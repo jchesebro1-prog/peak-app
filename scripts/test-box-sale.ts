@@ -268,9 +268,9 @@ function buildUiChecks(ok: Ok) {
   ok(us.includes("const [boxSale, setBoxSale] = useState(initial.boxSale);") && us.includes("const canBoxSale = isBoxSaleQuoteType(initial.quoteType) && isBoxSaleSource(initial.bonusSource);") &&
      us.includes("const boxSaleLabor = useMemo(() => (boxSale ? boxSaleLaborSystems(sections) : []), [boxSale, sections]);") && /\n    boxSale,\n    boxSaleLabor,\n    canBoxSale,\n    setBoxSale,\n/.test(us),
     "box sale build (source): the hook holds the flag and the systems with labor, and returns them");
-  const saveNow = us.slice(us.indexOf("const saveNow = async (): Promise<number | false> => {"), us.indexOf("const doSave = () => {"));
+  const saveNow = us.slice(us.indexOf("const performSave = async (mode: SaveMode): Promise<SaveOutcome> => {"), us.indexOf("const doSave = () => {"));
   const refuse = saveNow.indexOf("const boxProblem = boxSaleSaveProblem(boxSale, sections);");
-  ok(refuse > 0 && refuse < saveNow.indexOf("saveQuoteAction(") && /if \(boxProblem\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(boxProblem\);\s*return false;\s*\}/.test(saveNow),
+  ok(refuse > 0 && refuse < saveNow.indexOf("saveQuoteAction(") && /if \(boxProblem\) \{\s*if \(!auto\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(boxProblem\);\s*\}\s*return \{ kind: "refused", message: boxProblem \};\s*\}/.test(saveNow),
     "box sale build (source): Save refuses a box sale with labor in the browser, with the same sentence, and sends nothing");
   ok(saveNow.includes("          boxSale,\n") && us.includes("      boxSale,\n      document: packageDoc,\n    }),") && us.includes("packageDoc, boxSale, sections, groups, vendorQuotes, pdfOpts]"),
     "box sale build (source): the flag rides every Save and is part of the document key");

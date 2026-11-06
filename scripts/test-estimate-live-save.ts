@@ -180,6 +180,29 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(saveSrc.includes("if (!live && payload.status !== \"draft\")"), "action: a live create never acts on status");
   ok(!/\bdel\(/.test(actionsSrc), "action: saving never deletes a vendor quote's Blob file, so Undo can bring the attachment back");
 
+
+  // The hook's wiring: rules that only a browser could break, pinned at the source.
+  const hookSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/use-estimator-state.ts"), "utf8");
+  ok(hookSrc.includes("const performSave = async (mode: SaveMode)"), "hook: saveNow became performSave(mode)");
+  ok(hookSrc.includes("const saveNow = live.saveManual"), "hook: saveNow runs through the one queue");
+  ok(/if \(mode !== "auto"\) setSavedDoc\(/.test(hookSrc), "hook: a live save does not clear pdfDirty — only a save that renders does");
+  ok(/updateQuoteMetaAction\(id, meta\)/.test(hookSrc) && hookSrc.includes("liveRef.current?.enqueue"), "hook: the header autosave shares the queue");
+  ok(hookSrc.includes("markEdit") && /const setSections:[\s\S]{0,300}markEdit/.test(hookSrc), "hook: a user edit to the sections marks the live save");
+  const applyStampSrc = hookSrc.slice(hookSrc.indexOf("const applyTierStamp"), hookSrc.indexOf("const resolveTierFor"));
+  ok(/markEdit/.test(applyStampSrc), "hook: a tier re-price is an edit");
+  const freightSrc = hookSrc.slice(hookSrc.indexOf("const reapplyAutoFreight"), hookSrc.indexOf("const reapplyAutoFreight") + 700);
+  ok(!/markEdit/.test(freightSrc), "hook: auto freight is not an edit — opening never writes");
+  // Added while building: what a queued save, a status change and a missing quote have to do.
+  const performSrc = hookSrc.slice(hookSrc.indexOf("const performSave = async"), hookSrc.indexOf("const saveNow = live.saveManual"));
+  ok(/const idAtSave = loadedIdRef\.current/.test(performSrc) && /saveQuoteAction\(idAtSave,/.test(performSrc), "hook: a queued save reads the new id from a ref — a closure from before the create would mint a second quote");
+  ok(!/\bloadedId\b/.test(performSrc.slice(0, performSrc.indexOf("const live = useLiveSave")).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")), "hook: performSave never reads the loadedId state");
+  ok(performSrc.includes('if (auto) return { kind: "refused", message: res.error'), "hook: a live save's refusal carries its reason, never a retried failure (a missing quote)");
+  ok(/res\.conflict\)[\s\S]{0,120}res\.notLive\)/.test(performSrc), "hook: conflict and notLive are read before anything from the response is adopted");
+  ok(/const showsStatus = !auto \|\| !idAtSave \|\| res\.status !== statusBeforeSave/.test(performSrc), "hook: a live save leaves an optimistic status pick alone");
+  ok(/!idAtSave && status !== baseStatus/.test(performSrc), "hook: a first manual Save with a picked status still applies it");
+  ok(/live\s*\.enqueue\(\(\) => currentLiveKeyAction\(loadedId\)\)/.test(hookSrc), "hook: the key re-read waits its turn, so it can't overwrite a newer save's key");
+  const liveHookSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/use-live-save.ts"), "utf8");
+  ok(/const flush = [\s\S]{0,400}statusChanging: false/.test(liveHookSrc), "hook: flush saves past statusChanging — a status change sets it before flushing");
 }
 
 export async function liveSaveDbChecks(ok: Ok) {

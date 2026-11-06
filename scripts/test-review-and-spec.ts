@@ -15631,7 +15631,7 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   // just runs it in a transition) — the slice starts there and still covers both.
   // #287 fix round 1: saveNow resolves to the saved updatedAt (or false), not a boolean.
   const doSaveBody = estimatorClientSrc.slice(
-    estimatorClientSrc.indexOf("const saveNow = async (): Promise<number | false> =>"),
+    estimatorClientSrc.indexOf("const performSave = async (mode: SaveMode): Promise<SaveOutcome> =>"),
     estimatorClientSrc.indexOf("const changeStatus = (v: QuoteStatus)")
   );
   ok(doSaveBody.length > 0, "#181 fixture: doSave is still where the test expects it");
@@ -35165,14 +35165,14 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   const t254Client = estimatorSource();
   const t254Pure = readFileSync(join(process.cwd(), "src/app/(app)/estimator/tier-reprice.ts"), "utf8");
   const t254Persist = t254Client.slice(t254Client.indexOf("const persistMeta = "), t254Client.indexOf("const openTitle = "));
-  ok(/await updateQuoteMetaAction\(id, meta\)/.test(t254Persist) && !/applyTierStamp|tierMargin/.test(t254Persist),
+  ok(/updateQuoteMetaAction\(id, meta\)/.test(t254Persist) && !/applyTierStamp|tierMargin/.test(t254Persist),
     "#254 wiring (review): persistMeta no longer applies a tier stamp — picks resolve it through resolveTierFor");
   const t254Apply = t254Client.slice(t254Client.indexOf("const applyTierStamp = "), t254Client.indexOf("const persistMeta = "));
   ok(/repriceForTier\(before, prev, next\)/.test(t254Apply) && /setSectionsState\(res\.sections\)/.test(t254Apply) && /if \(res\.repriced === 0\) return;/.test(t254Apply),
     "#254 wiring: applyTierStamp re-prices the latest sections, and no re-priced line means no new banner");
   ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
-  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,120}?setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\);/.test(t254Client)
+  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,200}?setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\);/.test(t254Client)
     && (t254Client.match(/setSectionsState\(/g) || []).length === 7,
     "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the site-visit goals pre-fill the #bonus effect and the #366 discounts effect write the raw state (7)");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
@@ -35340,7 +35340,7 @@ import {
     "#254 review: applyTierStamp has exactly one caller (the shared block), which is the only resolveTierAction call");
   // #284 task 5: the save body lives in the awaitable saveNow; doSave runs it in a transition.
   // #287 fix round 1: saveNow resolves to the saved updatedAt (or false).
-  const save = between("const saveNow = async (): Promise<number | false> => {", "const changeStatus = ");
+  const save = between("const performSave = async (mode: SaveMode): Promise<SaveOutcome> => {", "const changeStatus = ");
   ok(/const repriceSeqAtSave = tierRepriceSeqRef\.current;/.test(save)
     && /if \(res\.id\) \{[\s\S]{0,400}setTierReprice\(\(n\) => \(n && n\.unsaved && n\.seq <= repriceSeqAtSave \? \{ \.\.\.n, unsaved: false \} : n\)\)/.test(save)
     && (save.match(/unsaved: false/g) || []).length === 1,
@@ -35351,7 +35351,7 @@ import {
     && /tierResolvingRef\.current = true;\s*setTierResolving\(true\);/.test(resolveFor)
     && /\} finally \{\s*(\/\/[^\n]*\n\s*)*if \(seq === tierResolveSeqRef\.current\) \{\s*tierResolvingRef\.current = false;\s*setTierResolving\(false\);/.test(resolveFor),
     "#254 wave 2: a tier lookup marks Save pending until the LATEST lookup settles (ok, refused or thrown)");
-  ok(/^\s*\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return false;/.test(save.slice("const saveNow = async (): Promise<number | false> => {".length))
+  ok(/\/\/[^\n]*\n\s*if \(tierResolvingRef\.current\) return \{ kind: "blocked" \};/.test(save)
     && /const doSave = \(\) => \{\s*if \(tierResolvingRef\.current\) return;/.test(save),
     "#254 wave 2: doSave refuses to run while a tier lookup is in flight (pick then immediate Save can't stamp ahead of its lines)");
   ok(/onClick=\{doSave\}\s*disabled=\{statusChanging \|\| tierResolving\}/.test(c) && /onSave=\{doSave\}\s*saveDisabled=\{statusChanging \|\| tierResolving\}/.test(c),
@@ -35389,9 +35389,9 @@ import {
   ok(!/pricingTier|tierMargin|resolveTier/.test(meta.replace(/\/\/[^\n]*/g, "")),
     "#254 review: the header autosave (updateQuoteMetaAction) no longer resolves or persists the tier stamp");
   const saveA = fn("saveQuoteAction");
-  ok(/const tier = await resolveTier\(payload\.customerId \|\| null, payload\.contactName \|\| ""\);/.test(saveA)
+  ok(/: await resolveTier\(payload\.customerId \|\| null, payload\.contactName \|\| ""\);/.test(saveA)
     && /pricingTier: tier\.tier,\s*tierMargin: tier\.markup,/.test(saveA)
-    && /create\(\{ \.\.\.patch, owner: user\.name, \.\.\.\(leadId \? \{ leadId \} : \{\}\) \}\)/.test(saveA) && /update\(loadedId, \{ \.\.\.patch, vendorQuotes: storedVendorQuotes \}/.test(saveA),
+    && /create\(\{ \.\.\.patch, owner: user\.name, \.\.\.\(leadId \? \{ leadId \} : \{\}\) \}\)/.test(saveA) && /updateCheckingLiveKey\(loadedId, payload\.baseKey, \{ \.\.\.writePatch, vendorQuotes: storedVendorQuotes/.test(saveA),
     "#254 review: saveQuoteAction stamps the tier server-side into the one patch both create and update write");
   const rta = fn("resolveTierAction");
   ok(/await requireUser\(\)/.test(rta) && /resolveTier\(/.test(rta) && /ok: true, pricingTier: r\.tier, tierMargin: r\.markup, label:/.test(rta)
@@ -38432,7 +38432,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   ok(JSON.stringify(l269Copy(allHand, { newSectionId: "z", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: 0.37 }).section.laborGroups) === JSON.stringify(allHand.laborGroups),
     "#269 copy system: equal tiers leave the stored draft exactly as it was");
   const cliFix = estimatorSource();
-  ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
+  ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*liveRef\.current\?\.markEdit\(\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
     "#269 applyTierStamp: a draft-only change is applied silently (no banner) when nothing re-priced");
 
   /* ---- #269 review fix: notes count as hand edits too ---- */
@@ -42851,7 +42851,7 @@ import { quoteBackFromReview as a287Back } from "@/lib/quote-approval-rules";
   ok(comp.includes("nsSendAction(quoteId, view.asOf), { skipBefore: true }") && comp.includes("nsSendAction(quoteId, shown), { versioned: true }")
     && comp.includes("nsApproveAction(quoteId, shown), { versioned: true }") && comp.includes("beforeAction?: () => Promise<number | false>;"),
     "#287 control: Approve & send decides the shown version without a pre-save; a non-owner Send / Approve only carry asOf — after a pre-save, the version it saved");
-  ok(estimatorSource().includes("return res.id ? res.updatedAt : false;"),
+  ok(estimatorSource().includes('return res.id ? { kind: "saved", version: res.updatedAt } : { kind: "failed" };') && readFileSync(join(process.cwd(), "src/app/(app)/estimator/use-live-save.ts"), "utf8").includes("return out.version;"),
     "#287 control: the Estimator's saveNow resolves to the saved quote's updatedAt (the version the control then decides)");
   ok(comp.includes("(!approverOnly || view.approverMode)") && comp.includes('approverOnly ? view.secondary.filter((s) => s.action === "approve")'),
     "#287 control: the phone approver mode shows Approve & send, Send back and Approve only");
@@ -52066,7 +52066,7 @@ async function e301GoalsAsyncChecks(): Promise<void> {
     "#301 page: the stored fields seed the editor; a quote that never stored Not included gets the default");
   const cli = estimatorSource();
   ok(cli.includes("useState(initial.notIncluded ?? notIncludedDefault)") && cli.includes("persistMeta({ coverSummary: v })") && cli.includes("persistMeta({ notIncluded: v })") &&
-     /saveQuoteAction\(loadedId, \{[\s\S]{0,1500}coverSummary,\s+notIncluded,/.test(cli),
+     /saveQuoteAction\(idAtSave, \{[\s\S]{0,1800}coverSummary,\s+notIncluded,/.test(cli),
     "#301 estimator: the fields autosave (500 ms) and ride every Save");
   const panel = rd("src/app/(app)/estimator/cover-package-panel.tsx");
   ok(panel.startsWith('"use client";') && panel.includes("Cover &amp; package") && panel.includes("Overall summary") && panel.includes("Not included") &&
@@ -55035,7 +55035,7 @@ import * as p2a from "@/lib/estimate-groups/groups";
   ok(mb.includes("setSections((ss) => ss.map((s) => (s.id === secId && !s.built ? { ...s, built: true as const } : s)))") && mb.includes("setExpandedRemembered({ ...expanded, [secId]: false })") && !mb.includes("setSectionsState"),
     "#P2a hook: markBuilt sets built through setSections and collapses (remembered)");
   ok(hook.includes("const isBuilt = (secId: string) => sections.some((s) => s.id === secId && s.built === true);"), "#P2a hook: isBuilt reads the live sections");
-  const save = between("const saveNow = async (): Promise<number | false> =>", "const changeStatus = (v: QuoteStatus)");
+  const save = between("const performSave = async (mode: SaveMode): Promise<SaveOutcome> =>", "const changeStatus = (v: QuoteStatus)");
   ok(/mobs,\s*\/\/ Phase 2a[^\n]*\n\s*groups,\s*vendorQuotes,/.test(save) && (save.match(/unsaved: false/g) || []).length === 1, "#P2a hook: the save payload sends groups");
   const doc = between("const docInput = useMemo<PdfDocKeyInput>(", "const docKey = ");
   ok(/sections,\s*groups,\s*vendorQuotes,/.test(doc) && doc.includes("sections, groups, vendorQuotes, pdfOpts]"), "#P2a hook: docInput passes groups (and depends on them)");
@@ -58430,7 +58430,7 @@ import { renderToStaticMarkup as p5fMarkup } from "react-dom/server";
   ok(fn.includes("if (!docSave.ok) return refusedSave(prior, docSave.error);") && /ok: false,\n\s+id: null,\n\s+number: null,/.test(refusal) && !refusal.includes("id: loadedId"),
     "#P5 render fix: a document-too-large refusal returns id null / number null (nothing was written)");
   const hook = rd("src/app/(app)/estimator/use-estimator-state.ts");
-  const save = hook.slice(hook.indexOf("const res = await saveQuoteAction(loadedId, {"), hook.indexOf("const doSave = () => {"));
+  const save = hook.slice(hook.indexOf("const res = await saveQuoteAction(idAtSave, {"), hook.indexOf("const doSave = () => {"));
   const adopt = save.slice(save.indexOf("if (res.id) {"), save.indexOf("if (res.ok) {"));
   ok(adopt.includes("setTierReprice(") && adopt.includes("setSavedDoc(") && adopt.includes("setRevNum(res.revNum);") && adopt.includes("setRevDateMs(res.updatedAt);") &&
      save.includes('setActionError(res.error || "That save did not go through — nothing was written.");'),
@@ -58684,10 +58684,10 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
 
   // (1) An over-limit document: the editor reports it; the estimator's Save refuses with the server's words, nothing written.
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`), edSrc = rd(`${ED}/package-doc-editor.tsx`), pkgStep = rd(`${EST_DIR}/steps/package-narrative-tab.tsx`);
-  const saveNowBody = hook.slice(hook.indexOf("const saveNow = async (): Promise<number | false> => {"), hook.indexOf("const doSave = () => {"));
+  const saveNowBody = hook.slice(hook.indexOf("const performSave = async (mode: SaveMode): Promise<SaveOutcome> => {"), hook.indexOf("const doSave = () => {"));
   const refuse = saveNowBody.indexOf("if (docNow && packageDocOverRef.current) {");
   ok(hook.includes("const [packageDocOver, setPackageDocOverState] = useState(false);") && refuse > 0 && refuse < saveNowBody.indexOf("saveQuoteAction(") &&
-     /if \(docNow && packageDocOverRef\.current\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(PACKAGE_DOC_TOO_LARGE\);\s*return false;\s*\}/.test(saveNowBody) &&
+     /if \(docNow && packageDocOverRef\.current\) \{\s*if \(!auto\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(PACKAGE_DOC_TOO_LARGE\);\s*\}\s*return \{ kind: "refused", message: PACKAGE_DOC_TOO_LARGE \};\s*\}/.test(saveNowBody) &&
      hook.includes('import { PACKAGE_DOC_TOO_LARGE } from "@/lib/package-doc/save";') && /startTransition\(async \(\) => \{\s*await saveNow\(\);/.test(hook),
     "#P5 editor fix: Save (doSave → saveNow, the next-step control's saveNow too) refuses while the editor's document is over the caps — the action-error banner, no saveQuoteAction call");
   ok(P5F_TOO_LARGE === "The document is too large to save — shorten it." && p5fm.TOO_LARGE === P5F_TOO_LARGE,
@@ -68509,7 +68509,7 @@ import { repriceForTier as bnfReprice } from "@/app/(app)/estimator/tier-reprice
   const hook = bnfRead("src/app/(app)/estimator/use-estimator-state.ts");
   const pick = hook.slice(hook.indexOf("const pickAlternatesTaken ="), hook.indexOf("const [peopleBusy"));
   ok(/setAlternatesTouched\(true\)/.test(pick) && /const \[alternatesTouched, setAlternatesTouched\] = useState\(false\)/.test(hook), "#bonus I3 source pin: ticking an alternate marks the list touched (untouched → the server decides)");
-  const save = hook.slice(hook.indexOf("const saveNow = async"), hook.indexOf("const doSave ="));
+  const save = hook.slice(hook.indexOf("const performSave = async"), hook.indexOf("const doSave ="));
   ok(/const statusBeforeSave = baseStatus;/.test(save) && /syncBonusAfterStatus\(statusBeforeSave, res\.status\);\s*setStatus\(res\.status\);/.test(save), "#bonus M5 source pin: a save that moves to/from Won refreshes the bonus card");
   const sum = bnfRead("src/app/(app)/estimator/review-cost-summary.tsx");
   ok(sum.includes("Package bonus (payout)") && sum.includes("bonusSum(isPackageBonusItem, (it) => it.qty * it.cost)"), "#bonus M8: the cost summary shows the 5% as its payout (package line cost)");
@@ -70396,7 +70396,7 @@ import { SEND_UI_COPY as p3rSendCopy } from "@/lib/estimate-email/send-ui";
   ok(w0 > 0 && writer.includes("selectionAckedKey.current = key;") && writer.includes("if (key === selectionAckedKey.current) {") && !writer.includes("selectionSentKey"),
     "#333 review A: the writer compares against the last SERVER-ACKED key, set only when the server confirms");
   ok(/if \(key === selectionAckedKey\.current\) \{\s*setSelectionError\(null\);\s*return;/.test(writer), "#333 review E: a skipped write (UI already equals the server) clears the error");
-  ok(hook.includes("if (res.id && (!loadedId || selectionError)) flushSelection(res.id);"), "#333 review A/E: the first Save flushes an edited selection (and any Save retries a failed one)");
+  ok(hook.includes("if (res.id && (!idAtSave || selectionError)) flushSelection(res.id);"), "#333 review A/E: the first Save flushes an edited selection (and any Save retries a failed one)");
   const flush = hook.slice(hook.indexOf("const flushSelection = "), hook.indexOf("const flushSelection = ") + 400);
   ok(flush.includes("selectionKey(selectionLatest.current) === selectionAckedKey.current"), "#333 review B: a new estimate gains no packageSelection unless it was edited");
   const settled = hook.slice(hook.indexOf("const selectionSettled = "), hook.indexOf("const selectionSettled = ") + 900);
@@ -71999,7 +71999,7 @@ import { tierLockedMessage as e368TierLockedMsg } from "@/lib/estimate-reprice/l
   const act = rd("src/app/(app)/estimator/actions.ts");
   const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("export async function searchQuotesAction("));
   const keepAt = save.indexOf("if (prior && repriceLocked(prior.status)) {\n    patch.pricingTier = prior.pricingTier ?? null;\n    patch.tierMargin = prior.tierMargin ?? null;\n  }");
-  ok(keepAt > save.indexOf("pricingTier: tier.tier,") && keepAt < save.indexOf("patch.spec = await quoteSpecFollowingRenames(patch.spec);") && keepAt < save.indexOf("await update(loadedId,"),
+  ok(keepAt > save.indexOf("pricingTier: tier.tier,") && keepAt < save.indexOf("patch.spec = await quoteSpecFollowingRenames(patch.spec);") && keepAt < save.indexOf("await updateCheckingLiveKey(loadedId,"),
 
     "#368 estimator tier (review): a save of a stored sent / won / lost estimate keeps its tier stamp (server-side, on the STORED status) — only a draft or new estimate re-resolves it");
 }

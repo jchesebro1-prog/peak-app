@@ -13,7 +13,7 @@ import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
-import { saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
+import { currentLiveKeyAction, saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
@@ -72,6 +72,8 @@ import { PRICING_TIER_LABEL, type PricingTier } from "@/lib/identity/config";
 import { postChanged } from "@/lib/popout/channel";
 import { applyLineMove, extractLinesAsSection, lineRefKey, planLineMove, removeLinesFromSources, type LineRef } from "@/lib/estimate-line-move/move";
 import { setUnsavedHold } from "@/lib/popout/hold";
+import { liveSaveEligible } from "@/lib/estimate-live-save/rules";
+import { useLiveSave, type LiveSaveApi, type SaveMode, type SaveOutcome } from "./use-live-save";
 import { discardConfirmText, inputIsDirty, isModalInputKind, MODAL_INPUT_KINDS, rebaseDraft, stableDraftJson, type ModalInputKind } from "@/lib/estimate-steps/discard-confirm";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
@@ -255,6 +257,17 @@ export function useEstimatorState(props: EstimatorProps) {
     miles: initialTravelMiles,
     rule: freightRule,
   });
+  /** Live save: declared here so closures above the hook call can reach it. Set in an effect after useLiveSave. */
+  const liveRef = useRef<LiveSaveApi | null>(null);
+  /** The change key this window last saw. A `useRef`, not read from `initial`: a LiveSync refresh must not adopt someone else's key. */
+  const liveKeyRef = useRef<string | null>(initial.liveKey);
+  /** The saved id, synchronously: a save queued behind the first one can run before the new id is committed, and a
+   *  closure still holding null would mint a second quote. */
+  const loadedIdRef = useRef(initial.loadedId);
+  /** The vendor quote list a save response just wrote: not an edit. */
+  const serverVendorQuotesRef = useRef<VendorQuote[] | null>(null);
+  /** The header fields a first save posted; compared once the id lands. */
+  const createdHeaderRef = useRef<Record<string, unknown> | null>(null);
   /* #267: a draft (or unsaved) estimate's systems round up to the next $25
      from this load on; a sent/won/lost quote keeps its exact prices until a
      system's "Round to $25" is used. A portal-catalog quote is left exact —
@@ -294,6 +307,7 @@ export function useEstimatorState(props: EstimatorProps) {
    *  setSectionsState directly. */
   const setSections: Dispatch<SetStateAction<SpecSection[]>> = (v) => {
     setTierReprice(null);
+    liveRef.current?.markEdit();
     // Phase 2a: any edit to a built system other than `built` itself un-marks it.
     setSectionsState((prev) => unmarkUserEdits(prev, typeof v === "function" ? v(prev) : v));
   };
@@ -1105,15 +1119,8 @@ export function useEstimatorState(props: EstimatorProps) {
   );
   const savedDocKey = useMemo(() => pdfDocKey(savedDoc), [savedDoc]);
   const pdfDirty = !!loadedId && docKey !== savedDocKey;
-  // Pop-outs (D912): while this estimate has unsaved work — edits since the
-  // last Save, or a new estimate with lines — this window won't answer "Open
-  // in main window" and skips its focus refresh. Keyed on the boolean only.
-  // #366: a project-discount edit that moved no line (a note) is unsaved work too.
-  const unsavedHold = pdfDirty || (!loadedId && sections.some((s) => s.items.length > 0)) || projectDiscountsKey(projectDiscounts) !== savedDiscountsKey;
-  useEffect(() => {
-    setUnsavedHold(unsavedHold);
-    return () => setUnsavedHold(false);
-  }, [unsavedHold]);
+  /** Estimator live save: Draft, non-portal, system quotes. `baseStatus` is what the server confirmed, so an optimistic status pick doesn't flip it. */
+  const liveMode = liveSaveEligible({ status: baseStatus, source: initial.bonusSource, quoteType: initial.bonusQuoteType });
 
   /* ---------------- persistence ---------------- */
   /** #254 (D87 amended) — re-price the lines still at `prev`'s markup to
@@ -1129,6 +1136,7 @@ export function useEstimatorState(props: EstimatorProps) {
     if (res.sections !== before) {
       sectionsRef.current = res.sections;
       setSectionsState(res.sections);
+      liveRef.current?.markEdit();
     }
     if (res.repriced === 0) return;
     setTierReprice({
@@ -1193,13 +1201,22 @@ export function useEstimatorState(props: EstimatorProps) {
     if (!tierReprice) return;
     setSectionsState(tierReprice.before);
     setTierReprice(null);
+    liveRef.current?.markEdit();
   };
 
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
     if (!loadedId) return;
     const id = loadedId;
     startTransition(async () => {
-      const r = await updateQuoteMetaAction(id, meta);
+      const run = liveRef.current?.enqueue ?? (<T,>(f: () => Promise<T>) => f());
+      let r: Awaited<ReturnType<typeof updateQuoteMetaAction>> | null = null;
+      try {
+        r = await run(() => updateQuoteMetaAction(id, meta));
+      } catch (e) {
+        console.error("[estimator] header autosave failed:", e);
+      }
+      // A live save leaves the header alone, so nothing else would heal this: say so.
+      if (!r || !r.ok) setActionError(r?.error || "That header change did not save. Check your connection and change it again.");
       // #254 review: the header autosave never carries the tier stamp — a
       // pick resolves it through resolveTierFor, and Save persists it with
       // the re-priced lines.
@@ -1438,33 +1455,43 @@ export function useEstimatorState(props: EstimatorProps) {
     if (r.stage) setStage(r.stage);
   };
 
-  /** #284: the save itself, awaitable — the next-step control saves unsaved
-   *  edits first and acts only when this resolves to a version (written, no
-   *  refusal). #287: that version is the saved quote's updatedAt, which the
-   *  control then decides; false = abort. */
-  const saveNow = async (): Promise<number | false> => {
+  /** The save itself, one attempt. "auto" is a live save (limited patch, no render, quiet); "manual" is every awaitable
+   *  Save (on a live-save estimate: the limited patch plus a render); "force" is Keep mine (no change check).
+   *  #284: the next-step control saves unsaved edits first and acts only when saveNow (below) resolves to a version
+   *  (written, no refusal). #287: that version is the saved quote's updatedAt, which the control then decides. */
+  const performSave = async (mode: SaveMode): Promise<SaveOutcome> => {
+    const auto = mode === "auto";
     // #254 fix wave 2: never save while a tier lookup is in flight.
-    if (tierResolvingRef.current) return false;
+    if (tierResolvingRef.current) return { kind: "blocked" };
     // Phase 5 fix: the editor's document is over the caps — nothing is written
     // (a Save would otherwise store the last valid copy and say "Saved ✓").
     // Pending keystrokes first: the editor emits (or flags over) synchronously.
     packageDocFlushRef.current?.();
     const docNow = packageDocRef.current;
     if (docNow && packageDocOverRef.current) {
-      setActionNotice(null);
-      setGateRefused(false);
-      setActionError(PACKAGE_DOC_TOO_LARGE);
-      return false;
+      if (!auto) {
+        setActionNotice(null);
+        setGateRefused(false);
+        setActionError(PACKAGE_DOC_TOO_LARGE);
+      }
+      return { kind: "refused", message: PACKAGE_DOC_TOO_LARGE };
     }
     // Box goods sale (spec 2026-10-21): any labor line refuses the save — the server's own sentence, nothing sent.
     const boxProblem = boxSaleSaveProblem(boxSale, sections);
     if (boxProblem) {
-      setActionNotice(null);
-      setGateRefused(false);
-      setActionError(boxProblem);
-      return false;
+      if (!auto) {
+        setActionNotice(null);
+        setGateRefused(false);
+        setActionError(boxProblem);
+      }
+      return { kind: "refused", message: boxProblem };
     }
     const docAtSave = { ...docInput, document: docNow };
+    // The ref, not the state: a save queued behind the first one can run before React commits the new id.
+    const idAtSave = loadedIdRef.current;
+    // A status picked before the first Save still moves through that Save, as it always has. Every other save on a
+    // live-save estimate uses the limited patch.
+    const isLive = liveMode && !(!auto && !idAtSave && status !== baseStatus);
     const discountsAtSave = projectDiscounts; // #366
     // What the server had before this save (estimator bonuses: syncBonusAfterStatus).
     const statusBeforeSave = baseStatus;
@@ -1477,14 +1504,14 @@ export function useEstimatorState(props: EstimatorProps) {
     // (the former startTransition body — doSave below still runs it in one)
     {
       try {
-        const res = await saveQuoteAction(loadedId, {
+        const res = await saveQuoteAction(idAtSave, {
           name: projectName,
           // D205: only the create save retires the replaced draft.
-          replaces: loadedId ? "" : initial.replaces,
+          replaces: idAtSave ? "" : initial.replaces,
           // Estimate suggestion: the lead rides the CREATE save only (a saved
           // quote keeps its own); the suggestion id rides every save while the
           // panel shows one — linking is idempotent server-side.
-          ...(!loadedId && initial.leadId ? { leadId: initial.leadId } : {}),
+          ...(!idAtSave && initial.leadId ? { leadId: initial.leadId } : {}),
           ...(suggestion && sendSuggestionId(suggestion, suggestionLinkedRef.current) ? { suggestionId: suggestion.id } : {}),
           customer: cname,
           customerId: customerId || null,
@@ -1497,10 +1524,13 @@ export function useEstimatorState(props: EstimatorProps) {
           category,
           value: t.grand,
           markup: t.markup,
-          status,
+          // A live save never moves status.
+          status: isLive ? baseStatus : status,
           // #180 review 2 — what this tab last confirmed from the server,
           // so the action can tell a genuine change from a stale tab.
           baseStatus,
+          ...(isLive ? { live: true, renderPdf: !auto } : {}),
+          ...(mode !== "force" && liveKeyRef.current ? { baseKey: liveKeyRef.current } : {}),
           sections,
           mobs,
           // Phase 2a: the named system groups ride every Save.
@@ -1519,6 +1549,17 @@ export function useEstimatorState(props: EstimatorProps) {
           // #366: the project discounts ride every Save (the server stamps by / at and re-applies them).
           projectDiscounts,
         });
+        if (res.conflict) return { kind: "conflict", by: res.conflict.by, at: res.conflict.at };
+        if (res.notLive) {
+          if (res.status) {
+            syncBonusAfterStatus(statusBeforeSave, res.status);
+            setStatus(res.status);
+            setBaseStatus(res.status);
+          }
+          setActionNotice(res.error ?? null);
+          return { kind: "notLive" };
+        }
+        if (res.liveKey) liveKeyRef.current = res.liveKey;
         // #181: adopt the id whenever the server hands one back, even when
         // `ok` is false — the create branch mints the quote FIRST and only
         // then attempts the requested status advance, so a refused advance
@@ -1530,21 +1571,35 @@ export function useEstimatorState(props: EstimatorProps) {
           // even when a requested status change was refused (ok:false with
           // the gate's message), so the banner stops asking to Save.
           setTierReprice((n) => (n && n.unsaved && n.seq <= repriceSeqAtSave ? { ...n, unsaved: false } : n));
+          loadedIdRef.current = res.id;
           setLoadedId(res.id);
+          // The header fields this first save posted, compared once the id lands: edits made while it ran had no id to autosave against.
+          if (!idAtSave) createdHeaderRef.current = { name: projectName, customerId: customerId || null, customer: cname, quoteNote: quoteNote || "", assumptions: assumptions || "", installTimeframe, category, coverSummary, notIncluded, contactName: contactName || "", locationId: locationId || null };
           // Estimate suggestion: linked — later saves stop sending the id.
           if (res.suggestionLinked) suggestionLinkedRef.current = true;
           postChanged("quote", res.id);
           // #333 review (A, E): the first save writes an edited selection; any
           // later Save retries one that failed. Untouched → nothing written.
-          if (res.id && (!loadedId || selectionError)) flushSelection(res.id);
+          if (res.id && (!idAtSave || selectionError)) flushSelection(res.id);
           // #223: this save's render prints the number the server hands back.
-          setSavedDoc({ ...docAtSave, quoteNumber: res.number ?? res.id });
-          setSavedDiscountsKey(projectDiscountsKey(discountsAtSave)); // #366
-          if (res.pdf) setPdf(res.pdf);
+          if (mode !== "auto") setSavedDoc({ ...docAtSave, quoteNumber: res.number ?? res.id });
+          if (mode !== "auto") setSavedDiscountsKey(projectDiscountsKey(discountsAtSave)); // #366
+          if (res.pdf && mode !== "auto") setPdf(res.pdf);
           setQuoteId(res.number ?? res.id);
-          // The server may have moved attachments into Blob storage — take its
-          // version back so the next save doesn't re-upload the same bytes.
-          if (res.vendorQuotes) setVendorQuotes(res.vendorQuotes);
+          // The server may have moved attachments into Blob storage — take its version back so the next save doesn't
+          // re-upload the same bytes, and mark the write as the server's, not an edit. A row edited during this save keeps
+          // the edit, a row added during it stays, and a row the server pruned or kept for a revision follows the server.
+          if (res.vendorQuotes) {
+            const returned = res.vendorQuotes;
+            const stored = new Map(returned.map((v) => [v.id, v]));
+            const posted = new Map(vendorQuotes.map((v) => [v.id, v]));
+            setVendorQuotes((cur) => {
+              const kept = cur.filter((v) => stored.has(v.id) || !posted.has(v.id)).map((v) => (posted.get(v.id) === v ? stored.get(v.id) ?? v : v));
+              const merged = [...kept, ...returned.filter((v) => !posted.has(v.id) && !cur.some((c) => c.id === v.id))];
+              serverVendorQuotesRef.current = merged;
+              return merged;
+            });
+          }
           setRevNum(res.revNum);
           setRevDateMs(res.updatedAt);
           if (res.next !== undefined) setNext(res.next ?? null);
@@ -1552,15 +1607,21 @@ export function useEstimatorState(props: EstimatorProps) {
           if (typeof res.rewardCredit === "number") {
             const stored = res.rewardCredit;
             // Only when the server clamped it — an edit like any other.
-            if (rewardCreditOf(sectionsRef.current) !== stored)
-              setSections((ss) => withRewardCredit(ss, stored, nextId()));
+            // A live save's clamp is the server's own write, so it doesn't start another save.
+            if (rewardCreditOf(sectionsRef.current) !== stored) {
+              const write = auto ? setSectionsState : setSections;
+              write((ss) => withRewardCredit(ss, stored, nextId()));
+            }
             setCreditSeq((n) => n + 1);
           }
           // Server-confirmed either way (ok or refused/stale) — this IS the
           // resync: whether the requested status applied, was refused, or
           // was left alone because this tab was stale, res.status is always
           // what the server actually has now (#180 review 2).
-          if (res.status) {
+          // A live save moves nothing, so when it reports the status this tab already knew it leaves `status` alone:
+          // a status change flushes through here with its optimistic pick on screen.
+          const showsStatus = !auto || !idAtSave || res.status !== statusBeforeSave;
+          if (res.status && showsStatus) {
             // Estimator bonuses: a save that moves to/from Won refreshes the card.
             syncBonusAfterStatus(statusBeforeSave, res.status);
             setStatus(res.status);
@@ -1575,46 +1636,118 @@ export function useEstimatorState(props: EstimatorProps) {
           // version that won — this document holds the edits; load it afresh.
           if (res.reopenedAtWon) {
             window.location.reload();
-            return false;
+            return { kind: "blocked" };
           }
           // #368: …or was a revise that re-priced lines to today's catalog.
           if (res.repriced) {
             window.location.reload();
-            return false;
+            return { kind: "blocked" };
           }
         }
         if (res.ok) {
-          setActionError(null);
-          setGateRefused(false);
-          // #180 review 3 — a stale tab's status got silently refreshed;
-          // shown alongside "Saved ✓", never implying the save failed.
-          setActionNotice(res.notice || null);
-          setJustSaved(true);
-          if (savedTimer.current) clearTimeout(savedTimer.current);
-          savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
-          return res.id ? res.updatedAt : false;
-        } else {
-          // The gate's own message (statusFailureMessage, D230) — the quote
-          // itself saved; only the requested status advance was refused.
-          setActionNotice(null);
-          setActionError(res.error || "That save did not go through — nothing was written.");
-          setGateRefused(false);
-          return false;
+          if (!auto) {
+            setActionError(null);
+            setGateRefused(false);
+            // #180 review 3 — a stale tab's status got silently refreshed;
+            // shown alongside "Saved ✓", never implying the save failed.
+            setActionNotice(res.notice || null);
+            setJustSaved(true);
+            if (savedTimer.current) clearTimeout(savedTimer.current);
+            savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
+          } else if (res.notice) {
+            setActionNotice(res.notice);
+          }
+          return res.id ? { kind: "saved", version: res.updatedAt } : { kind: "failed" };
         }
+        // A refusal with a reason (a missing quote, the server's box-sale and document checks) is never a retried failure.
+        if (auto) return { kind: "refused", message: res.error || "That save did not go through." };
+        // The gate's own message (statusFailureMessage, D230) — the quote
+        // itself saved; only the requested status advance was refused.
+        setActionNotice(null);
+        setActionError(res.error || "That save did not go through — nothing was written.");
+        setGateRefused(false);
+        return { kind: "refused", message: res.error || "That save did not go through." };
       } catch (e) {
         /* #143 re-review: a save that THROWS — a rejected request body, a
            dropped connection — used to be indistinguishable from a save that
            did nothing: no "Saved" flash, no banner, and every edit still
            only in memory. Say so instead. */
         console.error("[estimator] save failed:", e);
-        setGateRefused(false);
-        setActionError(
-          "That save did not go through — nothing was written. Check your connection, or remove a large vendor-quote attachment, and try again."
-        );
-        return false;
+        if (!auto) {
+          setGateRefused(false);
+          setActionError(
+            "That save did not go through — nothing was written. Check your connection, or remove a large vendor-quote attachment, and try again."
+          );
+        }
+        return { kind: "failed" };
       }
     }
   };
+  const live = useLiveSave({
+    gate: { enabled: liveMode, hasId: !!loadedId, hasLines: sections.some((s) => s.items.length > 0), tierResolving, statusChanging },
+    perform: performSave,
+  });
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
+  const saveNow = live.saveManual;
+  /** The edits aren't stored yet. `pdfDirty` is narrower on a live-save estimate: the rendered PDF is behind the screen. */
+  const contentUnsaved = liveMode ? live.status !== "saved" : pdfDirty;
+  // Pop-outs (D912): while this estimate has unsaved work — edits since the
+  // last Save, or a new estimate with lines — this window won't answer "Open
+  // in main window" and skips its focus refresh. Keyed on the boolean only.
+  // #366: a project-discount edit that moved no line (a note) is unsaved work too.
+  const unsavedHold = liveMode
+    ? contentUnsaved || (!loadedId && sections.some((s) => s.items.length > 0))
+    : pdfDirty || (!loadedId && sections.some((s) => s.items.length > 0)) || projectDiscountsKey(projectDiscounts) !== savedDiscountsKey;
+  useEffect(() => {
+    setUnsavedHold(unsavedHold);
+    return () => setUnsavedHold(false);
+  }, [unsavedHold]);
+
+  // Everything else Save writes has no automatic writer: any change to it is a user edit.
+  const editProbeRef = useRef({ groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc });
+  useEffect(() => {
+    const p = editProbeRef.current;
+    const changed =
+      p.groups !== groups ||
+      (p.vendorQuotes !== vendorQuotes && vendorQuotes !== serverVendorQuotesRef.current) ||
+      p.pdfOpts !== pdfOpts ||
+      p.paymentTerms !== paymentTerms ||
+      p.boxSale !== boxSale ||
+      p.projectDiscounts !== projectDiscounts ||
+      // The editor may emit on mount, so compare content: viewing the tab must not save.
+      (p.packageDoc !== packageDoc && JSON.stringify(p.packageDoc) !== JSON.stringify(packageDoc));
+    editProbeRef.current = { groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc };
+    if (changed) live.markEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, vendorQuotes, pdfOpts, paymentTerms, boxSale, projectDiscounts, packageDoc]);
+
+  // Header edits made while the first save ran had no id to save against: send the difference now.
+  useEffect(() => {
+    const posted = createdHeaderRef.current;
+    if (!loadedId || !posted) return;
+    createdHeaderRef.current = null;
+    const now: Record<string, unknown> = { name: projectName, customerId: customerId || null, customer: docCustName, quoteNote: quoteNote || "", assumptions: assumptions || "", installTimeframe, category, coverSummary, notIncluded, contactName: contactName || "", locationId: locationId || null };
+    const diff = Object.fromEntries(Object.entries(now).filter(([k, v]) => v !== posted[k]));
+    if (Object.keys(diff).length) persistMeta(diff as Parameters<typeof updateQuoteMetaAction>[1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedId]);
+
+  // A server-confirmed status move can rewrite the spec (a Lost move clears the Rewards credit): re-read the key.
+  // In the queue, so a read that started before a save can't land after it and put back the older key.
+  const keyStatusRef = useRef(baseStatus);
+  useEffect(() => {
+    if (keyStatusRef.current === baseStatus) return;
+    keyStatusRef.current = baseStatus;
+    if (!loadedId) return;
+    void live
+      .enqueue(() => currentLiveKeyAction(loadedId))
+      .then((k) => {
+        if (k) liveKeyRef.current = k;
+      })
+      .catch(() => undefined);
+  }, [baseStatus, loadedId, live]);
   const doSave = () => {
     if (tierResolvingRef.current) return;
     startTransition(async () => {
@@ -1630,6 +1763,7 @@ export function useEstimatorState(props: EstimatorProps) {
       setStatusChanging(true);
       startTransition(async () => {
         try {
+          if (liveMode) await live.flush();
           // #355 review I3: leaving Won with unsaved edits — save them first, so
           // the reopen's snapshot keeps them before the won version comes back.
           if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {
@@ -1695,6 +1829,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
+        if (liveMode) await live.flush();
         // #355 review I3: same as changeStatus — a stage move can leave Won.
         // #368: …or revise a sent / lost estimate (a stage whose tag is Draft) — saved first, as above.
         const pl = pipelines.quote.find((p) => p.id === pipelineId) || pipelines.quote.find((p) => p.id === pipelines.defaultQuotePipelineId) || pipelines.quote[0];
@@ -3709,6 +3844,9 @@ export function useEstimatorState(props: EstimatorProps) {
     pdfCover,
     pdfCutSheets,
     pdfDirty,
+    liveMode,
+    live,
+    contentUnsaved,
     pdfItemizedAppendix,
     pdfNotes,
     pdfOptions,
