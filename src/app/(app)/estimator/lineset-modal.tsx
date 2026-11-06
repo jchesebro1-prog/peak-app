@@ -103,7 +103,7 @@ export default function LinesetModal({
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               {num("Lift lines per set", "linesPerSet", linesHint)}
-              {num("Cable allowance (ft)", "allowance", current ? String(current.allowanceFt) : "")}
+              {num("Cable allowance (ft per line)", "allowance", current ? String(current.allowanceFt) : "")}
             </div>
           </fieldset>
         )}

@@ -2733,7 +2733,7 @@ export function useEstimatorState(props: EstimatorProps) {
     }
   };
 
-  /** #348 follow-up: whether the open pop-up holds unsaved work (null when clean, or not one of the five). */
+  /** #348 follow-up: whether the open pop-up holds unsaved work (null when clean, or not a configurator pop-up). */
   const openInputDirty = (): { kind: ModalInputKind; read: boolean } | null => {
     const cur = openInputRef.current;
     if (!cur || !isModalInputKind(cur.kind)) return null;
