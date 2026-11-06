@@ -9,6 +9,11 @@ import { pipeQuantities } from "../src/lib/rigging-config/pipe";
 import { defaultLinesPerSet, linesetQuantities } from "../src/lib/rigging-config/lineset";
 import { isConfiguredLine } from "../src/lib/rigging-config/line";
 import { rewriteLinesetTypes, rewritePipeTypes } from "../src/lib/catalog-rename/rewrite";
+import type { ResolvedFixtureAssembly } from "../src/lib/fixture-assemblies";
+import {
+  curtainPipeDraft, curtainPipePrefill, followCurtainPipePrefill, freshLinesetDraft, freshPipeDraft, linesetBom, linesetConfigFromDraft, linesetDraftFromConfig, linesetLine,
+  pipeBom, pipeConfigFromDraft, pipeDraftFromConfig, pipeLine, riggingCatalog, selectableTypes,
+} from "../src/app/(app)/estimator/rigging-bom";
 
 const PIPE: PipeType = {
   id: "sch40", name: "1-1/2\" Sch 40", manufacturer: "", sticks: [{ lengthFt: 10, sku: "P10" }, { lengthFt: 21, sku: "P21" }],
@@ -113,10 +118,75 @@ export async function riggingDbChecks(ok: Ok) {
   ok(!act.ok, "#373 store: Active refuses a dead assembly and dead parts");
 }
 
+const part = (sku: string, cost: number, list = 0, unit = "ea") => ({ sku, desc: sku + " desc", cost, list, unit, mfr: "" });
+const PARTS = { P10: part("P10", 50), P21: part("P21", 100), SPL: part("SPL", 20), CLP: part("CLP", 10), GAC: part("GAC", 1, 0, "ft"), HL: part("HL", 2, 0, "ft"), TRM: part("TRM", 5) };
+const HW = (id: string, comps: Array<[string, number, boolean?]>, kind: "hardware" | "fixture" = "hardware") =>
+  ({ id, name: id, kind, components: comps.map(([sku, defaultQty, found]) => ({ sku, label: sku + " label", role: "other", defaultQty, desc: sku, unit: "ea", cost: 3, list: 9, found: found ?? true })) }) as unknown as ResolvedFixtureAssembly;
+const CAT = riggingCatalog(PARTS, [HW("SA-1", [["SWG", 2], ["THB", 1], ["OPT", 0]]), HW("FX-1", [["F", 1]], "fixture"), HW("BROKEN", [["DEAD", 1, false]])]);
+
+function pricingChecks(ok: Ok) {
+  // 2 × $100 + 1 × $20 + 5 × $10 = $270 cost; at 50 % markup, $405.
+  const b = pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, PIPE, CAT, 0.5);
+  ok(!b.errors.length && b.cost === 270 && b.price === 405, "#373 pipe price: tier seed on the parts' cost");
+  ok(b.rows.map((r) => r.label).join() === "Pipe (21' stick),Splice sleeve,Hanging clamp", "#373 pipe rows named");
+  ok(b.rows[0].ext === 300 && b.rows[0].price === 150, "#373 pipe row: unit sell and extended");
+  ok(pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, { ...PIPE, spliceSku: undefined }, CAT, 0.5).errors[0].includes("Estimating Rules → Pipe types"), "#373 pipe: a needed unmapped splice blocks and names the screen");
+  ok(!pipeBom({ typeId: "sch40", runFt: 15, qty: 1 }, { ...PIPE, spliceSku: undefined }, CAT, 0.5).errors.length, "#373 pipe: an unneeded unmapped splice doesn't block");
+  const listed = riggingCatalog({ ...PARTS, CLP: part("CLP", 0, 25) }, []);
+  ok(pipeBom({ typeId: "sch40", runFt: 15, qty: 1 }, PIPE, listed, 0.5).price === 225, "#373 pipe: a part with no cost sells at list");
+  ok(pipeBom({ typeId: "x", runFt: 40, qty: 1 }, null, CAT, 0.5).errors[0].includes("no longer exists"), "#373 pipe: deleted type");
+  ok(pipeBom({ typeId: "sch40", runFt: 40, qty: 1 }, { ...PIPE, sticks: [{ lengthFt: 21, sku: "FOOT" }] }, riggingCatalog({ ...PARTS, FOOT: part("FOOT", 5, 0, "ft") }, []), 0.5).warnings.length === 1, "#373 pipe: a foot-priced stick warns and doesn't block");
+
+  const l = linesetBom({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, LINESET, CAT, 0.5);
+  ok(!l.errors.length, "#373 lineset: prices");
+  // 24 chain wraps × (SWG 2, THB 1); OPT is an add-on and left out.
+  const swg = l.rows.find((r) => r.sku === "SWG");
+  const thb = l.rows.find((r) => r.sku === "THB");
+  ok(swg?.qty === 48 && thb?.qty === 24 && !l.rows.some((r) => r.sku === "OPT"), "#373 lineset: assembly members multiply; add-ons left out");
+  ok(swg?.label === "Chain wraps: SWG label", "#373 lineset: member row names the role and the member");
+  ok(swg?.price === 4.5, "#373 lineset: members price at the tier on the assembly's cost, not its sell");
+  // 1680×$1 + 480×$2 + 48×$5 + 72×$3 = $3,096.
+  ok(l.cost === 3096 && l.price === 4644, "#373 lineset: line total");
+  const asmType = (id: string): LinesetType => ({ ...LINESET, parts: { ...LINESET.parts, chainWrap: { kind: "assembly", id } } });
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, asmType("GONE"), CAT, 0.5).errors[0].includes("Chain wraps"), "#373 lineset: a deleted assembly blocks by role");
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, asmType("FX-1"), CAT, 0.5).errors.length === 1, "#373 lineset: a non-hardware assembly blocks");
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, asmType("BROKEN"), CAT, 0.5).errors.length === 1, "#373 lineset: an assembly with a part gone from the catalog blocks");
+  const spool = riggingCatalog({ ...PARTS, GAC: part("GAC", 300, 0, "spool") }, [HW("SA-1", [["SWG", 2]])]);
+  ok(linesetBom({ typeId: "q", sets: 1, widthFt: 40, gridHeightFt: 40 }, LINESET, spool, 0.5).warnings.some((w) => w.includes("Aircraft cable")), "#373 lineset: non-foot cable warns");
+
+  const line = pipeLine({ typeId: "sch40", runFt: 40, qty: 2, label: "Main drape pipe" }, PIPE, CAT, 0.5);
+  ok(line.ok && line.item.sku === "PIP-SCH40" && line.item.qty === 1 && line.item.unit === "lot", "#373 pipe line: one lot");
+  ok(line.ok && line.item.desc === "Main drape pipe — 1-1/2\" Sch 40, 40' run (2 pipes)", "#373 pipe line: description");
+  ok(line.ok && line.item.rigging?.kind === "pipe" && line.item.components!.length === 3, "#373 pipe line: config and parts");
+  ok(line.ok && line.item.components!.find((c) => c.sku === "CLP")?.role === "mount", "#373 pipe line: clamps are mounts");
+  const ll = linesetLine({ typeId: "quarter", sets: 6, widthFt: 40, gridHeightFt: 40 }, LINESET, CAT, 0.5);
+  ok(ll.ok && ll.item.sku === "LNS-QUARTER" && ll.item.desc === "Lineset hardware — 1/4\" cable: 6 sets, 24 lift lines", "#373 lineset line: description");
+
+  const pd = freshPipeDraft([{ ...PIPE, active: false }, { ...PIPE, id: "on", active: true }]);
+  ok(pd.typeId === "on" && pd.qty === "1", "#373 draft: fresh pipe takes the first active type");
+  ok(selectableTypes([{ ...PIPE, active: false }], "sch40").length === 1 && selectableTypes([{ ...PIPE, active: false }]).length === 0, "#373 selectable: inactive only when it's the draft's own");
+  const round = pipeConfigFromDraft(pipeDraftFromConfig({ typeId: "a", runFt: 12.5, qty: 3, hangerSpacingFt: 8, label: "L" }));
+  ok(round.runFt === 12.5 && round.qty === 3 && round.hangerSpacingFt === 8 && round.label === "L", "#373 draft: pipe round trip");
+  const blank = pipeConfigFromDraft({ typeId: "a", run: "", qty: "", hangerSpacing: "", label: " " });
+  ok(Number.isNaN(blank.runFt) && blank.qty === 1 && blank.hangerSpacingFt === undefined && blank.label === undefined, "#373 draft: blanks");
+  const lr = linesetConfigFromDraft(linesetDraftFromConfig({ typeId: "a", sets: 6, widthFt: 40, gridHeightFt: 30, linesPerSet: 5, allowanceFt: 0, label: "L" }));
+  ok(lr.sets === 6 && lr.linesPerSet === 5 && lr.allowanceFt === 0 && lr.label === "L", "#373 draft: lineset round trip keeps a 0' allowance");
+  const lb = linesetConfigFromDraft(freshLinesetDraft([]));
+  ok(lb.linesPerSet === undefined && lb.allowanceFt === undefined, "#373 draft: blank lineset fields are defaults");
+
+  const c = { name: "Main drape", qty: "2", width: "40" };
+  ok(curtainPipePrefill(c).label === "Main drape pipe" && curtainPipePrefill(c).run === "40" && curtainPipePrefill(c).qty === "2", "#373 curtain: pre-fill");
+  const prev = curtainPipePrefill(c);
+  const d = { ...curtainPipeDraft(c, [{ ...PIPE, active: true }]), label: "Typed" };
+  const next = followCurtainPipePrefill(d, prev, curtainPipePrefill({ ...c, width: "50" }));
+  ok(next.run === "50" && next.label === "Typed", "#373 curtain: untouched fields follow; typed ones stay");
+}
+
 export async function riggingConfigChecks(ok: Ok) {
   engineChecks(ok);
   typeChecks(ok);
   renameChecks(ok);
+  pricingChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-rigging-config.ts")) {
