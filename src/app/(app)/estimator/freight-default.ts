@@ -21,5 +21,11 @@ export function sectionFreightDefault(input: {
 }
 
 export function applyAutoFreight(sections: SpecSection[], d: { pct: number }): SpecSection[] {
-  return sections.map((s) => (s.freightAuto ? { ...s, freightPct: d.pct } : s));
+  let changed = false;
+  const out = sections.map((s) => {
+    if (!s.freightAuto || s.freightPct === d.pct) return s;
+    changed = true;
+    return { ...s, freightPct: d.pct };
+  });
+  return changed ? out : sections;
 }

@@ -195,10 +195,17 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(!/markEdit/.test(freightSrc), "hook: auto freight is not an edit — opening never writes");
   // Keeping history honest.
   const setSecAt = hookSrc.indexOf("const setSections:");
-  ok(setSecAt > 0 && /undoRef\.current\?\.flagEdit\(\)/.test(hookSrc.slice(setSecAt, setSecAt + 400)), "undo: a user edit to the sections is flagged");
+  ok(setSecAt > 0 && /undoRef\.current\?\.flagEdit\(\)/.test(hookSrc.slice(setSecAt, setSecAt + 900)), "undo: a user edit to the sections is flagged");
   ok(/undoRef\.current\?\.mapHistory\(/.test(hookSrc.slice(hookSrc.indexOf("const reapplyAutoFreight"), hookSrc.indexOf("const reapplyAutoFreight") + 900)), "undo: auto freight reaches stored snapshots");
   ok((hookSrc.match(/undoRef\.current\?\.clearHistory\(/g) || []).length >= 3, "undo: moving a system out, moving lines out and a status change clear history");
   ok(/flagEdit\("re-priced"\)/.test(hookSrc), "undo: a tier re-price is one labelled step");
+  ok(/setSectionsState\(\(prev\) => \{[\s\S]{0,260}if \(next !== prev\) undoRef\.current\?\.flagEdit\(\)/.test(hookSrc.slice(setSecAt, setSecAt + 900)), "undo: a user edit that changes nothing leaves no pending flag");
+  ok(/const changed = tierReprice\.before !== sectionsRef\.current;\s*if \(changed\) undoRef\.current\?\.flagEdit/.test(hookSrc), "undo: undoing a re-price that changes nothing leaves no pending flag");
+  ok(/fillClientGoals\(prev, r\.goals\)\);\s*undoRef\.current\?\.mapHistory\(\(ss\) => fillClientGoals\(ss, r\.goals\)\)/.test(hookSrc), "undo: the survey goals pre-fill reaches stored snapshots");
+  ok(/shortcuts: undoStep === "build" \|\| undoStep === "package"/.test(hookSrc), "undo: Cmd+Z works only on Build and Build package");
+  ok(/setActiveId\(\(a\) => \(a && s\.sections\.some/.test(hookSrc), "undo: a restore that removes the active system falls back like a delete");
+  const buildStepSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/build-step.tsx"), "utf8");
+  ok(/const liveSelected = useMemo\(\(\) => \[\.\.\.selectedLines\]\.filter\(\(k\) => movableKeys\.has\(k\)\)/.test(buildStepSrc) && /if \(liveSelected\.length !== selectedLines\.size\) setSelectedLines/.test(buildStepSrc), "undo: ticked lines are derived from the sections, so a restore drops gone lines as a delete does");
   ok(/\n    undo,\n/.test(hookSrc), "undo: the state hook returns undo");
   // Added while building: what a queued save, a status change and a missing quote have to do.
   const performSrc = hookSrc.slice(hookSrc.indexOf("const performSave = async"), hookSrc.indexOf("const saveNow = live.saveManual"));

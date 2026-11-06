@@ -35170,11 +35170,11 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   const t254Apply = t254Client.slice(t254Client.indexOf("const applyTierStamp = "), t254Client.indexOf("const persistMeta = "));
   ok(/repriceForTier\(before, prev, next\)/.test(t254Apply) && /setSectionsState\(res\.sections\)/.test(t254Apply) && /if \(res\.repriced === 0\) return;/.test(t254Apply),
     "#254 wiring: applyTierStamp re-prices the latest sections, and no re-priced line means no new banner");
-  ok(/const undoTierReprice = [\s\S]{0,120}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
+  ok(/const undoTierReprice = [\s\S]{0,260}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
-  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,200}?setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\);/.test(t254Client)
-    && (t254Client.match(/setSectionsState\(/g) || []).length === 7,
-    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the site-visit goals pre-fill the #bonus effect and the #366 discounts effect write the raw state (7)");
+  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,300}?setSectionsState\(\(prev\) => \{\s*const next = unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(t254Client)
+    && (t254Client.match(/setSectionsState\(/g) || []).length === 8,
+    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the site-visit goals pre-fill the #bonus effect and the #366 discounts effect and the Undo restore write the raw state (8)");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
     "#254 the automatic freight re-apply keeps a live banner and carries into its Undo snapshot");
   ok(!/from "@\/(lib\/stores|db)/.test(t254Pure) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(t254Client),
@@ -38433,7 +38433,7 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
   ok(JSON.stringify(l269Copy(allHand, { newSectionId: "z", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.37, targetTierMargin: 0.37 }).section.laborGroups) === JSON.stringify(allHand.laborGroups),
     "#269 copy system: equal tiers leave the stored draft exactly as it was");
   const cliFix = estimatorSource();
-  ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*liveRef\.current\?\.markEdit\(\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
+  ok(/if \(res\.sections !== before\) \{\s*sectionsRef\.current = res\.sections;\s*setSectionsState\(res\.sections\);\s*liveRef\.current\?\.markEdit\(\);\s*undoRef\.current\?\.flagEdit\("re-priced"\);\s*\}\s*if \(res\.repriced === 0\) return;\s*setTierReprice\(\{/.test(cliFix),
     "#269 applyTierStamp: a draft-only change is applied silently (no banner) when nothing re-priced");
 
   /* ---- #269 review fix: notes count as hand edits too ---- */
@@ -51739,7 +51739,7 @@ import type { SpecSection as E301fSec } from "@/app/(app)/estimator/types";
   ok(e301fSel("  First line\n  second line  ") === "First line second line", "#301 fields: a selection becomes one cover paragraph");
   ok(e301fAppend("", " New ") === "New" && e301fAppend("Old", "New") === "Old\n\nNew" && e301fAppend("Old\n\nNew", "New") === "Old\n\nNew" && e301fAppend("Old", "  ") === "Old",
     "#301 fields: From site visit fills blank goals, appends after a blank line, never duplicates");
-  ok(/setSectionsState\(\(prev\) => fillClientGoals\(prev, r\.goals\)\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: fillClientGoals\(n\.before, r\.goals\) \} : n\)\);/.test(estimatorSource()),
+  ok(/setSectionsState\(\(prev\) => fillClientGoals\(prev, r\.goals\)\);\s*undoRef\.current\?\.mapHistory\(\(ss\) => fillClientGoals\(ss, r\.goals\)\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: fillClientGoals\(n\.before, r\.goals\) \} : n\)\);/.test(estimatorSource()),
     "#301 goals pre-fill carries into a live re-price banner's Undo snapshot, like the freight auto-apply");
   const e301Full = "x".repeat(e301fGoalsMax);
   ok(!e301fAppendRes("", "New").truncated && !e301fAppendRes("Old", "Old").truncated && !e301fAppendRes("Old", "New").truncated && !e301fAppendRes("Old", "  ").truncated,
@@ -55017,8 +55017,8 @@ import * as p2a from "@/lib/estimate-groups/groups";
   };
   ok(hook.includes("const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? [])"), "#P2a hook: groups state seeds from initial.groups");
   ok(hook.includes("const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups])"), "#P2a hook: blocks = groupBlocks(sections, groups, { includeEmpty: true })");
-  ok(/setSectionsState\(\(prev\) => unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\)\)/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 7,
-    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (7 raw writes: 5 + the #bonus effect + the #366 discounts effect)");
+  ok(/setSectionsState\(\(prev\) => \{\s*const next = unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 8,
+    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (8 raw writes: 5 + the #bonus effect + the #366 discounts effect + the Undo restore)");
   const um = between("function unmarkUserEdits(", "const COLLAPSED_KEY_PREFIX");
   ok(um.includes("unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next))") && um.includes("withoutBuilt(s)"),
     "#P2a hook: un-marking ignores the Rewards credit line (a re-pin after a reorder is not an edit)");
@@ -57847,7 +57847,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(pkgSrc.includes("pinned.bySection[x.id]") && pkgSrc.includes("on the whole estimate</span>") && pkgSrc.includes("useCommentsFocusRefresh(s)"),
     "#P4 pins: the Build package nav shows each system's open-comment count and the whole-estimate count");
   ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
-  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 7, "#P4 pins: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
+  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 8, "#P4 pins: setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
 }
 
 // ---- #P4 polish: pin popover lifecycle + clamp, Escape, no aria-label on plain spans ----
@@ -58658,8 +58658,8 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
     "#P5 editor: the editor is wired to the hook's packageDoc / setPackageDoc and Save to product refreshes the library row");
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
   ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus, kpAliases);") &&
-     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
-    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
+     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 8,
+    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
     "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
 }
@@ -58698,8 +58698,8 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
     "#P5 editor fix: the editor reports over on every flush, and clears it when an outside value re-sets the content (an unmount keeps it — #P5 final)");
   ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
-     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
-    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
+     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 8,
+    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
 
   // (2) Remove document: the unmount flush never brings the removed document back.
   ok(pkgStep.includes("const discardRef = useRef(false);") && /const removeDocument = \(\) => \{\s*discardRef\.current = true;/.test(pkgStep) &&
@@ -59212,8 +59212,8 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(page.includes("loadSystemCategoryOptions()") && page.includes("await getSystemCategories()") && page.includes("getManyBySku(skus)") && page.includes("sku: p.sku") && page.includes("part: p ? {") && page.includes(": null,"),
     "#P6 estimator: page.tsx loads the categories and resolves their parts server-side (live sku, null when gone)");
   ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
-     (hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
-    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last");
+     (hook.match(/setSectionsState\(/g) || []).length === 8 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
+    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last");
   // Fix round 1
   ok(page.includes(".catch((e) => {") && page.includes("return []") && /estimateOutputDefaults, systemCategories\] =/.test(page) && page.includes("loadSystemCategoryOptions(),") && !page.includes("await loadSystemCategoryOptions()"),
     "#P6 estimator: the category load is fail-soft ([] + a server warning) and runs inside the page's Promise.all, not serially after it");
@@ -59462,8 +59462,8 @@ import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui
     "#312 estimator: the hook stages the pre-filled draft, consumes it on open, and saves through replaceCustomLine (add path unchanged)");
   ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
     "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
-  ok((hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
-    "#312 estimator: setSectionsState( count stays 7 (5 + the #bonus effect + the #366 discounts effect; the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last in the hook's return");
+  ok((hook.match(/setSectionsState\(/g) || []).length === 8 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
+    "#312 estimator: setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last in the hook's return");
 
   type R312 = { id: number; custom?: boolean; curtain?: boolean };
   const rows = specLineRows312<R312>([

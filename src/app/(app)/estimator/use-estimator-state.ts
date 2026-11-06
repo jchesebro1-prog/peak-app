@@ -17,7 +17,8 @@ import { currentLiveKeyAction, saveBonusAlternatesAction, saveBonusSplitAction, 
 import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { parseStep } from "@/lib/estimate-steps/steps";
 import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, parseDiscountPct, projectDiscountsKey, PROJECT_DISCOUNT_NOTE_MAX, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
@@ -317,9 +318,13 @@ export function useEstimatorState(props: EstimatorProps) {
   const setSections: Dispatch<SetStateAction<SpecSection[]>> = (v) => {
     setTierReprice(null);
     liveRef.current?.markEdit();
-    undoRef.current?.flagEdit();
     // Phase 2a: any edit to a built system other than `built` itself un-marks it.
-    setSectionsState((prev) => unmarkUserEdits(prev, typeof v === "function" ? v(prev) : v));
+    // Flagged only when the result differs: a flag left pending would turn the next automatic write into a step.
+    setSectionsState((prev) => {
+      const next = unmarkUserEdits(prev, typeof v === "function" ? v(prev) : v);
+      if (next !== prev) undoRef.current?.flagEdit();
+      return next;
+    });
   };
   /** The latest committed sections, read when a tier stamp lands (#254). */
   const sectionsRef = useRef(sections);
@@ -1211,10 +1216,11 @@ export function useEstimatorState(props: EstimatorProps) {
    *  tier stamp stays — it describes the customer. */
   const undoTierReprice = () => {
     if (!tierReprice) return;
+    const changed = tierReprice.before !== sectionsRef.current;
+    if (changed) undoRef.current?.flagEdit("re-priced");
     setSectionsState(tierReprice.before);
     setTierReprice(null);
     liveRef.current?.markEdit();
-    undoRef.current?.flagEdit("re-priced");
   };
 
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
@@ -1721,11 +1727,22 @@ export function useEstimatorState(props: EstimatorProps) {
   const applyUndoSnap = useCallback((s: { sections: SpecSection[]; groups: SystemGroup[]; vendorQuotes: VendorQuote[] }) => {
     setTierReprice(null);
     setSectionsState(s.sections);
+    // As after a delete: an active system the restore removed falls back to the first. Ticked lines need no step —
+    // the Build step derives them from the sections, so a line that is gone drops out of the Move bar.
+    setActiveId((a) => (a && s.sections.some((x) => x.id === a) ? a : s.sections[0]?.id ?? null));
     setGroups(s.groups);
     setVendorQuotes(s.vendorQuotes);
     liveRef.current?.markEdit();
   }, []);
-  const undo = useEstimateUndo({ snap: undoSnap, serverVendorQuotes: serverVendorQuotesRef, apply: applyUndoSnap });
+  // ⌘Z only where the edited content is on screen: Build and Build package (phone is the Review view).
+  const undoStepParams = useSearchParams();
+  const undoStep = phone ? "review" : parseStep(undoStepParams.get("step"));
+  const undo = useEstimateUndo({
+    snap: undoSnap,
+    serverVendorQuotes: serverVendorQuotesRef,
+    apply: applyUndoSnap,
+    shortcuts: undoStep === "build" || undoStep === "package",
+  });
   useEffect(() => {
     undoRef.current = undo;
   }, [undo]);
@@ -2732,6 +2749,7 @@ export function useEstimatorState(props: EstimatorProps) {
       .then((r) => {
         if (!live || !r.ok) return;
         setSectionsState((prev) => fillClientGoals(prev, r.goals));
+        undoRef.current?.mapHistory((ss) => fillClientGoals(ss, r.goals));
         setTierReprice((n) => (n ? { ...n, before: fillClientGoals(n.before, r.goals) } : n));
       })
       .catch(() => undefined);

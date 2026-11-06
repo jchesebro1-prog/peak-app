@@ -205,7 +205,7 @@ type UndoApiT = {
   flagEdit: (l?: string) => void;
   clearHistory: (o?: { pendingChange?: boolean }) => void;
 };
-type UseUndo = (o: { snap: UndoSnapT; serverVendorQuotes: { current: unknown[] | null }; apply: (s: UndoSnapT) => void }) => UndoApiT;
+type UseUndo = (o: { snap: UndoSnapT; serverVendorQuotes: { current: unknown[] | null }; apply: (s: UndoSnapT) => void; shortcuts?: boolean }) => UndoApiT;
 function loadUndoHook(): UseUndo {
   const M = Module as unknown as { _load: (request: string, parent: { filename?: string } | null, isMain: boolean) => unknown };
   const realLoad = M._load;
@@ -236,6 +236,7 @@ function mountUndo(runHook: UseUndo) {
   (globalThis as { HTMLElement?: unknown }).HTMLElement ??= class {};
   const server = { current: null as unknown[] | null };
   const t = {
+    shortcuts: true,
     state: { sections: [] as unknown[], groups: [] as unknown[], vendorQuotes: [] as unknown[] } as UndoSnapT,
     api: null as unknown as UndoApiT,
     keys,
@@ -244,7 +245,7 @@ function mountUndo(runHook: UseUndo) {
       h.i = 0;
       h.pending = [];
       h.dirty = false;
-      t.api = runHook({ snap: t.state, serverVendorQuotes: server, apply: (s) => (t.state = s) });
+      t.api = runHook({ snap: t.state, serverVendorQuotes: server, apply: (s) => (t.state = s), shortcuts: t.shortcuts });
       host = null;
       const pending = h.pending;
       for (const e of pending) if (e.stale && e.cleanup) e.cleanup();
@@ -315,6 +316,35 @@ export async function liveSaveHookChecks(ok: Ok) {
       t.api.redo();
       t.settle();
       ok(t.state.sections === B, "undo hook: redo restores for the keyboard check");
+      // Shortcuts off (Review / Send & track): the keyboard does nothing, the API still works.
+      t.shortcuts = false;
+      t.render();
+      prevented = 0;
+      press({});
+      t.settle();
+      ok(prevented === 0 && t.state.sections === B, "undo hook: shortcuts off, Cmd+Z does nothing");
+      t.api.undo();
+      t.settle();
+      ok(t.state.sections === A, "undo hook: undo() still works with shortcuts off");
+      t.shortcuts = true;
+      t.render();
+      // A restore identical to the current snapshot sets no stray flag: the next unflagged group edit is recorded.
+      {
+        const u = mountUndo(useUndo);
+        u.state = { ...u.state, sections: A };
+        u.render();
+        u.edit(B);
+        // history: [A -> A'] ; make the current state reference-equal to the stored prev, then undo.
+        u.state = { ...u.state, sections: A };
+        u.render();
+        u.api.undo();
+        u.settle();
+        const g1 = [{ id: "g" }];
+        u.state = { ...u.state, groups: g1 };
+        u.render();
+        u.settle();
+        ok(u.api.canUndo, "undo hook: an identical restore leaves no stray flag that swallows the next group edit");
+      }
     } finally {
       if (!hadDoc) delete (globalThis as { document?: unknown }).document;
       (globalThis as { window?: unknown }).window = realWin;

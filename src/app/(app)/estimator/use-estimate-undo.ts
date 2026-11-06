@@ -35,8 +35,15 @@ export function useEstimateUndo(opts: {
   serverVendorQuotes: { current: UndoSnap["vendorQuotes"] | null };
   /** Write a snapshot back to state. */
   apply: (s: UndoSnap) => void;
+  /** ⌘Z / ⇧⌘Z on the keyboard. Default on. Undo and redo stay callable either way (buttons). */
+  shortcuts?: boolean;
 }): EstimateUndoApi {
   const { snap, serverVendorQuotes, apply } = opts;
+  const shortcutsOn = opts.shortcuts !== false;
+  const shortcutsRef = useRef(shortcutsOn);
+  useEffect(() => {
+    shortcutsRef.current = shortcutsOn;
+  }, [shortcutsOn]);
   const [history, setHistory] = useState<UndoHistory>(emptyUndoHistory);
   const historyRef = useRef(history);
   const write = useCallback((h: UndoHistory) => {
@@ -62,24 +69,25 @@ export function useEstimateUndo(opts: {
     if (edited) write(recordEdit(historyRef.current, prev, snap, Date.now(), flag?.label));
   }, [snap, serverVendorQuotes, write]);
 
-  const undo = useCallback(() => {
-    const res = takeUndo(historyRef.current, currentRef.current);
-    if (!res) return;
-    applyingRef.current = true;
-    write(res.next);
-    apply(res.restore);
-  }, [apply, write]);
-  const redo = useCallback(() => {
-    const res = takeRedo(historyRef.current, currentRef.current);
-    if (!res) return;
-    applyingRef.current = true;
-    write(res.next);
-    apply(res.restore);
-  }, [apply, write]);
+  /** Restore a snapshot. When it is the very objects already shown, no change will land to reset the flag, so none is set. */
+  const restoreWith = useCallback(
+    (res: { next: UndoHistory; restore: UndoSnap } | null) => {
+      if (!res) return;
+      const cur = currentRef.current;
+      const r = res.restore;
+      applyingRef.current = !(r.sections === cur.sections && r.groups === cur.groups && r.vendorQuotes === cur.vendorQuotes);
+      write(res.next);
+      apply(res.restore);
+    },
+    [apply, write]
+  );
+  const undo = useCallback(() => restoreWith(takeUndo(historyRef.current, currentRef.current)), [restoreWith]);
+  const redo = useCallback(() => restoreWith(takeRedo(historyRef.current, currentRef.current)), [restoreWith]);
 
   // ⌘Z / ⇧⌘Z outside text fields: a text field keeps the browser's own undo.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!shortcutsRef.current) return;
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
       if (isTextTarget(e.target) || dialogOpen()) return;
       e.preventDefault();
