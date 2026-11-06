@@ -17,16 +17,31 @@ export const emptyUndoHistory = (): UndoHistory => ({ past: [], future: [] });
 /** Automatic lines re-derive after every edit, so they never count as one. */
 const editableLines = (s: SpecSection): SpecItem[] => s.items.filter((it) => !(it as { bonus?: unknown }).bonus);
 const lineKey = (it: SpecItem): string => {
-  const { lineOrder: _order, ...rest } = it as SpecItem & { lineOrder?: unknown };
+  const rest: Record<string, unknown> = { ...it };
+  delete rest.lineOrder;
   return JSON.stringify(rest);
 };
 const sectionFields = (s: SpecSection): string => {
-  const { items: _items, ...rest } = s;
+  const rest: Record<string, unknown> = { ...s };
+  delete rest.items;
   return JSON.stringify(rest);
 };
 const sectionKey = (s: SpecSection): string => sectionFields(s) + "|" + editableLines(s).map(lineKey).join("|");
 
 export type EditDiff = { label: string; target: string | null };
+
+/** Line-level change within one system (added, deleted, edited, reordered). null = the lines are unchanged. */
+function singleSectionLineChange(prev: SpecSection, next: SpecSection): EditDiff | null {
+  const prevLines = editableLines(prev);
+  const nextLines = editableLines(next);
+  if (nextLines.some((l) => !prevLines.some((p) => p.id === l.id))) return { label: "line added", target: null };
+  if (prevLines.some((p) => !nextLines.some((l) => l.id === p.id))) return { label: "line deleted", target: null };
+  const edited = nextLines.filter((l) => lineKey(l) !== lineKey(prevLines.find((p) => p.id === l.id) as SpecItem));
+  if (edited.length === 1) return { label: "line edited", target: `line:${next.id}:${edited[0].id}` };
+  if (edited.length > 1) return { label: "lines edited", target: null };
+  if (prevLines.map((p) => p.id).join() !== nextLines.map((l) => l.id).join()) return { label: "lines reordered", target: null };
+  return null;
+}
 
 /** What changed, in the words the tooltip shows. null = nothing the user would call an edit. */
 export function diffEdit(before: UndoSnap, after: UndoSnap): EditDiff | null {
@@ -45,14 +60,10 @@ export function diffEdit(before: UndoSnap, after: UndoSnap): EditDiff | null {
   if (changed.length === 1) {
     const next = changed[0];
     const prev = before.sections.find((s) => s.id === next.id) as SpecSection;
-    const prevLines = editableLines(prev);
-    const nextLines = editableLines(next);
-    if (nextLines.some((l) => !prevLines.some((p) => p.id === l.id))) return { label: "line added", target: null };
-    if (prevLines.some((p) => !nextLines.some((l) => l.id === p.id))) return { label: "line deleted", target: null };
-    const edited = nextLines.filter((l) => lineKey(l) !== lineKey(prevLines.find((p) => p.id === l.id) as SpecItem));
-    if (edited.length === 1) return { label: "line edited", target: `line:${next.id}:${edited[0].id}` };
-    if (edited.length > 1) return { label: "lines edited", target: null };
-    if (prevLines.map((p) => p.id).join() !== nextLines.map((l) => l.id).join()) return { label: "lines reordered", target: null };
+    const fieldsChanged = sectionFields(next) !== sectionFields(prev);
+    const lines = singleSectionLineChange(prev, next);
+    // A line change and a system-field change in one edit: no target, so it never coalesces with a later edit.
+    if (lines) return fieldsChanged ? { label: "system edited", target: null } : lines;
     return { label: "system edited", target: `sys:${next.id}` };
   }
   if (before.vendorQuotes !== after.vendorQuotes && JSON.stringify(before.vendorQuotes) !== JSON.stringify(after.vendorQuotes)) {

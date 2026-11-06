@@ -73,6 +73,23 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(recordEdit(emptyUndoHistory(), a, b, 1, "re-priced").past[0].label === "re-priced", "undo: a label override wins");
   const mapped = mapSnapshots(recordEdit(emptyUndoHistory(), a, b, 1), (ss) => ss.map((s) => ({ ...s, freightPct: 9 })));
   ok(mapped.past[0].snap.sections[0].freightPct === 9, "undo: mapSnapshots reaches stored snapshots");
+
+  // a line AND a system field in one edit: no target, so it never coalesces
+  const combined = snap([sec("A", [line(1, { qty: 4 }), line(2)], { name: "Renamed" })]);
+  const combinedDiff = diffEdit(a, combined);
+  ok(combinedDiff?.target === null && combinedDiff?.label === "system edited", "undo: a line plus a system field edit has no target");
+  let mixed = recordEdit(emptyUndoHistory(), a, combined, 1_000);
+  mixed = recordEdit(mixed, combined, snap([sec("A", [line(1, { qty: 5 }), line(2)], { name: "Renamed" })]), 1_100);
+  ok(mixed.past.length === 2, "undo: a combined edit then a line edit make two steps");
+
+  // vendor quotes equal by content in a new array are no step
+  ok(diffEdit({ ...a, vendorQuotes: [{ id: "v1" }] as never }, { ...a, vendorQuotes: [{ id: "v1" }] as never }) === null, "undo: equal vendor quotes in a new array are no step");
+
+  // undo then redo keep the label
+  const labelled = recordEdit(emptyUndoHistory(), a, b, 1_000);
+  const lu = takeUndo(labelled, b)!;
+  const lr = takeRedo(lu.next, a)!;
+  ok(lu.next.future[0].label === "line deleted" && lr.next.past[0].label === "line deleted", "undo: undo and redo keep the entry label");
 }
 
 export async function liveSaveDbChecks(_ok: Ok) {
