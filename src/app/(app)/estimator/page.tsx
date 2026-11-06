@@ -24,6 +24,8 @@ import { getFixtureRates, loadBonusRates, loadCurtainSewingPct } from "@/lib/sto
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
+import { listLinesetTypes, listPipeTypes } from "@/lib/stores/rigging-types";
+import { linesetTypeSkus, pipeTypeSkus } from "@/lib/rigging-config/types";
 import { getSystemCategories } from "@/lib/stores/system-categories";
 import type { CategoryOption } from "@/lib/system-categories";
 import { listIntros } from "@/lib/stores/narrative-intros";
@@ -407,7 +409,7 @@ export default async function EstimatorPage({
   // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
   // saved quote's linked one (else, unlinked, the one its URL still names).
   // Read inside the Promise.all below so an Estimator open doesn't wait on it serially.
-  const [suggestion, fabricRows, laborRows, customerDocs, settings, vendorPdfGate, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [suggestion, fabricRows, laborRows, customerDocs, settings, vendorPdfGate, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, pipeTypes, linesetTypes, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
       loadSuggestion(readHandoff(sp).suggestionId, q),
       fabricParts(),
@@ -424,6 +426,8 @@ export default async function EstimatorPage({
       loadFreightRule(),
       allSpecRecords(),
       listTrackSeries(),
+      listPipeTypes(),
+      listLinesetTypes(),
       listIntros(),
       getEstimateOutputDefaults(),
       loadSystemCategoryOptions(),
@@ -467,6 +471,13 @@ export default async function EstimatorPage({
   for (const p of catalogRows) {
     if (!trackSkus.has(p.sku)) continue;
     trackParts[p.sku] = { sku: p.sku, desc: p.desc || "", cost: Number(p.cost) || 0, list: Number(p.list) || 0, unit: p.unit || "ea", mfr: p.mfr || "" };
+  }
+  // #373: the same, for the pipe and lineset types' directly mapped parts.
+  const riggingSkus = new Set([...pipeTypes.flatMap((t) => pipeTypeSkus(t)), ...linesetTypes.flatMap((t) => linesetTypeSkus(t))]);
+  const riggingParts: Record<string, TrackPart> = {};
+  for (const p of catalogRows) {
+    if (!riggingSkus.has(p.sku)) continue;
+    riggingParts[p.sku] = { sku: p.sku, desc: p.desc || "", cost: Number(p.cost) || 0, list: Number(p.list) || 0, unit: p.unit || "ea", mfr: p.mfr || "" };
   }
 
   const laborRates: Record<string, number> = {};
@@ -584,6 +595,9 @@ export default async function EstimatorPage({
       curtainSewingPct={curtainSewingPct}
       trackSeries={trackSeries}
       trackParts={trackParts}
+      pipeTypes={pipeTypes}
+      linesetTypes={linesetTypes}
+      riggingParts={riggingParts}
       laborRates={laborRates}
       fixtureRates={fixtureRates}
       // #246: every Assembly Builder kind — fixtures, systems and hardware.

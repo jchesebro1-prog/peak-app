@@ -26,7 +26,7 @@ import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
 import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMarkup, buildLaborItems, computeCurtain, computeLabor, lineMarkupOf, makeLaborRate, repricedAtLineMarkup, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
 import type { PdfToggle } from "./preview-doc";
-import { vendorAttachmentLoad, type CurtainDraft, type CustomDraft, type EstimatorProps, type FixtureDraft, type LaborDraft, type MobDraft, type SpecItem, type SpecMob, type SpecSection, type TrackDraft, type TravelLite, type VendorDraft, type VendorLineDraft, type VendorPdfFormState, type VendorQuote } from "./types";
+import { vendorAttachmentLoad, type CurtainDraft, type CustomDraft, type EstimatorProps, type FixtureDraft, type LaborDraft, type LinesetDraft, type MobDraft, type PipeDraft, type SpecItem, type SpecMob, type SpecSection, type TrackDraft, type TravelLite, type VendorDraft, type VendorLineDraft, type VendorPdfFormState, type VendorQuote } from "./types";
 import { vendorQuoteFromThreadAction } from "./vendor-actions";
 import { VENDOR_COPY, isPdfAttachment } from "@/lib/vendor-quotes/rules";
 import { readVendorPdfAction } from "./vendor-pdf-actions";
@@ -56,6 +56,7 @@ import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { partsListSkus, reviewSheetModel, type PartInfo } from "./parts-csv";
 import { downloadReviewSheet } from "./review-sheet-xlsx";
 import { fileStem } from "../design/export";
+import { freshLinesetDraft, freshPipeDraft, linesetConfigFromDraft, linesetDraftFromConfig, linesetLine, pipeConfigFromDraft, pipeDraftFromConfig, pipeLine, riggingCatalog } from "./rigging-bom";
 import { curtainTrackDraft, curtainTrackPrefill, followCurtainPrefill, freshTrackDraft, replaceTrackLine, trackConfigFromDraft, trackDraftFromConfig, trackLine, type CurtainTrackPrefill } from "./track-bom";
 import { customDraftFromLine, isCustomLineEditable, costUntouched, saveCustomEdit, sellUntouched } from "./custom-part-edit";
 import { applyCurtainEdit, curtainDraftFromLine, curtainDraftValid, curtainItem } from "./curtain-line";
@@ -235,7 +236,7 @@ export const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3�
 
 export function useEstimatorState(props: EstimatorProps) {
   const {
-    initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, laborRates, fixtureRates,
+    initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, pipeTypes, linesetTypes, riggingParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
     quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
@@ -657,6 +658,8 @@ export function useEstimatorState(props: EstimatorProps) {
   const laborFor = openFor("labor");
   const vendorFor = openFor("vendor");
   const trackFor = openFor("track");
+  const pipeFor = openFor("pipe");
+  const linesetFor = openFor("lineset");
   const [customDraft, setCustomDraft] = useState<CustomDraft>(freshCustom);
   // #302: why the last "Add custom part" didn't add, and the in-flight guard.
   const [customError, setCustomError] = useState("");
@@ -720,6 +723,14 @@ export function useEstimatorState(props: EstimatorProps) {
   type TrackEdit = { lineId: number; readOnly: { components: SpecItem["components"]; cost: number; price: number } | null };
   const trackEditRef = useRef<(TrackEdit & { draft: TrackDraft }) | null>(null);
   const [trackEdit, setTrackEdit] = useState<TrackEdit | null>(null);
+  /* #373: the pipe and lineset forms, the same close-then-seed dance as the track edit. */
+  const riggingCat = useMemo(() => riggingCatalog(riggingParts, fixtureAssemblies), [riggingParts, fixtureAssemblies]);
+  const [pipeDraft, setPipeDraft] = useState<PipeDraft>(() => freshPipeDraft(pipeTypes));
+  const pipeEditRef = useRef<(TrackEdit & { draft: PipeDraft }) | null>(null);
+  const [pipeEdit, setPipeEdit] = useState<TrackEdit | null>(null);
+  const [linesetDraft, setLinesetDraft] = useState<LinesetDraft>(() => freshLinesetDraft(linesetTypes));
+  const linesetEditRef = useRef<(TrackEdit & { draft: LinesetDraft }) | null>(null);
+  const [linesetEdit, setLinesetEdit] = useState<TrackEdit | null>(null);
   /* #292: Edit curtain — the same close-then-seed dance as the track edit. */
   const curtainEditRef = useRef<{ lineId: number; draft: CurtainDraft; linkedTrack: string | null } | null>(null);
   const [curtainEdit, setCurtainEdit] = useState<{ lineId: number; linkedTrack: string | null } | null>(null);
@@ -804,8 +815,8 @@ export function useEstimatorState(props: EstimatorProps) {
      below snapshots the COMMITTED draft (so a seed set in the same click is in it). The hand-off's fill re-bases the
      stored baseline instead (rebaseDraft). confirmDiscardInput compares at close; Add / Save never asks. */
   const modalDrafts = useMemo<Record<ModalInputKind, unknown>>(
-    () => ({ curtain: { draft: curtainDraft, track: curtainTrack }, track: trackDraft, fixture: fixtureDraft, labor: laborDraft, vendor: vendorDraft }),
-    [curtainDraft, curtainTrack, trackDraft, fixtureDraft, laborDraft, vendorDraft]
+    () => ({ curtain: { draft: curtainDraft, track: curtainTrack }, track: trackDraft, pipe: pipeDraft, lineset: linesetDraft, fixture: fixtureDraft, labor: laborDraft, vendor: vendorDraft }),
+    [curtainDraft, curtainTrack, trackDraft, pipeDraft, linesetDraft, fixtureDraft, laborDraft, vendorDraft]
   );
   /** Per pop-up: the clean draft's stableDraftJson, or null while pending (snapshotted after the next commit). */
   const draftBaselineRef = useRef<Partial<Record<ModalInputKind, string | null>>>({});
@@ -2601,6 +2612,14 @@ export function useEstimatorState(props: EstimatorProps) {
       trackEditRef.current = null;
       setTrackEdit(null);
       setTrackDraft(freshTrackDraft(trackSeries));
+    } else if (kind === "pipe") {
+      pipeEditRef.current = null;
+      setPipeEdit(null);
+      setPipeDraft(freshPipeDraft(pipeTypes));
+    } else if (kind === "lineset") {
+      linesetEditRef.current = null;
+      setLinesetEdit(null);
+      setLinesetDraft(freshLinesetDraft(linesetTypes));
     } else if (kind === "fixture") setFixtureDraft(freshFixture());
     else if (kind === "vendor") {
       // #144: an abandoned edit must not seed the next "+ Vendor quote".
@@ -2641,6 +2660,16 @@ export function useEstimatorState(props: EstimatorProps) {
       trackEditRef.current = null;
       setTrackEdit(edit ? { lineId: edit.lineId, readOnly: edit.readOnly } : null);
       setTrackDraft(edit ? edit.draft : freshTrackDraft(trackSeries));
+    } else if (kind === "pipe") {
+      const edit = pipeEditRef.current;
+      pipeEditRef.current = null;
+      setPipeEdit(edit ? { lineId: edit.lineId, readOnly: edit.readOnly } : null);
+      setPipeDraft(edit ? edit.draft : freshPipeDraft(pipeTypes));
+    } else if (kind === "lineset") {
+      const edit = linesetEditRef.current;
+      linesetEditRef.current = null;
+      setLinesetEdit(edit ? { lineId: edit.lineId, readOnly: edit.readOnly } : null);
+      setLinesetDraft(edit ? edit.draft : freshLinesetDraft(linesetTypes));
     } else if (kind === "vendor") {
       /* #144: the pending edit seed, consumed and CLEARED here so it applies to
          exactly one open. With none set — or a record since deleted — this is
@@ -2875,6 +2904,24 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputMethod("track", secId);
   };
 
+  /** #373: reopen the pipe or lineset configurator on its line. A deleted type opens read-only with the saved parts. */
+  const openRiggingEdit = (secId: string, lineId: number) => {
+    const it = sections.find((s) => s.id === secId)?.items.find((x) => x.id === lineId);
+    const cfg = it?.rigging;
+    if (!it || !cfg) return;
+    if (repriceLocked(status)) return; // #368: as openLaborEdit
+    if (!confirmDiscardInput()) return;
+    closeInput();
+    const saved = { components: it.components, cost: it.cost, price: it.price };
+    if (cfg.kind === "pipe") {
+      pipeEditRef.current = { lineId, draft: pipeDraftFromConfig(cfg), readOnly: pipeTypes.some((t) => t.id === cfg.typeId) ? null : saved };
+      openInputMethod("pipe", secId);
+    } else {
+      linesetEditRef.current = { lineId, draft: linesetDraftFromConfig(cfg), readOnly: linesetTypes.some((t) => t.id === cfg.typeId) ? null : saved };
+      openInputMethod("lineset", secId);
+    }
+  };
+
   /** #312: reopen the Custom part form on a hand-entered custom line, pre-filled —
    *  the same close-then-seed dance as the configurators above. */
   const openCustomEdit = (secId: string, lineId: number) => {
@@ -2906,6 +2953,28 @@ export function useEstimatorState(props: EstimatorProps) {
     const res = trackLine(config, trackSeries.find((s) => s.id === config.seriesId), trackParts, tierMargin);
     if (!res.ok) return;
     const lineId = trackEdit?.lineId;
+    if (lineId != null) setSections((ss) => ss.map((s) => (s.id === secId ? replaceTrackLine(s, lineId, res.item) : s)));
+    else pushItems(secId, [{ ...res.item, id: nextId() }]);
+    closeInput();
+  };
+
+  /** #373: Add pipe / lineset pushes one line; Update replaces the line in place (replaceTrackLine keeps its notes and order). */
+  const addPipe = (secId: string) => {
+    if (pipeEdit?.readOnly) return;
+    const config = pipeConfigFromDraft(pipeDraft);
+    const res = pipeLine(config, pipeTypes.find((t) => t.id === config.typeId), riggingCat, tierMargin);
+    if (!res.ok) return;
+    const lineId = pipeEdit?.lineId;
+    if (lineId != null) setSections((ss) => ss.map((s) => (s.id === secId ? replaceTrackLine(s, lineId, res.item) : s)));
+    else pushItems(secId, [{ ...res.item, id: nextId() }]);
+    closeInput();
+  };
+  const addLineset = (secId: string) => {
+    if (linesetEdit?.readOnly) return;
+    const config = linesetConfigFromDraft(linesetDraft);
+    const res = linesetLine(config, linesetTypes.find((t) => t.id === config.typeId), riggingCat, tierMargin);
+    if (!res.ok) return;
+    const lineId = linesetEdit?.lineId;
     if (lineId != null) setSections((ss) => ss.map((s) => (s.id === secId ? replaceTrackLine(s, lineId, res.item) : s)));
     else pushItems(secId, [{ ...res.item, id: nextId() }]);
     closeInput();
@@ -3524,6 +3593,8 @@ export function useEstimatorState(props: EstimatorProps) {
   const laborSec = sections.find((s) => s.id === laborFor);
   const vendorSec = sections.find((s) => s.id === vendorFor);
   const trackSec = sections.find((s) => s.id === trackFor);
+  const pipeSec = sections.find((s) => s.id === pipeFor);
+  const linesetSec = sections.find((s) => s.id === linesetFor);
   /** The stored quote the vendor form is editing, if it is editing one (#144). */
   const vendorEditingRec = vendorQuotes.find((v) => v.id === vendorDraft.id);
   /**
@@ -3576,6 +3647,8 @@ export function useEstimatorState(props: EstimatorProps) {
     addSystemOpen,
     setAddSystemOpen,
     addTrack,
+    addPipe,
+    addLineset,
     addVendorLine,
     aiAdded,
     aiBusy,
@@ -3695,6 +3768,7 @@ export function useEstimatorState(props: EstimatorProps) {
     openInputMethod,
     openLaborEdit,
     openTitle,
+    openRiggingEdit,
     openTrackEdit,
     openVendorEdit,
     retargetVendor,
@@ -3834,6 +3908,19 @@ export function useEstimatorState(props: EstimatorProps) {
     toggleMobFlag,
     togglePdf,
     toggleSide,
+    pipeDraft,
+    setPipeDraft,
+    pipeEdit,
+    pipeFor,
+    pipeSec,
+    pipeTypes,
+    linesetDraft,
+    setLinesetDraft,
+    linesetEdit,
+    linesetFor,
+    linesetSec,
+    linesetTypes,
+    riggingCat,
     trackDraft,
     trackEdit,
     trackFor,

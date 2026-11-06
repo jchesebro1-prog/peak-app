@@ -23,7 +23,7 @@ import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
 import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
 import type { ProjectDiscounts } from "@/lib/project-discounts/rules";
 import type { RepricedOnRevise } from "@/lib/estimate-reprice/rules";
-import type { RiggingConfig } from "@/lib/rigging-config/types";
+import type { LinesetType, PipeType, RiggingConfig } from "@/lib/rigging-config/types";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -728,6 +728,11 @@ export type EstimatorProps = {
   /** #274: the live catalog part behind every SKU a series maps, keyed by
    *  SKU. A mapped SKU missing here was deleted from the catalog. */
   trackParts: Record<string, TrackPart>;
+  /** #373: every pipe and lineset type, active or not. A deleted one is simply absent. */
+  pipeTypes: PipeType[];
+  linesetTypes: LinesetType[];
+  /** #373: the live catalog part behind every SKU those types map directly. */
+  riggingParts: Record<string, TrackPart>;
   /** Live labor/travel rates from catalog category 'Labor' (sku → cost). */
   laborRates: Record<string, number>;
   /** Live fixture add-on rates (Estimating Rules → fixture group). */

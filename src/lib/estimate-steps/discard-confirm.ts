@@ -2,9 +2,9 @@
    Pure: the hook snapshots each open's draft once it settles (stableDraftJson) and compares it at close (inputIsDirty);
    the confirm text comes from here. Nothing here touches the DOM or React. */
 
-/** The five configurator pop-ups whose × / backdrop click discards a draft (closeInput). AI scope and Add a system
+/** The configurator pop-ups whose × / backdrop click discards a draft (closeInput). AI scope and Add a system
  *  hold no draft and keep closing without a question. */
-export const MODAL_INPUT_KINDS = ["curtain", "track", "fixture", "labor", "vendor"] as const;
+export const MODAL_INPUT_KINDS = ["curtain", "track", "pipe", "lineset", "fixture", "labor", "vendor"] as const;
 export type ModalInputKind = (typeof MODAL_INPUT_KINDS)[number];
 export const isModalInputKind = (k: string): k is ModalInputKind => (MODAL_INPUT_KINDS as readonly string[]).includes(k);
 
@@ -50,7 +50,7 @@ export function rebaseDraft<T>(baseline: string | null | undefined, apply: (d: T
 }
 
 export const DISCARD_COPY = {
-  noun: { curtain: "curtain", track: "track", fixture: "assembly", labor: "labor", vendor: "vendor quote" } as Record<ModalInputKind, string>,
+  noun: { curtain: "curtain", track: "track", pipe: "pipe", lineset: "lineset", fixture: "assembly", labor: "labor", vendor: "vendor quote" } as Record<ModalInputKind, string>,
   generic: (noun: string) => `Discard this ${noun}? Your changes will be lost.`,
   vendorRead: "Discard this vendor quote? The PDF read and your changes will be lost.",
   /** Fix round 1: the vendor form's own file upload is still in flight (asked by the modal, before the hook's check). */
