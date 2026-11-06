@@ -251,10 +251,16 @@ export async function liveSavePureChecks(ok: Ok) {
   const statusSrc = hookSrc.slice(hookSrc.indexOf("const changeStatus = "), hookSrc.indexOf("const changeStage = "));
   const stageSrc = hookSrc.slice(hookSrc.indexOf("const changeStage = "), hookSrc.indexOf("const changePipeline = "));
   ok(hookSrc.includes('"That status change did not go through — your latest edits are not saved yet."'), "C2: the exact sentence");
-  ok(/if \(liveMode && !\(await live\.flush\(\)\)\) \{\s*setStatus\(baseStatusRef\.current\);\s*setActionError\(STATUS_EDITS_UNSAVED\);\s*setGateRefused\(false\);\s*return;/.test(statusSrc), "C2: a status change stops and rolls back to the server-confirmed status");
+  ok(/if \(liveMode \? !\(await live\.flush\(\)\) : live\.conflictNow\(\)\) \{\s*setStatus\(baseStatusRef\.current\);\s*setActionError\(STATUS_EDITS_UNSAVED\);\s*setGateRefused\(false\);\s*return;/.test(statusSrc), "C2: a status change stops and rolls back to the server-confirmed status");
   ok(statusSrc.indexOf("await live.flush()") < statusSrc.indexOf("await setStatusAction("), "C2: the flush decides before setStatusAction writes");
-  ok(/if \(liveMode && !\(await live\.flush\(\)\)\) \{\s*setStage\(prevStage\);\s*setStatus\(baseStatusRef\.current\);\s*setActionError\(STATUS_EDITS_UNSAVED\);\s*setGateRefused\(false\);\s*return;/.test(stageSrc), "C2: a stage move stops the same way");
+  ok(/if \(liveMode \? !\(await live\.flush\(\)\) : live\.conflictNow\(\)\) \{\s*setStage\(prevStage\);\s*setStatus\(baseStatusRef\.current\);\s*setActionError\(STATUS_EDITS_UNSAVED\);\s*setGateRefused\(false\);\s*return;/.test(stageSrc), "C2: a stage move stops the same way");
   ok(stageSrc.indexOf("await live.flush()") < stageSrc.indexOf("await setQuoteStageAction("), "C2: the flush decides before setQuoteStageAction writes");
+  ok(/const noteStoredKey = async/.test(hookSrc) && /currentLiveKeyAction\(id\)\) === liveKeyRef\.current/.test(hookSrc) && /catch \{\s*return false;/.test(hookSrc), "fix2: the stored key is compared with this window's key through the queue; a failed read is a mismatch");
+  ok(statusSrc.indexOf("await noteStoredKey(id)") > statusSrc.indexOf("await live.flush()") && statusSrc.indexOf("await noteStoredKey(id)") < statusSrc.indexOf("await setStatusAction("), "fix2: status move reads the key after the flush, before setStatusAction");
+  ok(stageSrc.indexOf("await noteStoredKey(id)") > stageSrc.indexOf("await live.flush()") && stageSrc.indexOf("await noteStoredKey(id)") < stageSrc.indexOf("await setQuoteStageAction("), "fix2: stage move reads the key the same way");
+  ok(/if \(k && moveKeyMatchedRef\.current\) liveKeyRef\.current = k;\s*moveKeyMatchedRef\.current = true;/.test(hookSrc), "fix2: the re-read adopts the new key only when the key matched before the move");
+  ok(/live\.status === "saved"\) setActionError\(\(e\) => \(e === STATUS_EDITS_UNSAVED \? null : e\)\)/.test(hookSrc), "fix3: a live save clears only the stop sentence");
+  ok((hookSrc.match(/That status change did not go through/g) || []).length === 1, "fix3: the sentence lives in one constant");
   ok(/baseStatusRef\.current = res\.status;\s*setBaseStatus\(res\.status\);\s*\}\s*setActionNotice\(res\.error \?\? null\);\s*return \{ kind: "notLive" \}/.test(performSrc), "C2: the notLive sync reaches the rollback without waiting for a commit");
   // C3 + I1
   ok(/keyStatusRef\.current = res\.status;\s*(baseStatusRef\.current = res\.status;\s*)?setBaseStatus\(res\.status\);\s*\}\s*setActionNotice\(res\.error \?\? null\)/.test(performSrc), "I1: a notLive sync is not this window's move, so it doesn't re-read someone else's key");

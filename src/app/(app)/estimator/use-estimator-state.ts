@@ -262,6 +262,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const liveRef = useRef<LiveSaveApi | null>(null);
   /** The change key this window last saw. A `useRef`, not read from `initial`: a LiveSync refresh must not adopt someone else's key. */
   const liveKeyRef = useRef<string | null>(initial.liveKey);
+  const moveKeyMatchedRef = useRef(true);
   /** The status the change key was last read at. This window's own moves re-read the key; a sync of someone else's move doesn't. */
   const keyStatusRef = useRef(initial.status);
   /** What the server last confirmed, synchronously: a status move rolls back to it right after a flush, before any commit. */
@@ -1766,10 +1767,28 @@ export function useEstimatorState(props: EstimatorProps) {
     void live
       .enqueue(async () => (live.conflictNow() ? null : currentLiveKeyAction(loadedId)))
       .then((k) => {
-        if (k) liveKeyRef.current = k;
+        // Adopt only when this window held the stored key before its own move; otherwise the next Save must raise the conflict.
+        if (k && moveKeyMatchedRef.current) liveKeyRef.current = k;
+        moveKeyMatchedRef.current = true;
       })
       .catch(() => undefined);
   }, [baseStatus, loadedId, live]);
+  // Before this window's own status move: does the stored key still equal the one this screen was built on? A failed read counts as no.
+  const noteStoredKey = async (id: string) => {
+    moveKeyMatchedRef.current = await live
+      .enqueue(async () => {
+        try {
+          return (await currentLiveKeyAction(id)) === liveKeyRef.current;
+        } catch {
+          return false;
+        }
+      })
+      .catch(() => false);
+  };
+  // A live save landing clears the stop sentence its failed flush left behind (and only that sentence).
+  useEffect(() => {
+    if (live.status === "saved") setActionError((e) => (e === STATUS_EDITS_UNSAVED ? null : e));
+  }, [live.status]);
   const doSave = () => {
     if (tierResolvingRef.current) return;
     startTransition(async () => {
@@ -1786,12 +1805,13 @@ export function useEstimatorState(props: EstimatorProps) {
       startTransition(async () => {
         try {
           // Nothing moves unless the edits landed: a Won or Sent move works from the stored spec, and a conflict is waiting on an answer.
-          if (liveMode && !(await live.flush())) {
+          if (liveMode ? !(await live.flush()) : live.conflictNow()) {
             setStatus(baseStatusRef.current);
             setActionError(STATUS_EDITS_UNSAVED);
             setGateRefused(false);
             return;
           }
+          await noteStoredKey(id);
           // #355 review I3: leaving Won with unsaved edits — save them first, so
           // the reopen's snapshot keeps them before the won version comes back.
           if (prevStatus === "won" && v !== "won" && pdfDirty && (await saveNow()) === false) {
@@ -1857,13 +1877,14 @@ export function useEstimatorState(props: EstimatorProps) {
     setStatusChanging(true);
     startTransition(async () => {
       try {
-        if (liveMode && !(await live.flush())) {
+        if (liveMode ? !(await live.flush()) : live.conflictNow()) {
           setStage(prevStage);
           setStatus(baseStatusRef.current);
           setActionError(STATUS_EDITS_UNSAVED);
           setGateRefused(false);
           return;
         }
+        await noteStoredKey(id);
         // #355 review I3: same as changeStatus — a stage move can leave Won.
         // #368: …or revise a sent / lost estimate (a stage whose tag is Draft) — saved first, as above.
         const pl = pipelines.quote.find((p) => p.id === pipelineId) || pipelines.quote.find((p) => p.id === pipelines.defaultQuotePipelineId) || pipelines.quote[0];
