@@ -1721,5 +1721,19 @@ See `.env.example`.
     resolves), real taps and a real card scan, a production check after 0042, and
     `QUOTE_PDF_ORIGIN`. Open: keep captures through the go-live wipe (D1329)? Punch item #371.
 
+72. ✅ **Pipe and lineset configurators** (#373, D1332–D1336) — two more Track-style
+    pop-ups on every Estimator system. **+ Configure pipe** works out sticks,
+    splices and clamps from a run; **+ Configure lineset** works out aircraft
+    cable (lift lines × (grid + width ÷ 2 + allowance)), hand line, terminations
+    and chain wraps. Parts come from Estimating Rules → Pipe types and Lineset
+    types (blobs in `src/lib/stores/rigging-types.ts`; a lineset role may be a
+    catalog part or a Hardware assembly). Pure rules in `src/lib/rigging-config/`,
+    pricing in `estimator/rigging-bom.ts`. Each adds one lot line (`PIP-`/`LNS-`
+    SKU, parts in `components`, inputs in `SpecItem.rigging`), read through
+    `isConfiguredLine`; Track is untouched. The curtain configurator gains Add
+    pipe on new curtains, with no link kept. No migration, no env vars. Remaining
+    is Jeff-gated: create the types with real parts, check the 10' allowance,
+    decide on Quick Design's formula. Punch item #373.
+
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
