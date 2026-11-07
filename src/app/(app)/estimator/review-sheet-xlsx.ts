@@ -1,14 +1,14 @@
 import type { Worksheet } from "exceljs";
-import { isAdjustmentRow, partsRowItemName, partsRowNotes, reviewMoney, type ReviewSheetBlock, type SystemFees } from "./parts-csv";
+import { isAdjustmentRow, partsRowItemName, partsRowNotes, reviewMoney, type ReviewSheetBlock } from "./parts-csv";
 
 /** The Estimator's "Review spreadsheet" (#363, Jeff 2026-10-22) — the parts
  *  list (and, since #374, each system's labor rows: man-hours, travel, shop,
  *  lift, allowance — all ordinary rows inside the SUM ranges) as a real .xlsx for reviewing an estimate: every listed part with a
  *  clickable Link, live Ext Cost / Ext Sell / Markup formulas
  *  on the line's own sell (before freight, rounding and bonuses), and under
- *  each system three bold rows — System cost, System markup and System fees
- *  (freight + both bonuses + the round-up / typed-price adjustment) — that
- *  add up to the system's price.
+ *  each system five bold rows (#377, Jeff 2026-11-06) — System cost, System
+ *  markup, ACCTs (both bonuses, combined), Freight and Package sell, the system's
+ *  price, with any round-up or typed-price adjustment named in its Notes.
  *  exceljs is imported on demand, so it never lands in the Estimator's main
  *  bundle; the module touches the DOM only inside `downloadReviewSheet`.
  *  Every text cell is written as a string, never a formula. */
@@ -43,23 +43,22 @@ const MONEY_FMT = "$#,##0.00";
 const PCT_FMT = "0.0%";
 const WIDTHS = [18, 20, 40, 14, 18, 7, 12, 12, 13, 13, 10, 22, 36, 40];
 
-/** The System fees row's Notes (#363): each non-zero part, e.g. "Freight $X ·
- *  Estimator bonus $Y · Package bonus $Z · Price rounding $W". */
-export function feesBreakdown(fees: SystemFees): string {
+/** What Package sell adds beyond the rows above it (#377): the round-up or typed-price
+ *  adjustment, plus anything in the system's price the sheet doesn't list, so the row
+ *  always lands on the real price and says why. */
+export function packageSellExtra(block: ReviewSheetBlock, sellSum: number): { amount: number; note: string } {
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const { adjustment, typedPrice, total } = block.fees;
+  const unlisted = round(block.price - sellSum - total);
   const parts: string[] = [];
-  const add = (label: string, n: number) => {
-    if (Math.abs(n) >= 0.005) parts.push(`${label} ${reviewMoney(n)}`);
-  };
-  add("Freight", fees.freight);
-  add("Estimator bonus", fees.estimatorBonus);
-  add("Package bonus", fees.packageBonus);
-  add(fees.typedPrice ? "Typed price adjustment" : "Price rounding", fees.adjustment);
-  return parts.join(" · ");
+  if (Math.abs(adjustment) >= 0.005) parts.push(`Includes ${typedPrice ? "typed price adjustment" : "price rounding"} ${reviewMoney(adjustment)}`);
+  if (Math.abs(unlisted) >= 0.005) parts.push(`Includes ${reviewMoney(unlisted)} not listed above`);
+  return { amount: round(adjustment + unlisted), note: parts.join(" · ") };
 }
 
-/** "System cost — Lighting" etc. (#363). */
-export function subtotalLabels(system: string): { cost: string; markup: string; fees: string } {
-  return { cost: `System cost — ${system}`, markup: `System markup — ${system}`, fees: `System fees — ${system}` };
+/** The closing rows' labels (#363, #377). ACCTs and Freight print exactly that. */
+export function subtotalLabels(system: string): { cost: string; markup: string; accts: string; freight: string; sell: string } {
+  return { cost: `System cost — ${system}`, markup: `System markup — ${system}`, accts: "ACCTs", freight: "Freight", sell: `Package sell — ${system}` };
 }
 
 /** Writes the blocks onto the sheet (#363); returns nothing. */
@@ -124,9 +123,15 @@ function writeBlocks(ws: Worksheet, blocks: ReviewSheetBlock[]): void {
       row.font = { bold: true };
       if (topBorder) for (let c = 1; c <= REVIEW_SHEET_HEADER.length; c++) row.getCell(c).border = { top: { style: "thin" } };
     };
+    const closing = n + 1; // System cost; the next three rows follow it
     subtotal(labels.cost, { formula: costRange, result: costSum }, "", true);
     subtotal(labels.markup, { formula: `${sellRange}-${costRange}`, result: sellSum - costSum }, "", false);
-    subtotal(labels.fees, block.fees.total, feesBreakdown(block.fees), false);
+    subtotal(labels.accts, block.fees.accts, "", false);
+    subtotal(labels.freight, block.fees.freight, "", false);
+    const extra = packageSellExtra(block, sellSum);
+    const sum = [0, 1, 2, 3].map((i) => `${COL.extSell}${closing + i}`).join("+");
+    const tail = Math.abs(extra.amount) < 0.005 ? "" : `${extra.amount < 0 ? "-" : "+"}${Math.abs(extra.amount).toFixed(2)}`;
+    subtotal(labels.sell, { formula: `${sum}${tail}`, result: block.price }, extra.note, true);
   });
   ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: REVIEW_SHEET_HEADER.length } };

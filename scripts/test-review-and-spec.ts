@@ -37556,13 +37556,13 @@ import type { SpecItem as P262Item, SpecSection as P262Section, VendorQuote as P
   ok(phComp[0]?.sku === "" && p262Csv(phComp)[0][1] === "", "#262 final B: an assembly component with a placeholder SKU is also treated as no SKU");
 }
 
-/* --- #363: the Estimator's "Review spreadsheet" — links, one block per system, System fees (pure) --- */
+/* --- #363: the Estimator's "Review spreadsheet" — links, one block per system, the closing rows (pure) --- */
 import {
   partsListRows as r363Rows, reviewSheetModel as r363Model, systemFees as r363Fees, reviewLink as r363Link,
 } from "@/app/(app)/estimator/parts-csv";
 import { systemSellTotal as r363SellTotal } from "@/app/(app)/estimator/pricing";
 import {
-  buildReviewWorkbook as r363Build, feesBreakdown as r363Breakdown, REVIEW_SHEET_HEADER as r363Header,
+  buildReviewWorkbook as r363Build, packageSellExtra as r363Extra, REVIEW_SHEET_HEADER as r363Header,
 } from "@/app/(app)/estimator/review-sheet-xlsx";
 import type { SpecItem as R363Item, SpecSection as R363Section, VendorQuote as R363Vq } from "@/app/(app)/estimator/types";
 function r363Fixture() {
@@ -37618,11 +37618,10 @@ function r363Fixture() {
   ok(brackets[0].lineSell === 60 && Math.abs(brackets[0].unitSell - 60) > 0.01, "#363 review sheet: lineSell stays the line's own unit sell while unitSell carries the system factor");
 
   const fees = r363Fees(lighting);
-  ok(fees.freight === 40.48 && fees.packageBonus === 13.57 && fees.estimatorBonus === 9.99 && fees.adjustment === 20.96 && fees.total === 85 && fees.typedPrice === false,
-    "#363 systemFees: freight (10% of 404.83 → 40.48) + package bonus 13.57 + estimator bonus 9.99 + the $25 round-up (829.04 → 850: 20.96) = 85.00");
-  ok(r363Breakdown(fees) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96", "#363 systemFees: the Notes breakdown names each part");
+  ok(fees.freight === 40.48 && fees.packageBonus === 13.57 && fees.estimatorBonus === 9.99 && fees.accts === 23.56 && fees.adjustment === 20.96 && fees.total === 85 && fees.typedPrice === false,
+    "#363 systemFees: freight (10% of 404.83 → 40.48) + package bonus 13.57 + estimator bonus 9.99 (#377: ACCTs 23.56) + the $25 round-up (829.04 → 850: 20.96) = 85.00");
   const fees2 = r363Fees(lighting2);
-  ok(fees2.total === 0 && r363Breakdown(fees2) === "", "#363 systemFees: a system with no freight, bonus or rounding has no fees and an empty breakdown");
+  ok(fees2.total === 0 && fees2.accts === 0, "#363 systemFees: a system with no freight, bonus or rounding has no fees");
 
   const model = r363Model(sections, vqs, {});
   ok(model.map((b) => `${b.sectionId}:${b.system}:${b.room}`).join("|") === "s-a:Lighting:Stage|s-l:Labor:|s-b:Lighting:Stage",
@@ -37631,15 +37630,25 @@ function r363Fixture() {
   const reconcile = (b: (typeof model)[number], sec: R363Section) => {
     const cost = b.rows.reduce((s, r) => s + r.qty * r.unitCost, 0);
     const sell = b.rows.reduce((s, r) => s + r.qty * r.lineSell, 0);
-    return Math.round((cost + (sell - cost) + b.fees.total) * 100) / 100 === Math.round(r363SellTotal(sec) * 100) / 100;
+    return Math.round((cost + (sell - cost) + b.fees.total) * 100) / 100 === Math.round(r363SellTotal(sec) * 100) / 100 && b.price === r363SellTotal(sec);
   };
   ok(reconcile(model[0], lighting) && near(r363SellTotal(lighting), 850) && reconcile(model[2], lighting2),
-    "#363 review sheet: System cost + System markup + System fees = the system's price, to the cent (850.00)");
+    "#363 review sheet: the rows' sell + ACCTs + Freight + the adjustment = the system's price, to the cent (850.00)");
   const typed: R363Section = { ...lighting, id: "s-t", sellOverride: 700 };
   const tModel = r363Model([typed], vqs, {});
   const tFees = r363Fees(typed);
-  ok(tFees.typedPrice && tFees.adjustment === -129.04 && reconcile(tModel[0], typed) && r363Breakdown(tFees).endsWith("Typed price adjustment -$129.04"),
-    "#363 systemFees: a typed system price below the computed one is a negative adjustment, named as such, and still reconciles");
+  ok(tFees.typedPrice && tFees.adjustment === -129.04 && reconcile(tModel[0], typed),
+    "#363 systemFees: a typed system price below the computed one is a negative adjustment and still reconciles");
+  const sellSum363 = (b: (typeof model)[number]) => b.rows.reduce((s, r) => s + r.qty * r.lineSell, 0);
+  ok(r363Extra(model[0], sellSum363(model[0])).amount === 20.96 && r363Extra(model[0], sellSum363(model[0])).note === "Includes price rounding $20.96",
+    "#377 Package sell: the round-up is added and named in Notes");
+  ok(r363Extra(tModel[0], sellSum363(tModel[0])).amount === -129.04 && r363Extra(tModel[0], sellSum363(tModel[0])).note === "Includes typed price adjustment -$129.04",
+    "#377 Package sell: a typed price is a negative adjustment, named as such");
+  ok(r363Extra(model[2], sellSum363(model[2])).amount === 0 && r363Extra(model[2], sellSum363(model[2])).note === "",
+    "#377 Package sell: nothing to add, no note");
+  const short363 = r363Extra({ ...model[0], price: model[0].price + 50 }, sellSum363(model[0]));
+  ok(short363.amount === 70.96 && short363.note === "Includes price rounding $20.96 · Includes $50.00 not listed above",
+    "#377 Package sell: money in the price the sheet doesn't list still lands on the real price, and says so");
   ok(r363Header.join(",") === "Manufacturer,Item name,Description,Room,System,Qty,Unit Cost,Unit Sell,Ext Cost,Ext Sell,Markup,Price source,Link,Notes" && !r363Header.some((h) => /margin/i.test(h)),
     "#363 review sheet: the fourteen columns, in order (#367: Markup is the only % column — Line margin is gone; Ext Cost / Ext Sell / Link added)");
   const xlsxSrc = readFileSync(join(process.cwd(), EST_DIR, "review-sheet-xlsx.ts"), "utf8");
@@ -37683,16 +37692,22 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
   const evil = ws.getRow(9);
   check(evil.getCell(3).value === '=HYPERLINK("http://evil.example","x")' && evil.getCell(3).type === ExcelJS.ValueType.String,
     "#363 workbook: a description that looks like a formula is written as text");
-  check(text(10, 3) === "System cost — Lighting" && text(11, 3) === "System markup — Lighting" && text(12, 3) === "System fees — Lighting",
-    "#363 workbook: three subtotal rows close each system — System cost, System markup, System fees");
+  check(text(10, 3) === "System cost — Lighting" && text(11, 3) === "System markup — Lighting" && text(12, 3) === "ACCTs" && text(13, 3) === "Freight" && text(14, 3) === "Package sell — Lighting",
+    "#377 workbook: five rows close each system — System cost, System markup, ACCTs, Freight, Package sell");
+  check(![...Array(ws.rowCount).keys()].some((i) => /system fees|bonus/i.test(text(i + 1, 3) + text(i + 1, 14))),
+    "#377 workbook: no System fees row, and nothing on the sheet names a bonus");
   check(f(10, 10)?.formula === "SUM(I2:I9)" && f(10, 10)?.result === 382.5 && f(11, 10)?.formula === "SUM(J2:J9)-SUM(I2:I9)" && f(11, 10)?.result === 382.5,
     "#363 workbook: System cost / System markup are SUM formulas over the system's rows, cached (382.50 / 382.50)");
-  check(ws.getRow(12).getCell(10).value === 85 && text(12, 14) === "Freight $40.48 · Estimator bonus $9.99 · Package bonus $13.57 · Price rounding $20.96",
-    "#363 workbook: System fees is a number (85.00) with its breakdown in Notes");
-  check(ws.getRow(10).getCell(3).font?.bold === true && ws.getRow(12).getCell(10).font?.bold === true && ws.getRow(10).getCell(1).border?.top?.style === "thin",
-    "#363 workbook: the subtotal rows are bold, the first with a thin top border");
-  check(ws.getRow(13).getCell(3).value == null && text(14, 3) === "Labor (man-hours)" && text(15, 3) === "System cost — Labor" && ws.getRow(18).getCell(3).value == null
-      && text(19, 3) === "Plain" && text(20, 3) === "System cost — Lighting" && f(20, 10)?.formula === "SUM(I19:I19)",
+  check(ws.getRow(12).getCell(10).value === 23.56 && text(12, 14) === "" && ws.getRow(13).getCell(10).value === 40.48 && text(13, 14) === "",
+    "#377 workbook: ACCTs is the two bonuses combined (23.56) and Freight its own number (40.48), neither with a breakdown");
+  check(f(14, 10)?.formula === "J10+J11+J12+J13+20.96" && f(14, 10)?.result === 850 && text(14, 14) === "Includes price rounding $20.96",
+    "#377 workbook: Package sell adds the rows above plus the round-up, lands on the system's price (850.00) and names the round-up");
+  check(Math.round(((f(10, 10)?.result as number) + (f(11, 10)?.result as number) + (ws.getRow(12).getCell(10).value as number) + (ws.getRow(13).getCell(10).value as number) + 20.96) * 100) === 85000,
+    "#377 workbook: the printed amounts really do add up to Package sell");
+  check(ws.getRow(10).getCell(3).font?.bold === true && ws.getRow(14).getCell(10).font?.bold === true && ws.getRow(10).getCell(1).border?.top?.style === "thin" && ws.getRow(14).getCell(1).border?.top?.style === "thin" && ws.getRow(12).getCell(1).border?.top == null,
+    "#377 workbook: the closing rows are bold, System cost and Package sell with a thin top border");
+  check(ws.getRow(15).getCell(3).value == null && text(16, 3) === "Labor (man-hours)" && text(17, 3) === "System cost — Labor" && ws.getRow(22).getCell(3).value == null
+      && text(23, 3) === "Plain" && text(24, 3) === "System cost — Lighting" && f(24, 10)?.formula === "SUM(I23:I23)" && f(28, 10)?.formula === "J24+J25+J26+J27",
     "#363 workbook: one blank spacer row between systems — the labor system's block (#374), then the next same-named system with its own block and ranges");
   check(ws.getRow(2).getCell(7).numFmt === "$#,##0.00" && ws.getRow(2).getCell(11).numFmt === "0.0%", "#363 workbook: money and percent formats");
 }

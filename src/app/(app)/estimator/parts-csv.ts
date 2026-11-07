@@ -23,7 +23,7 @@ import { normalCostOf, type ProjectDiscounts } from "@/lib/project-discounts/rul
  *  helpers (`partsListCsvRows`, `PARTS_CSV_HEADER`) stay for the row tests.
  *  #374: the Review spreadsheet also lists each system's labor (`reviewLaborRows`,
  *  added only by `reviewSheetModel`) so a system's rows + fees tie out to its
- *  price; the parts list and CSV above never carry labor.
+ *  price (#377: its Package sell row); the parts list and CSV above never carry labor.
  *  Pure: no React, no server imports. */
 
 /** Catalog facts for one SKU, keyed by the trimmed SKU (#262). */
@@ -424,6 +424,8 @@ export type SystemFees = {
   freight: number;
   packageBonus: number;
   estimatorBonus: number;
+  /** ACCTs (#377, Jeff 2026-11-06): the package bonus + the estimator bonus, as one amount. */
+  accts: number;
   /** The $25 round-up, or what a typed system price adds (negative when it is below the computed price). */
   adjustment: number;
   /** True when `adjustment` comes from a typed system price, not the round-up. */
@@ -432,10 +434,12 @@ export type SystemFees = {
   total: number;
 };
 
-/** System fees (#363, Jeff 2026-10-22): freight + the 5% package bonus + the
- *  2% estimator bonus + the round-up / typed-price adjustment. With the
- *  listed rows' own sell (lineSell — parts and, since #374, labor) they make
- *  the system's price, to the cent. */
+/** What a system's price carries beyond its rows (#363, Jeff 2026-10-22):
+ *  freight + the 5% package bonus + the 2% estimator bonus + the round-up /
+ *  typed-price adjustment. With the listed rows' own sell (lineSell — parts and,
+ *  since #374, labor) they make the system's price, to the cent. #377: the sheet
+ *  prints them as ACCTs and Freight rows, and the adjustment in Package sell's
+ *  Notes; there is no System fees row any more. */
 export function systemFees(section: SpecSection): SystemFees {
   const bonus = (pick: (x: SpecItem) => boolean) =>
     round2(section.items.filter((x) => pick(x) && isSystemLine(x)).reduce((a, x) => a + lineExtSellOf(x), 0));
@@ -447,6 +451,7 @@ export function systemFees(section: SpecSection): SystemFees {
     freight,
     packageBonus,
     estimatorBonus,
+    accts: round2(packageBonus + estimatorBonus),
     adjustment,
     typedPrice: hasSellOverride(section),
     total: round2(freight + packageBonus + estimatorBonus + adjustment),
@@ -574,14 +579,16 @@ export function reviewLaborRows(section: SpecSection, defaultRoom = ""): PartsLi
   return out;
 }
 
-/** One system's block of the Review spreadsheet (#363): its listed rows, then
- *  its three subtotal rows (cost, markup, fees). */
+/** One system's block of the Review spreadsheet (#363, #377): its listed rows, then
+ *  its closing rows (System cost, System markup, ACCTs, Freight, Package sell).
+ *  `price` is what the system actually sells for (`systemSellTotal`). */
 export type ReviewSheetBlock = {
   sectionId: string;
   system: string;
   room: string;
   rows: PartsListRow[];
   fees: SystemFees;
+  price: number;
 };
 
 /** The Review spreadsheet's model (#363, #374): one block per system that lists at least one row, in the
@@ -617,6 +624,7 @@ export function reviewSheetModel(
       room: section.room?.trim() || defaultRoom.trim(),
       rows,
       fees: systemFees(section),
+      price: systemSellTotal(section),
     });
   }
   return out;

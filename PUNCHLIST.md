@@ -13043,3 +13043,14 @@ Jeff, Nov 6: "Can we make it so estimator lines live save when editing? And then
 - Known edge: an old tab open across the deploy saves with no check and can overwrite a live-saved spec.
 - Send now schedules a render when the cut finds a stale PDF (see D1344); outside a request the file is only marked stale and Send & track or Customer review renders it.
 
+
+## 377. Review spreadsheet: ACCTs, Freight, Package sell — DONE 2026-11-06 (D1347)
+
+Jeff, Nov 6: "make the estimator and the package bonus be a line that just says ACCTs and that is combined and then do a freight line, and then remove system fees but then I want a package sell line". Each system closes with System cost, System markup, ACCTs, Freight, Package sell (`src/app/(app)/estimator/review-sheet-xlsx.ts`; `SystemFees.accts` and `ReviewSheetBlock.price` in `parts-csv.ts`). The round-up or typed-price adjustment is in Package sell's formula and named in its Notes.
+
+**Gates:** tsc 0 errors; test:specs ALL PASSED (26,765 PASS lines, 10 `#377` checks); eslint clean on the two source files. Browser (dev): Q-2044's real download read back as $5,000.00 + $2,142.86 + ACCTs $144.86 + Freight $100.00 + $12.28 rounding = Package sell $7,400.00, the header's quoted total. `test:smoke` not run: 8.7 GB free against the ~35 GB it needs, and no route changed. That estimate has no labor, so the package bonus inside ACCTs is checked by the harness only.
+
+**Remaining (Jeff):**
+- Check a real estimate with labor on production, and open it in Excel.
+- Confirm "Package sell" per system is what he meant, not a whole-estimate total.
+- Still open from #374: freight % is charged on labor cost in a materials system.
