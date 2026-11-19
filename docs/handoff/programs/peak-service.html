@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Peak Service — Flame Tests & Rigging Inspections</title>
+<!--
+  Peak Service — a single-file, offline program for Flame Tests and Rigging Inspections.
+  Spun out of the Quartzite app (jchesebro1-prog/peak-app) on 2026-11-19.
+  No server, no login, no network. Data lives in this browser (IndexedDB) plus backup files
+  you export from the Backup tab. Spec: docs/handoff/flame-inspections-spec.md.
+
+  Ported from (repo-relative):
+    pricing ....... src/lib/flametest-engine.ts, src/lib/inspection-engine.ts,
+                    src/lib/service-pricing.ts, src/lib/travel-plan.ts, src/lib/repair-engine.ts (tripTravel)
+    rate defaults . src/lib/stores/pricing.ts
+    records ....... src/lib/stores/flame-jobs.ts, src/lib/stores/inspections.ts
+    wording ....... src/lib/templates.ts
+-->
+<style>
+:root{--ink:#1c2230;--mut:#6b7280;--line:#e4e7ec;--bg:#f5f6f8;--card:#fff;--acc:#2f5fd0;--acc-soft:#e9eefb;
+--red:#b4543a;--red-soft:#f7e9e5;--amb:#9a6a1f;--amb-soft:#fbf3dd;--grn:#1f7a52;--grn-soft:#eaf6ef;--pur:#7b3f8a;--pur-soft:#f3eaf5}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+header.top{background:#161b26;color:#fff;display:flex;align-items:center;gap:6px;padding:0 14px;position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header.top b.brand{font-size:15px;margin-right:14px;padding:12px 0;white-space:nowrap}
+header.top a{color:#c9cfdb;text-decoration:none;padding:12px 10px;border-bottom:3px solid transparent;white-space:nowrap}
+header.top a.on{color:#fff;border-color:#7ea2ff}
+#chip{margin-left:auto;font-size:12px;color:#9fe0bd;padding:4px 0}
+#chip.bad{color:#ffb4a2;font-weight:700}
+main{max-width:1180px;margin:0 auto;padding:18px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 10px}h3{font-size:13px;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.sub{color:var(--mut);margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}.row>.grow{flex:1;min-width:320px}.side{width:360px;max-width:100%}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px}.kpi b{display:block;font-size:22px}.kpi span{color:var(--mut);font-size:12px}
+table{width:100%;border-collapse:collapse}th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid #eef0f3;vertical-align:top}tr.click{cursor:pointer}tr.click:hover{background:#fafbfc}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+input,select,textarea{font:inherit;color:inherit;border:1px solid #cfd4dc;border-radius:6px;padding:6px 8px;background:#fff;max-width:100%}
+input:disabled,select:disabled,textarea:disabled{background:#f1f2f5;color:#6b7280}
+textarea{width:100%;resize:vertical}input.n{width:84px;text-align:right}input.w{width:100%}
+label.f{display:block;margin-bottom:10px}label.f>span{display:block;font-size:12px;color:var(--mut);margin-bottom:3px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 14px}
+button,.btn{font:inherit;border:1px solid #cfd4dc;background:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;color:var(--ink);text-decoration:none;display:inline-block}
+button:hover{background:#f5f6f8}button.p{background:var(--acc);border-color:var(--acc);color:#fff}button.p:hover{filter:brightness(.94)}
+button.d{color:var(--red)}button.s{padding:3px 8px;font-size:12px}button:disabled{opacity:.5;cursor:default}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:#f1f2f5;color:#59606c;white-space:nowrap}
+.pill.red{background:var(--red-soft);color:var(--red)}.pill.amb{background:var(--amb-soft);color:var(--amb)}.pill.grn{background:var(--grn-soft);color:var(--grn)}
+.pill.blu{background:var(--acc-soft);color:#3155a8}.pill.pur{background:var(--pur-soft);color:var(--pur)}
+.pl{display:flex;justify-content:space-between;gap:10px;padding:4px 0}.pl.t{border-top:2px solid var(--ink);margin-top:6px;padding-top:8px;font-size:18px;font-weight:700}
+.pl small{color:var(--mut)}.note{background:var(--amb-soft);color:#6b4a12;border-radius:6px;padding:8px 10px;margin:8px 0;font-size:13px}
+.note.red{background:var(--red-soft);color:#7d3524}.note.blu{background:var(--acc-soft);color:#243f80}
+.mut{color:var(--mut)}.tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}.tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.rate{display:inline-flex;gap:2px}.rate button{padding:2px 8px;font-size:12px}
+.rate button.on.na{background:#8c919c;color:#fff}.rate button.on.good{background:var(--grn);color:#fff}.rate button.on.fair{background:#c98a2b;color:#fff}.rate button.on.poor{background:var(--red);color:#fff}
+.log{border:1px solid var(--line);border-left:5px solid #c98a2b;border-radius:8px;padding:10px;margin-bottom:10px;background:#fff}
+.log.urgent{border-left-color:var(--red)}.log.basic{border-left-color:#3155a8}.log.closed{opacity:.75}
+img.ph{max-width:220px;max-height:160px;border-radius:6px;border:1px solid var(--line);display:block;margin-top:4px}
+code{background:#f1f2f5;padding:1px 5px;border-radius:4px;font-size:12.5px}
+/* documents */
+.doc{background:#fff;max-width:8.5in;margin:0 auto 20px;padding:.7in .8in;border:1px solid var(--line);font-size:12.5px;line-height:1.5}
+.doc h1{font-size:20px}.doc h2{font-size:15px;margin-top:18px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.doc .lh{display:flex;justify-content:space-between;border-bottom:3px solid var(--ink);padding-bottom:10px;margin-bottom:18px}
+.doc .callout{border-left:4px solid var(--acc);background:#f6f8fd;padding:8px 12px;margin:12px 0;font-style:italic}
+.doc table td,.doc table th{padding:5px 6px}.doc .sig{display:flex;gap:40px;margin-top:40px}.doc .sig div{flex:1;border-top:1px solid var(--ink);padding-top:4px;font-size:11px}
+.doc .cert{border:6px double var(--ink);padding:.5in;text-align:center}.doc .cert h1{font-size:26px;letter-spacing:.04em}
+.pb{page-break-before:always}
+@media print{header.top,.noprint{display:none!important}body{background:#fff}main{padding:0;max-width:none}.doc{border:0;margin:0;padding:0;max-width:none}.log{break-inside:avoid}@page{margin:.7in}}
+</style>
+</head>
+<body>
+<header class="top"><b class="brand">Peak Service</b><nav id="nav" style="display:contents"></nav><span id="chip">Loading…</span></header>
+<main id="app"></main>
+<script>
+"use strict";
+/* =====================================================================
+ * 1. BUILT-IN KNOWLEDGE — rates, rules data, checklists, wording.
+ *    Everything here is Peak's own content, carried over from the app.
+ * ===================================================================== */
+const DAY = 86400000, YEAR = 365 * DAY, RENEWAL_LEAD_DAYS = 60, PRICE_STEP = 25, PRICE_OVERRIDE_MAX = 10000000;
+const LOW_MARKUP_WARN = 0.11, LIFT_RATE_FALLBACK = 750, LIFT_COUNT_MAX = 50, LIFT_RATE_MAX = 100000;
+const TRAVEL_FLY_LINE = "Travel (air, lodging & per diem)";
+const RATE_DEFAULTS = {
+  flame: { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.43, travelRoundMin: 15, flyCrew: 1 },
+  inspection: { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.43, travelRoundMin: 15, flyCrew: 1 },
+  travel: { roadFactor: 1.25, mph: 50, flyThreshold: 1000, airfarePerPerson: 450, hotelPerNight: 140, perDiemPerDay: 70, carPerDay: 75, flyTravelHoursEachWay: 4, flyHoursPerDay: 8 },
+  liftRate: 750,
+};
+const RATE_LABELS = {
+  flame: { mileageRate: ["Mileage rate", "$ per mile (IRS standard rate at time of estimate)"], laborRate: ["Labor rate", "$ per hour, testing and drive time"], curtainMinutes: ["Minutes per curtain", "Time to test one curtain"], baseFee: ["Base minimum", "$ floor on the whole job cost, before markup"], margin: ["Markup", "Fraction on cost: 0.43 = 43%"], travelRoundMin: ["Round drive time up to", "minutes"], flyCrew: ["Crew when flying", "people"] },
+  inspection: { laborRate: ["Labor rate", "$ per hour"], mileageRate: ["Mileage rate", "$ per mile"], lineSetMinutes: ["Minutes per line set", "Level 1 visual pass"], baseHours: ["Base hours per visit", "Setup, walkthrough, write-up"], level2Mult: ["Level 2 time multiplier", "Applied to inspection hours"], minFee: ["Minimum fee", "$ floor on the marked-up price"], margin: ["Markup", "Fraction on cost: 0.43 = 43%"], travelRoundMin: ["Round drive time up to", "minutes"], flyCrew: ["Crew when flying", "people"] },
+  travel: { mph: ["Assumed drive speed", "mph, used to fill in drive minutes from miles"], flyThreshold: ["Fly instead of drive at", "$ drive cost for one trip (0 = never fly)"], airfarePerPerson: ["Airfare allowance", "$ round trip per person"], hotelPerNight: ["Hotel", "$ per person per night"], perDiemPerDay: ["Per diem", "$ per person per trip day"], carPerDay: ["Rental car", "$ per car per trip day, one car per two people"], flyTravelHoursEachWay: ["Travel-day hours each way", "per person"], flyHoursPerDay: ["On-site hours per day", "per person; sets the nights"] },
+};
+const VENUE_TYPES = ["Proscenium theater", "Black box", "Worship / sanctuary", "Gymnasium / gym stage", "Arena", "Multipurpose room", "Outdoor / amphitheater"];
+const FLAME_STAGES = [["approved", "Approved — needs a date", "amb"], ["scheduled", "Scheduled", "blu"], ["completed", "Completed", "grn"]];
+const INSP_STAGES = [["requested", "Requested", "amb"], ["scheduled", "Scheduled", "blu"], ["onsite", "On-site", "pur"], ["completed", "Completed", "grn"]];
+const LEVELS = [
+  { key: 1, label: "Level 1", long: "Level 1 — annual", years: 1, blurb: "Visual inspection of every accessible rigging component, performed every year." },
+  { key: 2, label: "Level 2", long: "Level 2 — every 5 years", years: 5, blurb: "In-depth inspection with wear measurement and load-path review, performed every five years." },
+];
+const levelMeta = k => LEVELS.find(l => l.key === Number(k)) || LEVELS[0];
+const SEVERITIES = [
+  { key: "urgent", label: "Urgent", long: "Urgent Repair", cls: "red", blurb: "A repair that requires immediate fixing — one that poses a danger until repaired." },
+  { key: "necessary", label: "Necessary", long: "Necessary Repair", cls: "amb", blurb: "A repair that should be dealt with in the next few months — one that, if left alone, may pose a threat." },
+  { key: "basic", label: "Basic", long: "Basic Improvement", cls: "blu", blurb: "A way to improve the venue’s efficiency and safety." },
+];
+const SEV_ORDER = { urgent: 0, necessary: 1, basic: 2 };
+const sevMeta = k => SEVERITIES.find(s => s.key === k) || SEVERITIES[1];
+const CONDITIONS = [["good", "Good condition", "grn"], ["fair", "Fair condition", "amb"], ["poor", "Poor condition", "red"], ["failing", "Failing / unsafe", "red"]];
+const VENUE_FACTS = [["yearBuilt", "Built / equipment installed"], ["currentUse", "Current use"], ["ownerConcerns", "Owner concerns"]];
+const SYSTEM_FIELDS = [["riggingType", "Rigging type"], ["lineSets", "Line sets"], ["liftLines", "Lift lines"], ["manufacturer", "Manufacturer"], ["electrics", "Electrics"], ["fireCurtain", "Fire curtain"], ["curtainTrack", "Curtain & track"], ["orchestraShell", "Orchestra shell"], ["deadHung", "Dead-hung rigging"], ["pitLift", "Orchestra pit / lift"]];
+const MEASUREMENT_GROUPS = [
+  { group: "Stage dimensions", items: [["proW", "Proscenium width"], ["proH", "Proscenium height"], ["depth", "Stage depth · PL to back wall"], ["apron", "Apron · PL to edge"], ["srW", "Stage-right wing"], ["slW", "Stage-left wing"]] },
+  { group: "Heights & section", items: [["steel", "Height to steel"], ["grid", "Gridiron height"], ["houseH", "Stage house height"], ["pit", "Orchestra pit depth"], ["deck", "Deck / traps"]] },
+  { group: "FOH positions & beams", items: [["beam1", "1st beam · from plaster line"], ["beam2", "2nd beam · from plaster line"], ["beam3", "3rd beam · from plaster line"], ["beamSpacing", "Beam spacing"], ["loadingBridge", "Loading bridge"]] },
+];
+const RUBRIC_RATINGS = [["na", "NA"], ["good", "Good"], ["fair", "Fair"], ["poor", "Poor"]];
+const RUBRIC_TEMPLATE = [
+  { group: "Counterweight Rigging System & Components", sections: [
+    { n: 1, title: "Loft Block", items: ["Mounting assembly (clips & bolts)", "Housing (side plates / base angles)", "Sheave (casting)", "Bearing / shaft", "Alignment / fleet angle"] },
+    { n: 2, title: "Wire Rope / Terminations", items: ["Wire rope", "Terminations", "Adjustment devices", "Alignment / fleet angle", "Clamps"] },
+    { n: 3, title: "Head Block", items: ["Mounting assembly (clips & bolts)", "Housing (side plates / base angles)", "Sheaves (casting)", "Bearing / shaft", "Alignment / fleet angle"] },
+    { n: 4, title: "Counterweight Arbor", items: ["Arbor top", "Arbor bottom", "Arbor rods", "Back bone", "Spreader plates", "Locking collars", "Guides / shoes"] },
+    { n: 5, title: "Counterweights", items: ["Counterweight"] },
+    { n: 6, title: "Rope Lock", items: ["Housing", "Jaws", "Handle", "Attachment", "Adjustment"] },
+    { n: 7, title: "Hand Line", items: ["Hand line"] },
+    { n: 8, title: "Tension Block", items: ["Housing", "Sheave", "Bearings / shaft", "Guides / shoes", "Attachment"] },
+    { n: 9, title: "Battens", items: ["Battens", "Splices"] },
+    { n: 10, title: "Locking Rail", items: ["Fasteners", "Stanchions", "Rail"] },
+    { n: 11, title: "Arbor Guide System", items: ["Tees", "Wall batten", "Wall knee", "Arbor stops", "Fasteners", "U-clips", "Wire arbor guides"] },
+    { n: 12, title: "CWT Electrics", items: ["SO power cable", "Connector strip", "Cable management", "Safety cables"] },
+    { n: 13, title: "CWT Other Components", items: ["Acoustic ceiling system", "Loading bridge level", "Access ladders"] },
+  ] },
+  { group: "Curtain & Track Elements", sections: [
+    { n: 1, title: "Curtain", items: ["Condition", "Flame retardants (NFPA 701 test)", "Travelers", "Borders", "Legs", "Scrims", "Grand valance", "Cyclorama", "Blackout"] },
+    { n: 2, title: "Track", items: ["Tracks", "Track hardware", "Components", "Curtain machine"] },
+  ] },
+];
+const RUBRIC_LETTERS = "ABCDEFGHIJKLMNOP";
+const ISSUE_LIBRARY = [
+  ["Fall protection", "urgent", "Access ladder requires a self-closing gate", "There is a gap in the guardrail at a ladder access point that presents a fall hazard. OSHA 1910.28(b) requires that any employee on a walking-working surface with an unprotected edge 4 ft or more above a lower level be protected from falling.", "Install a self-closing safety gate at the access opening to protect technicians from the fall hazard.", ["OSHA 1910.28(b)"]],
+  ["Fall protection", "urgent", "Guardrail required at grid edge", "An unprotected edge of the gridiron needs to be protected. Per OSHA 1910.28(b) the top rail must be 42\" (±3\") above the walking surface with a mid-rail halfway between.", "Install a compliant top rail, mid-rail, and self-closing gate to enclose the open edge.", ["OSHA 1910.28(b)"]],
+  ["Fall protection", "urgent", "Catwalk railings are too low and mid-rails are missing", "The catwalk guardrails sit below the required height and no mid-rail is present. This does not meet the OSHA 1910.28(b) fall-protection requirement (42\"±3\" top rail, mid-rail halfway down).", "Install a new top rail and mid-rail to the required heights throughout the catwalk system.", ["OSHA 1910.28(b)"]],
+  ["Fall protection", "urgent", "Loft access openings require gates and railings", "Floor openings used to access stage-left/right lofts present fall hazards. OSHA 1910.28(b) requires protection at any unprotected edge 4 ft or more above a lower level.", "Install self-closing gates and supplemental railings at each access location.", ["OSHA 1910.28(b)"]],
+  ["Fall protection", "necessary", "Grid channel openings exceed the allowable hole size", "The gaps between grid channels and loft-block wells exceed the 2\" hole definition in 29 CFR 1910.21(b), creating trip and fall-through hazards.", "Mitigate with covers, guardrails, or a fall-protection system after a review of the best option for the venue.", ["OSHA 1910.21(b)", "OSHA 1910.28(b)"]],
+  ["Hardware", "urgent", "Fire curtain head block uses unrated, undersized hardware", "The fire-curtain head block is mounted with unrated, undersized hardware. Overhead rigging must use rated locking hardware; the breaking strength of unrated hardware is unknown and can fail without warning.", "Replace all unrated hardware with properly sized Grade 5 or higher rated hardware.", []],
+  ["Hardware", "necessary", "Loft block hardware is unrated", "Unrated hardware secures several loft blocks. All rigging equipment must be connected with rated locking hardware; unrated hardware has an unknown breaking strength.", "Replace all unrated hardware with Grade 5 or higher rated hardware.", []],
+  ["Hardware", "necessary", "Shackle pins throughout are not moused (fixed)", "Screw-pin shackles below the battens are not moused. Vibration in use gradually loosens an unfixed pin until it can spin free.", "Mouse every screw-pin shackle with steel wire or a zip tie through the pin eye, fastened back to the shackle body.", []],
+  ["Hardware", "basic", "Unused sheaves / hardware left on the head block steel", "Redundant sheaves and hardware remain on the head-block steel. Unused overhead material adds weight and can work loose over time.", "Remove all unused sheaves and hardware from the overhead steel.", []],
+  ["Wire rope", "urgent", "Lift line is spiraled", "A lift line shows spiraling — a visible sign the wire rope has been twisted tighter than manufactured. Spiraled rope can fail unexpectedly.", "Replace all wire rope that displays spiraling damage.", []],
+  ["Wire rope", "urgent", "Fire curtain wire rope clips are improperly installed", "Wire-rope clips on the fire-curtain lift lines are loosely and incorrectly oriented. Clips rely on friction and must follow the manufacturer’s torque, orientation and spacing; done wrong the system can drop the load.", "Replace the wire rope and terminate with copper compression sleeves, which retain 95–100% of the rope’s breaking strength and need no periodic service.", []],
+  ["Wire rope", "necessary", "Single wire rope clip on a guide line", "A guide-line termination uses a single wire-rope clip. Clips are rated only when used in pairs or more at the correct spacing and torque; a single clip can slip.", "Replace the wire rope with a length terminated using copper compression sleeves.", []],
+  ["Wire rope", "necessary", "Improper compression-sleeve crimp", "A compression sleeve is crimped incorrectly (overlapping crimps / overhang at the ends). An improperly terminated sleeve has an unknown efficiency, making the connection unrated.", "Cut off and remake the termination; the wire rope will be replaced since it shortens when the eye is cut off.", []],
+  ["Wire rope", "necessary", "Severe fleet angle on a line set", "The wire rope runs off the head block at a fleet angle steeper than the 1.5° allowed by ANSI E1.4-1 for 7×19 rope, accelerating wear on both the sheave and the rope.", "Adjust head/loft block placement, or add diverting blocks, to bring the fleet angle within tolerance.", ["ANSI E1.4-1"]],
+  ["Fire curtain", "urgent", "Fire curtain has no deceleration device", "The fire curtain lacks any deceleration device. ANSI E1.22 requires the curtain take at least 5 seconds to travel the last 8 ft; without it the curtain can slam the deck and damage the system.", "Install a dashpot or other deceleration device after a review of the best method with venue staff.", ["ANSI E1.22"]],
+  ["Fire curtain", "urgent", "Fire curtain guide lines are attached with hooks", "The fire-curtain guide lines are hooked to the grid. Hooks are not designed to secure wire rope — a slack line can escape and an overloaded hook can straighten, jamming the curtain in an emergency.", "Replace the hooks with forged eye bolts.", []],
+  ["Fire curtain", "urgent", "Curtains are past their flame-retardancy certification", "The flame-retardancy certificate has expired. Curtain treatment typically must be renewed every 3–5 years; annual testing is recommended.", "Take down all curtains and send them out to have flame-retardant treatment reapplied.", ["NFPA 701"]],
+  ["Operation", "urgent", "Rope locks are worn", "The rope locks show severe wear with flattened cams. Worn rope locks can let a line set move unexpectedly, creating a runaway hazard.", "Replace the worn rope locks.", []],
+  ["Operation", "urgent", "Head block bearings are failing", "Several line sets are difficult to move and grinding during operation, indicating failed head-block bearings. This increases stress on the system and operator and can seize the set.", "Replace the affected head blocks; given the shared installation age, replacing all head blocks is recommended.", []],
+  ["Structure", "urgent", "Head block beam shows deflection", "The head-block steel is visibly deflecting. Deflection in a structural beam can indicate overloading and risks catastrophic failure.", "Have the beam assessed by a qualified structural engineer before any rigging renovation; develop a remediation plan from that assessment.", []],
+  ["Structure", "urgent", "Arbor rod is bent", "An arbor rod is bent, which weakens the arbor and can cause problems loading and unloading counterweight — especially in a runaway.", "Replace the affected arbor.", []],
+  ["Loading", "urgent", "Small weights can fall through the loading gallery grating", "The smallest counterweights fit through the loading-gallery grating and can fall to the stage, causing injury or property damage.", "Deck the loading-gallery walking surface with 3/4\" plywood.", []],
+  ["Rigging", "necessary", "Dead-hung pipe is rigged poorly", "Chains supporting a dead-hung pipe are pulled in multiple directions and wrapped around grid channels, side-loading links that are only rated for linear loading.", "Remove the improperly loaded chains and replace with an appropriately rated linear attachment.", []],
+  ["Rigging", "necessary", "Lifting lines are twisted from arbor to head block", "A lifting line is twisted around its neighbor between the arbor and head block, causing wear and risking premature failure.", "Unload the set, untwist and inspect the lines for damage, reattach, and mouse the shackle pins.", []],
+  ["Rigging", "necessary", "Overhead fixtures lack secondary safety cables", "Side-arm fixtures on the gallery hang from a single point with no secondary cable. Any single-point overhead unit needs a secondary to catch it if the primary fails.", "Install secondary safety cables on all overhead fixtures; monitor during every lighting changeover.", []],
+  ["Rigging", "necessary", "Batten splices are incorrect", "Batten splices throughout the system are made incorrectly, which can concentrate load and let the batten fail at the joint.", "Rework all batten splices to the correct internal-sleeve method.", []],
+  ["General", "basic", "Hand line does not have thimbles", "The operating hand line is terminated without thimbles, allowing the eye to deform and the line to wear quickly at the termination.", "Re-terminate the hand line over proper thimbles.", []],
+  ["General", "basic", "No signage indicating system capacities", "There is no posted signage for the rigging system’s rated capacities, so operators have no reference for safe loading.", "Post capacity signage at the operating rail and loading gallery.", []],
+  ["General", "basic", "Battens lack hi-visibility ends and clear numbering", "Batten ends are not hi-vis and the numbers do not face the operator, slowing safe operation and increasing the chance of a strike.", "Add hi-visibility batten ends and reorient the batten numbers to face down toward the deck.", []],
+].map(a => ({ cat: a[0], severity: a[1], problem: a[2], explanation: a[3], solution: a[4], standards: a[5] }));
+const STANDARDS_LIST = [
+  ["OSHA", "Occupational Safety and Health Administration — sets and enforces workplace safety standards, including fall protection for walking-working surfaces."],
+  ["NFPA", "National Fire Protection Association — publishes the consensus fire-safety codes that govern fire curtains and life-safety systems."],
+  ["ANSI", "American National Standards Institute — oversees the E1 series of voluntary entertainment-technology standards used throughout this report."],
+  ["ESTA / PLASA", "The entertainment-technology trade bodies whose technical standards program (E1) defines safe rigging practice."],
+  ["ETCP", "Entertainment Technician Certification Program — the North American certification for riggers who directly affect crew and audience safety."],
+];
+const TAX_NOTE = "Sales tax, if required, will be billed at the local sales tax rates in force at the time of billing.";
+const NFPA_SHORT = "NFPA 705 §1.1.1 — This recommended practice provides guidance for the field application of an open flame to textiles and films already in use or lacking reliable laboratory data.";
+/* Letter and report wording. Each field can be overridden on the Wording tab; {{tokens}} are filled in when printed. */
+const TEMPLATES = {
+  flame_proposal: { label: "Flame-test proposal letter", fields: {
+    intro: "{{company}} proposes to perform an annual field flame inspection at {{venue}}. Installed soft goods will be field-tested in place using the NFPA 705 field-flame method, and each applicable unit will be documented individually so the venue retains a clear, defensible fire-safety record.",
+    methodQuote: "NFPA 705 provides a field screening method for textiles and films already in service when reliable laboratory data are unavailable or added in-place verification is required.",
+    priceLine: "Everything above — the drive, the on-site hours, and every one of your {{curtainsLabel}} inspected and documented — comes to {{price}}, all in.",
+    priceLineNoTravel: "Every one of your {{curtainsLabel}} inspected and documented on-site comes to {{price}}, all in.",
+    priceLineFly: "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your {{curtainsLabel}} inspected and documented — comes to {{price}}, all in.",
+    costTail: "This amount covers mobilization, on-site NFPA 705 field testing, item-by-item disposition, and issuance of the final document set. Applicable sales and use tax, lift rentals not listed above, or other site-specific third-party costs may be stated separately when required.",
+    signoff: "Approving this quote authorizes us to schedule the inspection window and proceed with the services described herein.",
+    taxNote: TAX_NOTE } },
+  inspection_proposal: { label: "Rigging inspection proposal letter", fields: {
+    intro: "{{company}} proposes to perform a rigging inspection at {{venue}}. The inspection addresses the accessible rigging system in place — anything that leaves the ground — and records observed conditions against current federal and entertainment-industry guidance so the venue retains a ranked, defensible safety record.",
+    standardsQuote: "Inspection language is typically aligned to OSHA walking-working-surface requirements and applicable ANSI E1 guidance for counterweight, statically suspended, fall-prevention, and rigging-system inspection work.",
+    cadenceNoteL1: "Rigging components should be inspected at least once a year so wear is caught early — we'll remind you when next year's inspection comes due.",
+    cadenceNoteL2: "Level 2 inspections are recommended every five years, alongside the annual Level 1 visual inspection.",
+    priceLine: "Everything above — the drive, the on-site hours, and every one of your {{lineSetsLabel}} inspected and documented — comes to {{price}}, all in.",
+    priceLineNoTravel: "Every one of your {{lineSetsLabel}} inspected and documented on-site comes to {{price}}, all in.",
+    priceLineFly: "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your {{lineSetsLabel}} inspected and documented — comes to {{price}}, all in.",
+    costTail: "This amount covers mobilization, the agreed rigging inspection scope, prioritization of findings, and issuance of the written results and summary record package. Applicable sales and use tax, lift rentals not listed above, or other third-party site costs may be stated separately when required.",
+    signoff: "Approving this quote authorizes us to schedule the inspection window and proceed with the services described herein.",
+    taxNote: TAX_NOTE } },
+  flame_renewal_email: { label: "Flame-test renewal email", fields: {
+    subject: "Annual Field Flame Inspection renewal — {{customer}}",
+    body: "Hi {{contactFirstName}},\n\nOur records show the annual Field Flame Inspection at {{customer}}{{venueSuffix}} {{lastPerformedClause}}, which makes it due for renewal. Per NFPA 705 this inspection is performed yearly to keep your curtains and soft goods compliant.\n\n{{priceParagraph}}\n\nThanks,\n{{senderFirstName}}\n{{company}}" } },
+  inspection_renewal_email: { label: "Rigging inspection renewal email", fields: {
+    subject: "{{levelLabel}} rigging inspection renewal — {{customer}}",
+    body: "Hi {{contactFirstName}},\n\nOur records show the {{cadenceShort}} rigging inspection at {{customer}}{{venueSuffix}} is due for renewal.\n\n{{priceParagraph}}\n\nThanks,\n{{senderFirstName}}\n{{company}}" } },
+  flame_report: { label: "Flame-test certificate", fields: {
+    certificateParagraph: "This certifies that the soft goods listed above at {{venue}} were field-tested by {{company}} on {{testedLabel}} using the NFPA 705 field-flame method and, except where noted, were found to be flame-resistant. This certification is good through {{goodThrough}}.",
+    aboutPassed: "Topically treated goods that self-extinguished on the field flame test and were tagged for the year.",
+    aboutIFR: "Flame-resistant by fiber, not by a topical coating. IFR goods don’t lose resistance with age or cleaning and need no re-treatment — but are still inspected annually.",
+    aboutFailed: "Did not self-extinguish; must be re-treated with an approved flame retardant or replaced before it can be certified.",
+    aboutBrief: "Applies to textiles & films already in field use, or where reliable lab data (NFPA 701) isn’t available.\nA sample is exposed to an open flame for about 12 seconds, then observed.\nIt passes if it self-extinguishes promptly, chars rather than spreads flame, and drops no flaming residue.\nMaterial that keeps burning fails and must be re-treated with an approved retardant or replaced.\nIFR materials pass by fiber composition and need no chemical treatment.\nField testing is a screening practice, repeated yearly to keep treated goods compliant." } },
+  flame_results_letter: { label: "Flame-test results letter", fields: {
+    intro: "{{company}} performed a field flame-retardant inspection at {{venue}} on {{datePerformed}} in accordance with NFPA 705, Recommended Practice for a Field Flame Test. This letter serves as the single-page written confirmation of the observed disposition for the current inspection cycle.",
+    nfpaQuote: NFPA_SHORT,
+    resultsLine: "Inspection outcome: {{passedCount}} Passed, {{ifrCount}} IFR, and {{failedCount}} Failed. Eligible passing treated goods were tagged for the current inspection cycle, and each certified unit is labeled good through {{goodThrough}}.",
+    findingsNote: "Findings recorded under certificate number {{certNo}} reflect the conditions observed on the inspection date listed above. Where goods are topically treated rather than inherently flame resistant by fiber composition, continued compliance remains dependent on maintenance, exposure, and the condition of the textile at the time of each annual inspection.",
+    failedNote: "Failed goods should be removed, re-treated, or replaced before future certification is represented or relied upon.",
+    retainNote: "Retain this results letter with the summary letter and certificate record in the venue's life-safety file." } },
+  flame_summary_letter: { label: "Flame-test summary letter", fields: {
+    purpose: "This summary letter consolidates the principal job data, observed result, and interpretation language most commonly needed for the venue file, owner file, or authority-having-jurisdiction record.",
+    summaryStatement: "{{company}} performed the field flame-retardant inspection at {{venue}}, located in {{location}}, on {{datePerformed}}, in accordance with NFPA 705, Recommended Practice for a Field Flame Test.",
+    nfpaQuote: NFPA_SHORT } },
+  inspection_report: { label: "Rigging inspection report", fields: {
+    about: "We are an independent theatrical rigging company specializing in renovation, restoration, new installation, and repair of counterweight rigging systems, pipe grids, automated rigging, and custom rigging solutions. Being independent — with no sales agreements tied to any manufacturer — lets us specify the equipment that is genuinely best for each purpose and leverage the best quality and pricing for our clients.",
+    standardsIntro: "Our inspections follow a strict set of guidelines drawn from current federal regulations and theatrical industry standards, including:",
+    mission: "To install high-quality rigging in a professional, timely manner; to create rigging solutions suited to each client’s specific needs; and to further users’ understanding of how their equipment works — encouraging education, creativity, and safe practices.",
+    inspectionPurpose: "The purpose of a rigging inspection is to check every piece of hardware involved in the rigging system — anything that leaves the ground. Just as a chain is only as strong as its weakest link, a rigging system is only as strong as its weakest point. Each component must be checked at least once a year so wear can be caught early. This is a visual inspection of accessible components; items that cannot be seen (the inside of gearboxes and motors, spaces above finished ceilings) are not included unless specifically noted.",
+    howToUse: "This report sorts every finding into three categories — Urgent Repair, Necessary Repair, and Basic Improvement — and tracks each as an Open or Closed log. An Open log is present or still present from a past inspection; a Closed log was resolved during this inspection or is a past issue no longer present. Each finding is detailed in its own rigging log.",
+    disclaimer: "This report is limited to the deficiencies present and visually accessible at the time of the inspection. Mechanical and electrical systems can fail without warning and new deficiencies can develop at any time. This survey makes no attempt to vouch for the integrity of the system design and does not include any structural analysis; concerns about the building structure should be directed to a qualified structural engineer." } },
+};
+
+/* =====================================================================
+ * 2. STATE + STORAGE (IndexedDB, falls back to localStorage)
+ * ===================================================================== */
+const DBN = "peak-service", KEY = "state";
+let S = null;
+function blankState() {
+  return { v: 1, company: { name: "Peak Systems Group", originCity: "Milwaukee", address: "", phone: "", email: "", signerName: "", signerTitle: "", techs: "" },
+    rates: JSON.parse(JSON.stringify(RATE_DEFAULTS)), wording: {}, counters: { est: 1000, ft: 3000, ri: 2041, cu: 0, vn: 0, q: 2040 },
+    customers: [], quotes: [], flameJobs: [], inspections: [], lastExportAt: 0, savedAt: 0 };
+}
+function normalizeState(s) {
+  const b = blankState();
+  s = Object.assign(b, s || {});
+  for (const k of ["flame", "inspection", "travel"]) s.rates[k] = Object.assign({}, RATE_DEFAULTS[k], s.rates[k] || {});
+  if (s.rates.liftRate == null) s.rates.liftRate = RATE_DEFAULTS.liftRate;
+  s.counters = Object.assign(blankState().counters, s.counters);
+  s.company = Object.assign(blankState().company, s.company);
+  return s;
+}
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open(DBN, 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function loadState() {
+  try { const db = await idb(); return await new Promise((res, rej) => { const q = db.transaction("kv").objectStore("kv").get(KEY); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+  catch (e) { try { return JSON.parse(localStorage.getItem(DBN) || "null"); } catch (_) { return null; } }
+}
+let saveT = null;
+function save() { S.savedAt = Date.now(); chip("Saving…"); clearTimeout(saveT); saveT = setTimeout(persist, 250); }
+async function persist() {
+  try { const db = await idb(); await new Promise((res, rej) => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(S, KEY); t.oncomplete = res; t.onerror = () => rej(t.error); }); chip("Saved in this browser"); }
+  catch (e) { try { localStorage.setItem(DBN, JSON.stringify(S)); chip("Saved in this browser"); } catch (e2) { chip("NOT SAVED — export a backup now", true); } }
+}
+function chip(t, bad) { const c = document.getElementById("chip"); c.textContent = t; c.className = bad ? "bad" : ""; }
+function nextNum(k) { S.counters[k] = (S.counters[k] || 0) + 1; return S.counters[k]; }
+
+/* =====================================================================
+ * 3. PRICING ENGINE — a line-for-line port of the app's pure functions
+ * ===================================================================== */
+function roundToStep(x, s = PRICE_STEP) { if (!Number.isFinite(x)) return 0; return Math.floor(x / s + 0.5 + 1e-9) * s; }
+function ceilToStep(x, s = PRICE_STEP) { if (!Number.isFinite(x)) return 0; return Math.ceil(x / s - 1e-9) * s; }
+function wholeDollars(raw) {
+  if (typeof raw === "number") { if (!Number.isFinite(raw) || raw < 0) return undefined; return Math.round(raw) || 0; }
+  if (typeof raw !== "string") return undefined;
+  const s = raw.replace(/[$,\s]/g, ""); if (!/^\d+(\.\d+)?$/.test(s)) return undefined;
+  const n = Number(s); return Number.isFinite(n) ? Math.round(n) : undefined;
+}
+function normalizePriceOverride(raw) { const n = wholeDollars(raw); return n != null && n > 0 && n <= PRICE_OVERRIDE_MAX ? n : undefined; }
+function normalizeTestingOverride(raw) { const n = wholeDollars(raw); return n != null && n >= 0 && n <= PRICE_OVERRIDE_MAX ? n : undefined; }
+function sellAtMarkup(cost, m) { return Number.isFinite(m) && m > 0 ? cost * (1 + m) : cost; }
+function finishPrice(totalRaw, cost, priceOverride, floored) {
+  const autoTotal = floored ? ceilToStep(totalRaw) : roundToStep(totalRaw);
+  const o = normalizePriceOverride(priceOverride) ?? null, total = o ?? autoTotal;
+  return { totalRaw, autoTotal, total, priceOverride: o, overridden: o != null, marginAmount: total - cost, effectiveMarkup: cost > 0 ? (total - cost) / cost : 0 };
+}
+function normalizeLift(raw, defaultRate) {
+  if (!raw || typeof raw !== "object") return undefined;
+  const c = typeof raw.count === "number" ? raw.count : (typeof raw.count === "string" && /^\s*\d+\s*$/.test(raw.count) ? Number(raw.count) : NaN);
+  if (!Number.isInteger(c) || c < 1 || c > LIFT_COUNT_MAX) return undefined;
+  const r = wholeDollars(raw.rate), fb = Number.isFinite(defaultRate) && defaultRate >= 0 ? Math.round(defaultRate) : LIFT_RATE_FALLBACK;
+  return { count: c, rate: r != null && r <= LIFT_RATE_MAX ? r : fb };
+}
+const liftCostOf = l => l ? l.count * l.rate : 0;
+function liftFinish(liftCost, markup, total) { const cost = Math.max(0, Number.isFinite(liftCost) ? liftCost : 0), sell = sellAtMarkup(cost, markup); return { liftCost: cost, liftSell: sell, liftLine: Math.max(0, Math.min(Math.round(total), Math.round(sell))) }; }
+function finishFlame(i) {
+  const baseApplied = i.rawCost < i.baseFee, lift = Math.max(0, i.liftCost || 0), cost = (baseApplied ? i.baseFee : i.rawCost) + lift;
+  const fin = finishPrice(sellAtMarkup(cost, i.margin), cost, i.priceOverride, baseApplied);
+  return Object.assign({ rawCost: i.rawCost, baseFee: i.baseFee, baseApplied, cost, margin: i.margin }, fin, liftFinish(lift, i.margin, fin.total));
+}
+function finishInspection(i) {
+  const sellRaw = sellAtMarkup(i.cost, i.margin), minApplied = sellRaw < i.minFee, lift = Math.max(0, i.liftCost || 0), cost = i.cost + lift;
+  const fin = finishPrice((minApplied ? i.minFee : sellRaw) + sellAtMarkup(lift, i.margin), cost, i.priceOverride, minApplied);
+  return Object.assign({ cost, sellRaw, minFee: i.minFee, minApplied, margin: i.margin }, fin, liftFinish(lift, i.margin, fin.total));
+}
+function numOrNull(v) { if (v === "" || v == null || typeof v === "boolean") return null; const n = typeof v === "number" ? v : Number(v); return Number.isFinite(n) ? n : null; }
+function normalizeTravelOverride(raw) {
+  if (!raw || typeof raw !== "object") return undefined; const out = {};
+  if (raw.mode === "drive" || raw.mode === "fly") out.mode = raw.mode;
+  const crew = numOrNull(raw.crew); if (crew != null && crew >= 1) out.crew = Math.round(crew);
+  const nights = numOrNull(raw.nights); if (nights != null && nights >= 0) out.nights = Math.round(nights);
+  const air = numOrNull(raw.airfarePerPerson); if (air != null && air >= 0) out.airfarePerPerson = air;
+  return Object.keys(out).length ? out : undefined;
+}
+function planTravel(input) {
+  const R = Object.assign({}, RATE_DEFAULTS.travel); for (const k in R) { const v = numOrNull((input.rates || {})[k]); if (v != null) R[k] = v; }
+  const o = normalizeTravelOverride(input.override) || {}, driveTotal = input.drive.total;
+  const autoMode = R.flyThreshold > 0 && driveTotal >= R.flyThreshold ? "fly" : "drive", choice = o.mode || "auto", mode = choice === "auto" ? autoMode : choice;
+  const crewDefault = Math.max(1, Math.round(numOrNull(input.crewDefault) ?? 1)), crew = o.crew ?? crewDefault, perDay = crew * R.flyHoursPerDay;
+  const onSite = Math.max(0, numOrNull(input.onSiteHours) ?? 0);
+  const workDays = perDay > 0 ? Math.max(1, Math.ceil(Math.round((onSite / perDay) * 1e6) / 1e6)) : 1;
+  const defaults = { crew: crewDefault, nights: workDays, airfarePerPerson: R.airfarePerPerson };
+  if (mode === "drive") return { mode, autoMode, choice, driveTotal, threshold: R.flyThreshold, flight: null, defaults, total: driveTotal };
+  const nights = o.nights ?? workDays, tripDays = nights + 1, airfare = crew * (o.airfarePerPerson ?? R.airfarePerPerson), lodging = crew * nights * R.hotelPerNight;
+  const perDiem = crew * tripDays * R.perDiemPerDay, car = Math.ceil(crew / 2) * tripDays * R.carPerDay, travelHours = crew * R.flyTravelHoursEachWay * 2, travelLabor = travelHours * input.laborRate;
+  const total = airfare + lodging + perDiem + car + travelLabor;
+  return { mode, autoMode, choice, driveTotal, threshold: R.flyThreshold, flight: { crew, workDays, nights, tripDays, airfare, lodging, perDiem, car, travelHours, travelLabor, total }, defaults, total };
+}
+/* Shared trip: ONE round trip to the farthest venue (the app's "estimate" method; this offline program has no routing). */
+function tripTravel(venues, rates) {
+  let maxMi = 0, maxMin = 0;
+  venues.forEach(v => { const mi = Number(v.oneWayMiles) || 0; if (mi > maxMi) { maxMi = mi; maxMin = Number(v.oneWayMin) || 0; } });
+  const miles = maxMi * 2, minutes = maxMin * 2, step = rates.travelRoundMin || 15;
+  const billed = Math.ceil(minutes / step) * step, mileageCost = miles * rates.mileageRate, timeCost = (billed / 60) * rates.laborRate;
+  return { miles: Math.round(miles), minutesRaw: Math.round(minutes), minutes: billed, mileageCost, timeCost, total: mileageCost + timeCost, method: "estimate" };
+}
+function computeFlame(opts, C, travelRates) {
+  const venues = opts.venues || [];
+  const perVenue = venues.map(v => { const curtains = Math.max(0, Math.round(Number(v.curtains) || 0)), laborMin = curtains * C.curtainMinutes, computedCost = laborMin * (C.laborRate / 60), o = normalizeTestingOverride(v.testingOverride);
+    return { id: v.id, label: v.label || "Venue", curtains, laborMin, computedCost, testingOverride: o ?? null, laborCost: o ?? computedCost }; });
+  const testingSubtotal = perVenue.reduce((a, v) => a + v.laborCost, 0), curtainsTotal = perVenue.reduce((a, v) => a + v.curtains, 0);
+  const drive = tripTravel(venues, C);
+  const plan = planTravel({ drive, onSiteHours: (curtainsTotal * C.curtainMinutes) / 60, laborRate: C.laborRate, crewDefault: C.flyCrew ?? 1, rates: travelRates, override: opts.travel });
+  const lift = opts.lift && opts.lift.count > 0 ? opts.lift : null;
+  const fin = finishFlame({ rawCost: plan.total + testingSubtotal, baseFee: C.baseFee, margin: C.margin, priceOverride: opts.priceOverride, liftCost: liftCostOf(lift) });
+  return Object.assign({ type: "flame", rates: C, perVenue, testingSubtotal, curtainsTotal, unitsLabel: plural(curtainsTotal, "curtain"), trip: drive, travel: plan, lift }, fin);
+}
+function computeInspection(opts, C, travelRates) {
+  const venues = opts.venues || [], level = opts.level === 2 ? 2 : 1, levelMult = level === 2 ? C.level2Mult || 1 : 1;
+  const lineSetsTotal = venues.reduce((a, v) => a + Math.max(0, Number(v.lineSets) || 0), 0);
+  const inspectHoursRaw = C.baseHours + (lineSetsTotal * C.lineSetMinutes) / 60, inspectHours = Math.round(inspectHoursRaw * levelMult * 10) / 10, laborCost = inspectHours * C.laborRate;
+  const drive = tripTravel(venues, C);
+  const plan = planTravel({ drive, onSiteHours: inspectHours, laborRate: C.laborRate, crewDefault: C.flyCrew ?? 1, rates: travelRates, override: opts.travel });
+  const lift = opts.lift && opts.lift.count > 0 ? opts.lift : null;
+  const fin = finishInspection({ cost: laborCost + plan.total, minFee: C.minFee, margin: C.margin, priceOverride: opts.priceOverride, liftCost: liftCostOf(lift) });
+  return Object.assign({ type: "inspection", rates: C, level, levelMult, lineSetsTotal, inspectHoursRaw, inspectHours, laborCost, unitsLabel: plural(lineSetsTotal, "line set"), trip: drive, travel: plan, lift }, fin);
+}
+/* The letters' travel line in fly mode: travel's proportional share of the total; the service line absorbs rounding. */
+function travelLineShare(flightTotal, total, cost) { total = Math.max(0, Math.round(total || 0)); const share = cost > 0 ? Math.round((flightTotal * total) / cost) : Math.round(flightTotal); const travel = Math.max(0, Math.min(total, share)); return { travel, rest: total - travel }; }
+function typedPriceWarning(total, cost, markup) {
+  if (total < cost) return `Below cost — ${$(total)} is ${$(cost - total)} under the ${$(cost)} cost.`;
+  if (cost > 0 && markup < LOW_MARKUP_WARN) return `Low markup — ${pct(markup)}% at this total, under ${Math.round(LOW_MARKUP_WARN * 100)}%.`;
+  return null;
+}
+/** Price a quote. Drafts use today's rates; a sent/won/lost quote uses the rates frozen when it was sent. */
+function priceQuote(q) {
+  const R = q.ratesSnapshot || S.rates, base = q.type === "flame" ? R.flame : R.inspection;
+  const C = Object.assign({}, base, { margin: q.margin != null ? q.margin : base.margin });
+  const opts = { venues: q.venues, level: q.level, travel: q.travel, priceOverride: q.priceOverride, lift: normalizeLift(q.lift, R.liftRate) };
+  return q.type === "flame" ? computeFlame(opts, C, R.travel) : computeInspection(opts, C, R.travel);
+}
+
+/* =====================================================================
+ * 4. RECORDS — quotes, flame jobs, inspections, renewals
+ * ===================================================================== */
+const todayIso = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function parseISO(s) { if (!s) return null; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
+const msOf = s => { const d = parseISO(s); return d ? d.getTime() : null; };
+const fmtLong = v => { const d = typeof v === "number" ? new Date(v) : parseISO(v); return d ? MONTHS[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear() : "—"; };
+const fmtShort = v => { const d = typeof v === "number" ? new Date(v) : parseISO(v); return d ? MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate() + ", " + d.getFullYear() : "—"; };
+const fmtMonthYear = ts => { const d = new Date(ts); return MONTHS[d.getMonth()] + " " + d.getFullYear(); };
+const cust = id => S.customers.find(c => c.id === id);
+const quote = id => S.quotes.find(q => q.id === id);
+function newCustomer() { const c = { id: "C-" + nextNum("cu"), name: "New customer", contact: { name: "", email: "", phone: "" }, venues: [], notes: "", createdAt: Date.now() }; S.customers.push(c); return c; }
+function newVenue(c) { const v = { id: "V-" + nextNum("vn"), label: "Main stage", venueType: VENUE_TYPES[0], address: "", city: "", state: "", oneWayMiles: null, oneWayMin: null, curtains: null, lineSets: null }; c.venues.push(v); return v; }
+function quoteVenueFrom(v) { return { id: v.id, label: v.label, city: v.city, state: v.state, address: v.address, venueType: v.venueType, curtains: v.curtains || 0, lineSets: v.lineSets || 0, oneWayMiles: v.oneWayMiles || 0, oneWayMin: v.oneWayMin != null ? v.oneWayMin : Math.round(((v.oneWayMiles || 0) / (S.rates.travel.mph || 50)) * 60), testingOverride: "" }; }
+function newQuote(type, customerId, level) {
+  const c = cust(customerId), n = nextNum("est");
+  const q = { id: "Q-" + nextNum("q"), number: (type === "flame" ? "FLM-" : "RIG-") + n, type, level: type === "inspection" ? (level || 1) : null, customerId: c ? c.id : null, customer: c ? c.name : "",
+    contact: c ? Object.assign({}, c.contact) : { name: "", email: "", phone: "" }, venues: c ? c.venues.map(quoteVenueFrom) : [], travel: { mode: "auto", crew: "", nights: "", airfarePerPerson: "" },
+    lift: { count: "", rate: "" }, margin: null, priceOverride: "", status: "draft", value: 0, notes: "", renewalOf: null, priorValue: null, ratesSnapshot: null, createdAt: Date.now(), updatedAt: Date.now(), sentAt: null, decidedAt: null };
+  S.quotes.push(q); return q;
+}
+function setQuoteStatus(q, status) {
+  const p = priceQuote(q);
+  if (status === "draft") { q.ratesSnapshot = null; q.sentAt = null; q.decidedAt = null; }
+  else { if (!q.ratesSnapshot) q.ratesSnapshot = JSON.parse(JSON.stringify(S.rates)); q.value = p.total; if (!q.sentAt) q.sentAt = Date.now(); if (status !== "sent") q.decidedAt = Date.now(); }
+  q.status = status; q.updatedAt = Date.now();
+  if (status === "won") spawnFromQuote(q);
+}
+/** Accepted quote → work. Flame: ONE job for the whole quote. Inspection: one "requested" record PER venue. Never twice for one quote. */
+function spawnFromQuote(q) {
+  const p = priceQuote(q);
+  if (q.type === "flame") {
+    if (S.flameJobs.some(j => j.quoteId === q.id)) return;
+    S.flameJobs.push({ id: "FT-" + nextNum("ft"), quoteId: q.id, customer: q.customer, customerId: q.customerId, venue: (q.venues[0] || {}).label || "", value: p.total, curtainsTotal: p.curtainsTotal, contact: Object.assign({}, q.contact),
+      venues: q.venues.map(v => ({ id: v.id, label: v.label, city: v.city || "", state: v.state || "", curtains: Math.round(Number(v.curtains) || 0) })), stage: "approved", assignedTo: "", approvedAt: Date.now(), scheduledDate: "", completedAt: null, dueAt: null, results: null, renewalOutreach: null, createdAt: Date.now(), updatedAt: Date.now() });
+  } else {
+    if (S.inspections.some(r => r.quoteId === q.id)) return;
+    const tot = p.lineSetsTotal;
+    q.venues.forEach(v => { const share = tot > 0 ? (Number(v.lineSets) || 0) / tot : 1 / q.venues.length;
+      S.inspections.push(newInspection({ quoteId: q.id, level: q.level, lineSets: Number(v.lineSets) || 0, value: Math.round(p.total * share), customer: q.customer, customerId: q.customerId, locationId: v.id, venue: v.label, venueType: v.venueType || VENUE_TYPES[0],
+        address: [v.address, v.city, v.state].filter(Boolean).join(", "), contact: q.contact.name || "", contactPhone: q.contact.phone || "", contactEmail: q.contact.email || "", stage: "requested", requestedAt: Date.now() })); });
+  }
+}
+function blankRubric() { const out = []; RUBRIC_TEMPLATE.forEach((g, gi) => g.sections.forEach((s, si) => out.push({ key: gi + "-" + si, group: g.group, n: s.n, title: s.title, items: s.items.map((label, i) => ({ l: RUBRIC_LETTERS[i] || String(i + 1), label, rating: null })), comments: "", lineSet: "", photo: null }))); return out; }
+function newInspection(p) {
+  return Object.assign({ id: "RI-" + nextNum("ri"), quoteId: null, level: 1, lineSets: 0, value: 0, customer: "", customerId: null, locationId: null, venue: "", venueType: VENUE_TYPES[0], address: "", contact: "", contactPhone: "", contactEmail: "",
+    surveyDate: "", reportDate: "", inspector: "", condition: "fair", scope: "", narrative: "", logs: [], rubric: blankRubric(), venueInfo: {}, measurements: {}, priorInspectionId: null, priorSurveyDate: "",
+    stage: "requested", assignedTo: "", scheduledDate: "", requestedAt: 0, renewalOutreach: null, createdAt: Date.now(), updatedAt: Date.now() }, p);
+}
+function blankLog(p) { return Object.assign({ id: 0, seq: Date.now(), svid: String(30000 + Math.floor(Math.random() * 9999)), severity: "necessary", status: "open", problem: "", explanation: "", solution: "", workPerformed: "", location: "", standards: [], beforePhoto: null, afterPhoto: null, firstNoted: "", estHours: null, estCost: null }, p); }
+/** Findings are always numbered 1..n in severity order (urgent, necessary, basic), oldest first within a severity. */
+function renumber(rec) { rec.logs.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity] || (a.seq || 0) - (b.seq || 0)); rec.logs.forEach((l, i) => l.id = i + 1); }
+function logCounts(rec) { const c = { urgent: { open: 0, closed: 0 }, necessary: { open: 0, closed: 0 }, basic: { open: 0, closed: 0 }, open: 0, closed: 0, total: 0 }; (rec.logs || []).forEach(l => { const k = l.status === "closed" ? "closed" : "open"; (c[l.severity] || c.necessary)[k]++; c[k]++; c.total++; }); return c; }
+/** One finding per rubric section for every un-logged item of the given rating. Poor → Urgent, Fair → Necessary. */
+function findingsFromRubricRating(rec, rating) {
+  const covered = {}; rec.logs.forEach(l => (l.rubricRefs || []).forEach(r => covered[r.key + ":" + r.idx] = true));
+  let made = 0;
+  rec.rubric.forEach(s => { const refs = []; s.items.forEach((it, idx) => { if (it.rating === rating && !covered[s.key + ":" + idx]) refs.push({ key: s.key, idx, label: it.label, rating, section: s.title }); });
+    if (!refs.length) return; const cmt = (s.comments || "").trim();
+    rec.logs.push(blankLog({ seq: Date.now() + made, severity: rating === "poor" ? "urgent" : "necessary", problem: s.title + (refs.length === 1 ? " — " + refs[0].label.toLowerCase() : ""),
+      explanation: "Rated " + (rating === "poor" ? "Poor" : "Fair") + " during the component condition walkthrough. Affected: " + refs.map(r => r.label.toLowerCase()).join(", ") + (cmt ? " — " + cmt : "") + ".",
+      location: (s.lineSet || "").trim() ? "Line set " + s.lineSet : s.title, rubricRefs: refs })); made++; });
+  renumber(rec); return made;
+}
+/** Re-inspection: a new record carrying every OPEN finding forward (still open, first-noted date kept). */
+function carryForward(prior) {
+  const logs = prior.logs.filter(l => l.status === "open").map(l => blankLog({ severity: l.severity, problem: l.problem, explanation: l.explanation, solution: l.solution, location: l.location, standards: (l.standards || []).slice(), firstNoted: l.firstNoted || prior.surveyDate || "", seq: l.seq, carried: true }));
+  const r = newInspection({ level: prior.level, lineSets: prior.lineSets, customer: prior.customer, customerId: prior.customerId, locationId: prior.locationId, venue: prior.venue, venueType: prior.venueType, address: prior.address, contact: prior.contact, contactPhone: prior.contactPhone, contactEmail: prior.contactEmail,
+    condition: prior.condition, scope: prior.scope, venueInfo: Object.assign({}, prior.venueInfo), measurements: Object.assign({}, prior.measurements), logs, priorInspectionId: prior.id, priorSurveyDate: prior.surveyDate || "", stage: "scheduled" });
+  renumber(r); S.inspections.push(r); return r;
+}
+const inspCompletedAt = r => r.stage !== "completed" ? null : (msOf(r.surveyDate) ?? msOf(r.reportDate) ?? r.updatedAt ?? null);
+const inspDueAt = r => { const at = inspCompletedAt(r); return at == null ? null : at + levelMeta(r.level).years * YEAR; };
+function renewalStatus(due) {
+  if (due == null) return { state: "none", days: 0, dueAt: null };
+  const diff = due - Date.now();
+  if (diff < 0) return { state: "overdue", days: Math.round(-diff / DAY), dueAt: due };
+  if (diff <= RENEWAL_LEAD_DAYS * DAY) return { state: "due_soon", days: Math.round(diff / DAY), dueAt: due };
+  if (diff <= 120 * DAY) return { state: "upcoming", days: Math.round(diff / DAY), dueAt: due };
+  return { state: "ok", days: Math.round(diff / DAY), dueAt: due };
+}
+const RENEWAL_PILL = { overdue: ["Overdue", "red"], due_soon: ["Due soon", "amb"], upcoming: ["Upcoming", "blu"], ok: ["On schedule", "grn"], none: ["—", ""] };
+function dueLabel(r) { if (r.state === "overdue") return r.days === 0 ? "due today" : r.days + " day" + (r.days === 1 ? "" : "s") + " overdue"; if (r.state === "due_soon" || r.state === "upcoming") return r.days === 0 ? "due today" : "due in " + r.days + " day" + (r.days === 1 ? "" : "s"); return "on schedule"; }
+/** Latest completed flame job per customer + venue; latest completed inspection per customer + venue + LEVEL. Soonest due first. */
+function flameRenewals() { const m = {}; S.flameJobs.filter(j => j.stage === "completed").forEach(j => { const k = (j.customerId || j.customer) + "|" + j.venue; if (!m[k] || (j.completedAt || 0) > (m[k].completedAt || 0)) m[k] = j; }); return Object.values(m).map(j => ({ rec: j, r: renewalStatus(j.dueAt) })).sort((a, b) => (a.r.dueAt || 0) - (b.r.dueAt || 0)); }
+function inspRenewals() { const m = {}; S.inspections.filter(r => r.stage === "completed").forEach(r => { const k = (r.customerId || r.customer) + "|" + (r.locationId || r.venue) + "|" + r.level; if (!m[k] || (inspCompletedAt(r) || 0) > (inspCompletedAt(m[k]) || 0)) m[k] = r; }); return Object.values(m).map(r => ({ rec: r, r: renewalStatus(inspDueAt(r)) })).sort((a, b) => (a.r.dueAt || 0) - (b.r.dueAt || 0)); }
+/** Renewal quote: last year's scope at TODAY's rates. Travel choice (mode, crew, nights) carries; a typed airfare, typed total and typed lift rate do not. */
+function renewalQuote(kind, rec) {
+  const prior = rec.quoteId ? quote(rec.quoteId) : null, c = cust(rec.customerId);
+  const q = newQuote(kind, rec.customerId, rec.level); q.customer = rec.customer; q.renewalOf = rec.id; q.priorValue = prior ? prior.value : (rec.value || null);
+  if (!c && kind === "flame") q.contact = Object.assign({ name: "", email: "", phone: "" }, rec.contact);
+  if (kind === "flame") { const src = prior ? prior.venues : rec.venues; q.venues = src.map(v => Object.assign(quoteVenueFrom(Object.assign({}, (c && c.venues.find(x => x.id === v.id)) || {}, v)), { curtains: v.curtains })); }
+  else { const v = (c && c.venues.find(x => x.id === rec.locationId)) || { id: rec.locationId, label: rec.venue }; q.venues = [Object.assign(quoteVenueFrom(v), { label: rec.venue, lineSets: rec.lineSets || v.lineSets || 0 })]; }
+  if (prior) { const t = normalizeTravelOverride(prior.travel) || {}; q.travel = { mode: t.mode || "auto", crew: t.crew ?? "", nights: t.nights ?? "", airfarePerPerson: "" }; const l = normalizeLift(prior.lift, S.rates.liftRate); if (l) q.lift = { count: kind === "inspection" && prior.venues.length > 1 ? 1 : l.count, rate: "" }; q.priorMode = priceQuote(prior).travel.mode; }
+  return q;
+}
+function renewalEmail(q) {
+  const p = priceQuote(q), flame = q.type === "flame", t = flame ? "flame_renewal_email" : "inspection_renewal_email";
+  const rec = flame ? S.flameJobs.find(j => j.id === q.renewalOf) : S.inspections.find(r => r.id === q.renewalOf);
+  let para = "I've attached this year's quote — " + $(p.total);
+  if (q.priorValue) para += p.total === q.priorValue ? ", unchanged from last year." : ", compared with " + $(q.priorValue) + " last year.";
+  else para += ".";
+  if (q.priorValue && q.priorMode && q.priorMode !== p.travel.mode) para += " The " + (p.total > q.priorValue ? "increase" : "change") + " reflects " + (p.travel.mode === "fly" ? "travel now being priced as flights, lodging & per diem instead of a drive" : "travel now being priced as a drive instead of flights") + ".";
+  para += " If it looks good, just reply here and we'll get this year's inspection on the schedule.";
+  const last = rec && rec.completedAt ? "was last performed in " + fmtMonthYear(rec.completedAt) : "is on our renewal list";
+  const vars = { contactFirstName: (q.contact.name || "").trim().split(/\s+/)[0] || "there", customer: q.customer, venueSuffix: q.venues.length === 1 && q.venues[0].label ? " (" + q.venues[0].label + ")" : "", lastPerformedClause: last,
+    priceParagraph: para, senderFirstName: (S.company.signerName || "").split(/\s+/)[0] || "", company: S.company.name, levelLabel: levelMeta(q.level).label, cadenceShort: q.level === 2 ? "five-year Level 2" : "annual Level 1" };
+  return { subject: W(t, "subject", vars), body: W(t, "body", vars) };
+}
+
+/* =====================================================================
+ * 5. UI PLUMBING — tiny render loop: views return HTML; A[] holds click
+ *    handlers and B[] holds field bindings for the current render.
+ * ===================================================================== */
+let A = [], B = [], F = [], UI = { tab: {}, lib: "" };
+const h = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = n => "$" + Math.round(n || 0).toLocaleString("en-US");
+const $c = n => "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = m => (Math.round((Number.isFinite(m) ? m : 0) * 1000) / 10).toLocaleString("en-US", { maximumFractionDigits: 1 });
+const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+const act = fn => { A.push(fn); return 'data-a="' + (A.length - 1) + '"'; };
+function bind(obj, key, o) { B.push(Object.assign({ obj, key }, o || {})); return 'data-b="' + (B.length - 1) + '"'; }
+function inp(obj, key, o) { o = o || {}; const v = obj[key]; return `<input ${bind(obj, key, o)} type="${o.type || (o.num ? "number" : "text")}" class="${o.cls || (o.num ? "n" : "w")}" value="${h(v == null ? "" : v)}" placeholder="${h(o.ph || "")}" ${o.step ? 'step="' + o.step + '"' : ""} ${o.min != null ? 'min="' + o.min + '"' : ""} ${o.dis ? "disabled" : ""}>`; }
+function sel(obj, key, opts, o) { o = o || {}; return `<select ${bind(obj, key, Object.assign({ rr: true }, o))} ${o.dis ? "disabled" : ""}>` + opts.map(x => { const [v, l] = Array.isArray(x) ? x : [x, x]; return `<option value="${h(v)}" ${String(obj[key] ?? "") === String(v) ? "selected" : ""}>${h(l)}</option>`; }).join("") + "</select>"; }
+function ta(obj, key, rows, o) { o = o || {}; return `<textarea ${bind(obj, key, o)} rows="${rows || 3}" ${o.dis ? "disabled" : ""} placeholder="${h(o.ph || "")}">${h(obj[key] || "")}</textarea>`; }
+const fld = (label, html) => `<label class="f"><span>${h(label)}</span>${html}</label>`;
+const pill = (t, cls) => `<span class="pill ${cls || ""}">${h(t)}</span>`;
+const stagePill = (list, k) => { const s = list.find(x => x[0] === k) || list[0]; return pill(s[1].split(" — ")[0], s[2]); };
+const STATUS_PILL = { draft: ["Draft", ""], sent: ["Sent", "blu"], won: ["Won", "grn"], lost: ["Lost", "red"] };
+function photo(obj, key) { F.push({ obj, key }); const i = F.length - 1; return (obj[key] ? `<img class="ph" src="${obj[key]}" alt=""> <button class="s d noprint" ${act(() => { obj[key] = null; save(); render(); })}>Remove photo</button>` : `<input class="noprint" type="file" accept="image/*" data-f="${i}">`); }
+function W(tpl, field, vars) { const t = (S.wording[tpl] || {})[field] ?? TEMPLATES[tpl].fields[field]; return (t || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, k) => vars && vars[k] != null ? String(vars[k]) : ""); }
+function go(p) { location.hash = "#/" + p; }
+function later() { setTimeout(() => { const el = document.activeElement, kb = el && el.dataset ? el.dataset.b : null, ka = el && el.dataset ? el.dataset.a : null, y = window.scrollY; render(); window.scrollTo(0, y);
+  const t = kb != null ? document.querySelector('[data-b="' + kb + '"]') : ka != null ? document.querySelector('[data-a="' + ka + '"]') : null; if (t) { t.focus(); if (t.select && t.type !== "date") try { t.select(); } catch (e) {} } }, 0); }
+document.addEventListener("click", e => { const el = e.target.closest("[data-a]"); if (!el || el.disabled) return; const fn = A[+el.dataset.a]; if (fn) { e.preventDefault(); fn(e); } });
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.dataset && el.dataset.f != null) { const f = F[+el.dataset.f], file = el.files[0]; if (f && file) shrink(file).then(d => { f.obj[f.key] = d; save(); render(); }); return; }
+  if (!el.dataset || el.dataset.b == null) return; const b = B[+el.dataset.b]; if (!b) return;
+  let v = el.type === "checkbox" ? el.checked : el.value;
+  if (b.num) { v = v === "" ? (b.blank !== undefined ? b.blank : null) : Number(v); if (Number.isNaN(v)) v = b.blank !== undefined ? b.blank : null; if (b.scale && v != null) v = v / b.scale; }
+  b.obj[b.key] = v; if (b.after) b.after(v); if (b.touch) b.touch.updatedAt = Date.now(); save(); if (b.num || b.rr || el.type === "checkbox") later();
+});
+window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+/** Photos are shrunk to at most 1,400 px JPEG before they are stored, so backups stay small. */
+function shrink(file) { return new Promise(res => { const r = new FileReader(); r.onload = () => { const img = new Image(); img.onload = () => { const k = Math.min(1, 1400 / Math.max(img.width, img.height)), c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL("image/jpeg", 0.78)); }; img.onerror = () => res(null); img.src = r.result; }; r.readAsDataURL(file); }); }
+const NAV = [["home", "Home"], ["customers", "Customers & venues"], ["quotes", "Quotes"], ["flame", "Flame tests"], ["insp", "Inspections"], ["renewals", "Renewals"], ["rates", "Rates"], ["rules", "How pricing works"], ["wording", "Wording"], ["backup", "Backup"]];
+function render() {
+  A = []; B = []; F = [];
+  const parts = (location.hash.replace(/^#\/?/, "") || "home").split("/"), top = parts[0];
+  const navKey = top === "quote" ? "quotes" : top === "doc" ? (parts[1] === "quote" ? "quotes" : parts[1]) : top;
+  document.getElementById("nav").innerHTML = NAV.map(n => `<a href="#/${n[0]}" class="${n[0] === navKey ? "on" : ""}">${n[1]}</a>`).join("");
+  const V = { home: vHome, customers: vCustomers, quotes: vQuotes, quote: vQuote, flame: vFlame, insp: vInsp, renewals: vRenewals, rates: vRates, rules: vRules, wording: vWording, backup: vBackup, doc: vDoc };
+  let html; try { html = (V[top] || vHome)(parts.slice(1)); } catch (err) { console.error(err); html = `<div class="note red">Something went wrong drawing this screen: ${h(err.message)}. Your data is safe; go to Backup and export a copy.</div>`; }
+  document.getElementById("app").innerHTML = html;
+}
+
+/* =====================================================================
+ * 6. SCREENS
+ * ===================================================================== */
+function vHome() {
+  const open = S.quotes.filter(q => q.status === "draft" || q.status === "sent"), fr = flameRenewals(), ir = inspRenewals(), due = [...fr, ...ir].filter(x => x.r.state === "overdue" || x.r.state === "due_soon");
+  const stale = Date.now() - (S.lastExportAt || 0) > 7 * DAY && (S.quotes.length || S.customers.length);
+  return `<h1>Flame Tests & Rigging Inspections</h1><p class="sub">Everything saves in this browser on this computer. Export a backup file regularly.</p>
+  ${stale ? `<div class="note">No backup file in the last 7 days. <a href="#/backup">Export one now</a>.</div>` : ""}
+  ${!S.customers.length ? `<div class="note blu">Start by adding a customer and its venues, or load sample data from the <a href="#/backup">Backup</a> tab to look around.</div>` : ""}
+  <div class="kpis">
+    <div class="kpi"><b>${open.length}</b><span>open quotes · ${$(open.reduce((a, q) => a + priceQuote(q).total, 0))}</span></div>
+    <div class="kpi"><b>${S.flameJobs.filter(j => j.stage === "approved").length}</b><span>flame tests to schedule</span></div>
+    <div class="kpi"><b>${S.flameJobs.filter(j => j.stage === "scheduled").length}</b><span>flame tests scheduled</span></div>
+    <div class="kpi"><b>${S.inspections.filter(r => r.stage !== "completed").length}</b><span>inspections in progress</span></div>
+    <div class="kpi"><b>${due.filter(x => x.r.state === "overdue").length}</b><span>renewals overdue</span></div>
+    <div class="kpi"><b>${due.filter(x => x.r.state === "due_soon").length}</b><span>renewals due within 60 days</span></div>
+  </div>
+  <div class="row"><div class="card grow"><h2>Upcoming work</h2>${upcomingTable()}</div>
+  <div class="card grow"><h2>Renewals needing contact</h2>${due.length ? `<table>${due.slice(0, 10).map(x => `<tr class="click" ${act(() => go("renewals"))}><td>${h(x.rec.customer)}<br><span class="mut">${h(x.rec.venue)}</span></td><td>${x.rec.level ? "Inspection L" + x.rec.level : "Flame test"}</td><td>${pill(RENEWAL_PILL[x.r.state][0], RENEWAL_PILL[x.r.state][1])}<br><span class="mut">${dueLabel(x.r)}</span></td></tr>`).join("")}</table>` : `<p class="mut">Nothing overdue or due soon.</p>`}</div></div>`;
+}
+function upcomingTable() {
+  const rows = [...S.flameJobs.filter(j => j.stage === "scheduled").map(j => ({ d: j.scheduledDate, t: "Flame test", c: j.customer, v: j.venue, who: j.assignedTo, go: "flame/" + j.id })),
+    ...S.inspections.filter(r => r.stage === "scheduled" || r.stage === "onsite").map(r => ({ d: r.scheduledDate, t: "Inspection L" + r.level, c: r.customer, v: r.venue, who: r.assignedTo, go: "insp/" + r.id }))].sort((a, b) => (a.d || "9").localeCompare(b.d || "9"));
+  return rows.length ? `<table><tr><th>Date</th><th>Job</th><th>Customer</th><th>Tech</th></tr>${rows.map(r => `<tr class="click" ${act(() => go(r.go))}><td>${fmtShort(r.d)}</td><td>${r.t}</td><td>${h(r.c)}<br><span class="mut">${h(r.v)}</span></td><td>${h(r.who || "—")}</td></tr>`).join("")}</table>` : `<p class="mut">Nothing scheduled.</p>`;
+}
+function vCustomers(p) {
+  const c = p[0] ? cust(p[0]) : null;
+  if (!c) return `<div class="bar"><h1 style="flex:1">Customers & venues</h1><button class="p" ${act(() => { const n = newCustomer(); newVenue(n); save(); go("customers/" + n.id); })}>+ New customer</button></div>
+    <div class="card">${S.customers.length ? `<table><tr><th>Customer</th><th>Contact</th><th>Venues</th><th class="num">Quotes</th></tr>${S.customers.map(x => `<tr class="click" ${act(() => go("customers/" + x.id))}><td><b>${h(x.name)}</b></td><td>${h(x.contact.name)}<br><span class="mut">${h(x.contact.email)}</span></td><td>${x.venues.map(v => h(v.label)).join(", ")}</td><td class="num">${S.quotes.filter(q => q.customerId === x.id).length}</td></tr>`).join("")}</table>` : `<p class="mut">No customers yet.</p>`}</div>`;
+  const used = S.quotes.some(q => q.customerId === c.id) || S.flameJobs.some(j => j.customerId === c.id) || S.inspections.some(r => r.customerId === c.id);
+  return `<div class="bar"><a class="btn" href="#/customers">← All customers</a><span style="flex:1"></span>
+    <button class="p" ${act(() => { const q = newQuote("flame", c.id); save(); go("quote/" + q.id); })}>+ Flame-test quote</button>
+    <button class="p" ${act(() => { const q = newQuote("inspection", c.id, 1); save(); go("quote/" + q.id); })}>+ Inspection quote</button>
+    <button ${act(() => { c.venues.forEach(v => S.inspections.push(newInspection({ customer: c.name, customerId: c.id, locationId: v.id, venue: v.label, venueType: v.venueType, lineSets: v.lineSets || 0, address: [v.address, v.city, v.state].filter(Boolean).join(", "), contact: c.contact.name, contactPhone: c.contact.phone, contactEmail: c.contact.email, requestedAt: Date.now() }))); save(); go("insp"); })}>+ Inspection without a quote</button>
+    <button class="d" ${used ? "disabled title='Has quotes or jobs'" : ""} ${act(() => { if (confirm("Delete this customer?")) { S.customers = S.customers.filter(x => x !== c); save(); go("customers"); } })}>Delete</button></div>
+  <div class="card"><div class="grid2">${fld("Customer name", inp(c, "name", { rr: true }))}${fld("Contact name", inp(c.contact, "name"))}${fld("Contact email", inp(c.contact, "email"))}${fld("Contact phone", inp(c.contact, "phone"))}</div>${fld("Notes", ta(c, "notes", 2))}</div>
+  <div class="card"><h2>Venues</h2><p class="sub">Miles and minutes are one way from the office. Leave minutes blank to use ${S.rates.travel.mph} mph. Curtain and line-set counts pre-fill new quotes.</p>
+  <table><tr><th>Venue</th><th>Type</th><th>Address</th><th>City</th><th>St</th><th class="num">Miles</th><th class="num">Minutes</th><th class="num">Curtains</th><th class="num">Line sets</th><th></th></tr>
+  ${c.venues.map(v => `<tr><td>${inp(v, "label")}</td><td>${sel(v, "venueType", VENUE_TYPES, { rr: false })}</td><td>${inp(v, "address")}</td><td>${inp(v, "city")}</td><td>${inp(v, "state", { cls: "n" })}</td><td class="num">${inp(v, "oneWayMiles", { num: true, min: 0 })}</td><td class="num">${inp(v, "oneWayMin", { num: true, min: 0, ph: v.oneWayMiles ? Math.round(v.oneWayMiles / S.rates.travel.mph * 60) : "" })}</td><td class="num">${inp(v, "curtains", { num: true, min: 0 })}</td><td class="num">${inp(v, "lineSets", { num: true, min: 0 })}</td><td><button class="s d" ${act(() => { if (confirm("Remove this venue?")) { c.venues = c.venues.filter(x => x !== v); save(); render(); } })}>✕</button></td></tr>`).join("")}</table>
+  <p><button ${act(() => { newVenue(c); save(); render(); })}>+ Add venue</button></p></div>
+  <div class="card"><h2>History</h2>${quotesTable(S.quotes.filter(q => q.customerId === c.id))}</div>`;
+}
+function quotesTable(list) {
+  if (!list.length) return `<p class="mut">No quotes.</p>`;
+  return `<table><tr><th>Number</th><th>Type</th><th>Customer</th><th>Venues</th><th>Status</th><th class="num">Total</th><th>Updated</th></tr>${list.slice().sort((a, b) => b.updatedAt - a.updatedAt).map(q => { const p = priceQuote(q); return `<tr class="click" ${act(() => go("quote/" + q.id))}><td><b>${h(q.number)}</b>${q.renewalOf ? " " + pill("Renewal", "pur") : ""}</td><td>${q.type === "flame" ? "Flame test" : "Inspection L" + q.level}</td><td>${h(q.customer)}</td><td>${q.venues.map(v => h(v.label)).join(", ")}</td><td>${pill(...STATUS_PILL[q.status])}</td><td class="num">${$(p.total)}</td><td>${fmtShort(q.updatedAt)}</td></tr>`; }).join("")}</table>`;
+}
+function vQuotes() {
+  const f = UI.qf || "open", list = S.quotes.filter(q => f === "all" ? true : f === "open" ? (q.status === "draft" || q.status === "sent") : q.status === f);
+  return `<div class="bar"><h1 style="flex:1">Quotes</h1><span class="mut">New quotes start from a customer:</span><a class="btn" href="#/customers">Customers & venues →</a></div>
+  <div class="tabs">${[["open", "Open"], ["won", "Won"], ["lost", "Lost"], ["all", "All"]].map(t => `<button class="${f === t[0] ? "on" : ""}" ${act(() => { UI.qf = t[0]; render(); })}>${t[1]}</button>`).join("")}</div><div class="card">${quotesTable(list)}</div>`;
+}
+function vQuote(p) {
+  const q = quote(p[0]); if (!q) return `<p>Quote not found. <a href="#/quotes">Back to quotes</a></p>`;
+  const P = priceQuote(q), lock = q.status !== "draft", flame = q.type === "flame", c = cust(q.customerId), R = q.ratesSnapshot || S.rates, base = flame ? R.flame : R.inspection, t = { touch: q, dis: lock };
+  const missing = c ? c.venues.filter(v => !q.venues.some(x => x.id === v.id)) : [];
+  const mk = { obj: q, key: "margin" }; // markup shown as a percent
+  const mkPct = Math.round((q.margin != null ? q.margin : base.margin) * 100);
+  const warn = P.overridden ? typedPriceWarning(P.total, P.cost, P.effectiveMarkup) : null;
+  const fl = P.travel.flight;
+  return `<div class="bar"><a class="btn" href="#/quotes">← Quotes</a><h1 style="flex:1;margin:0">${h(q.number)} · ${flame ? "Flame test" : "Rigging inspection"} ${pill(...STATUS_PILL[q.status])}${q.renewalOf ? " " + pill("Renewal of " + q.renewalOf, "pur") : ""}</h1>
+    <a class="btn" href="#/doc/quote/${q.id}">Proposal letter</a>
+    ${q.status === "draft" ? `<button class="p" ${act(() => { if (!q.venues.length) return alert("Add at least one venue."); setQuoteStatus(q, "sent"); save(); render(); })}>Mark sent</button>` : ""}
+    ${q.status === "sent" ? `<button class="p" ${act(() => { setQuoteStatus(q, "won"); save(); go(flame ? "flame" : "insp"); })}>Mark won</button><button ${act(() => { setQuoteStatus(q, "lost"); save(); render(); })}>Mark lost</button>` : ""}
+    ${lock && q.status !== "won" ? `<button ${act(() => { if (confirm("Reopen as a draft? It will re-price at today's rates.")) { setQuoteStatus(q, "draft"); save(); render(); } })}>Revise</button>` : ""}
+    ${q.status !== "won" ? `<button class="d" ${act(() => { if (confirm("Delete this quote?")) { S.quotes = S.quotes.filter(x => x !== q); save(); go("quotes"); } })}>Delete</button>` : ""}</div>
+  ${lock ? `<div class="note blu">This quote is ${q.status}. Its price is frozen at the rates in force when it was sent (${fmtShort(q.sentAt)}).${q.status !== "won" ? " Choose Revise to change it." : ""}</div>` : ""}
+  ${q.renewalOf ? renewalEmailCard(q) : ""}
+  <div class="row"><div class="grow">
+    <div class="card"><h2>Customer</h2><div class="grid2">${fld("Customer", inp(q, "customer", t))}${fld("Contact name", inp(q.contact, "name", t))}${fld("Contact email", inp(q.contact, "email", t))}${fld("Contact phone", inp(q.contact, "phone", t))}
+    ${!flame ? fld("Inspection level", sel(q, "level", LEVELS.map(l => [l.key, l.long]), Object.assign({ num: true }, t))) : ""}</div>${!flame ? `<p class="mut" style="margin:0">${h(levelMeta(q.level).blurb)}</p>` : ""}</div>
+    <div class="card"><h2>Venues on this trip</h2><p class="sub">Venues on one quote share one trip: travel is charged once, to the farthest venue and back.</p>
+    <table><tr><th>Venue</th><th class="num">${flame ? "Curtains" : "Line sets"}</th><th class="num">Miles one way</th><th class="num">Minutes one way</th>${flame ? `<th class="num">Testing cost</th>` : ""}<th></th></tr>
+    ${q.venues.map((v, i) => `<tr><td>${inp(v, "label", t)}</td><td class="num">${inp(v, flame ? "curtains" : "lineSets", Object.assign({ num: true, min: 0, blank: 0 }, t))}</td><td class="num">${inp(v, "oneWayMiles", Object.assign({ num: true, min: 0, blank: 0 }, t))}</td><td class="num">${inp(v, "oneWayMin", Object.assign({ num: true, min: 0, blank: 0 }, t))}</td>
+      ${flame ? `<td class="num">${inp(v, "testingOverride", Object.assign({ cls: "n", rr: true, ph: Math.round(P.perVenue[i].computedCost) }, t))}</td>` : ""}<td>${lock ? "" : `<button class="s d" ${act(() => { q.venues.splice(i, 1); save(); render(); })}>✕</button>`}</td></tr>`).join("")}</table>
+    ${!lock ? `<p>${missing.map(v => `<button class="s" ${act(() => { q.venues.push(quoteVenueFrom(v)); save(); render(); })}>+ ${h(v.label)}</button> `).join("")}<button class="s" ${act(() => { q.venues.push(quoteVenueFrom({ id: null, label: "Venue" })); save(); render(); })}>+ Blank venue</button></p>` : ""}
+    ${flame ? `<p class="mut" style="margin:0">Testing cost: leave blank to use the computed figure (shown in grey); type a dollar amount to replace it for that venue.</p>` : ""}</div>
+    <div class="card"><h2>Travel</h2><div class="grid2">${fld("How the crew travels", sel(q.travel, "mode", [["auto", "Auto (drive unless over " + $(P.travel.threshold) + ")"], ["drive", "Drive"], ["fly", "Fly"]], t))}
+      ${P.travel.mode === "fly" ? fld("Crew", inp(q.travel, "crew", Object.assign({ num: true, min: 1, blank: "", ph: P.travel.defaults.crew }, t))) + fld("Nights", inp(q.travel, "nights", Object.assign({ num: true, min: 0, blank: "", ph: P.travel.defaults.nights }, t))) + fld("Airfare per person", inp(q.travel, "airfarePerPerson", Object.assign({ num: true, min: 0, blank: "", ph: P.travel.defaults.airfarePerPerson }, t))) : ""}</div>
+      ${P.travel.choice === "auto" && P.travel.mode === "fly" ? `<div class="note">Drive would be ${$(P.travel.driveTotal)} — over the ${$(P.travel.threshold)} threshold, priced as flights.</div>` : ""}</div>
+    <div class="card"><h2>Lift rental, markup and total</h2><div class="grid2">
+      ${fld("Lift rentals (count)", inp(q.lift, "count", Object.assign({ num: true, min: 0, blank: "" }, t)))}${fld("Lift rate each", inp(q.lift, "rate", Object.assign({ num: true, min: 0, blank: "", ph: R.liftRate }, t)))}
+      ${fld("Markup % on cost", `<input type="number" class="n" min="0" max="150" value="${mkPct}" ${lock ? "disabled" : ""} ${bind(q, "margin", { num: true, scale: 100, touch: q })}> <span class="mut">default ${Math.round(base.margin * 100)}%</span>`)}
+      ${fld("Typed total (optional)", inp(q, "priceOverride", Object.assign({ cls: "n", rr: true, ph: P.autoTotal }, t)))}</div>
+      <p class="mut" style="margin:0">A typed total replaces the automatic one exactly; the markup is then worked backwards from it.</p>${fld("Internal notes", ta(q, "notes", 2))}</div>
+  </div>
+  <div class="side"><div class="card"><h2>Price</h2>
+    ${flame ? P.perVenue.map(v => `<div class="pl"><span>${h(v.label)}<br><small>${plural(v.curtains, "curtain")} × ${base.curtainMinutes} min${v.testingOverride != null ? " · typed" : ""}</small></span><span>${$c(v.laborCost)}</span></div>`).join("") : `<div class="pl"><span>Inspection labor<br><small>${base.baseHours} h base + ${P.lineSetsTotal} × ${base.lineSetMinutes} min${P.level === 2 ? " × " + P.levelMult + " (Level 2)" : ""} = ${P.inspectHours} h</small></span><span>${$c(P.laborCost)}</span></div>`}
+    ${fl ? `<div class="pl"><span>Travel by air<br><small>${fl.crew} crew · ${plural(fl.nights, "night")} · ${plural(fl.tripDays, "trip day")}<br>air ${$(fl.airfare)} · hotel ${$(fl.lodging)} · per diem ${$(fl.perDiem)} · car ${$(fl.car)} · travel time ${$(fl.travelLabor)}</small></span><span>${$c(fl.total)}</span></div>`
+      : `<div class="pl"><span>Travel by road<br><small>${P.trip.miles} mi round trip · ${P.trip.minutesRaw} min → billed ${P.trip.minutes} min<br>mileage ${$c(P.trip.mileageCost)} · time ${$c(P.trip.timeCost)}</small></span><span>${$c(P.trip.total)}</span></div>`}
+    ${flame && P.baseApplied ? `<div class="pl"><span>Base minimum applies<br><small>raw cost ${$c(P.rawCost)} is under ${$(P.baseFee)}</small></span><span>${$c(P.baseFee)}</span></div>` : ""}
+    ${P.lift ? `<div class="pl"><span>Lift rental<br><small>${P.lift.count} × ${$(P.lift.rate)}</small></span><span>${$c(P.liftCost)}</span></div>` : ""}
+    <div class="pl" style="border-top:1px solid var(--line);margin-top:4px"><b>Cost</b><b>${$c(P.cost)}</b></div>
+    <div class="pl"><span>Markup ${pct(P.margin)}%</span><span>${$c(sellAtMarkup(P.cost, P.margin) - P.cost)}</span></div>
+    ${!flame && P.minApplied ? `<div class="pl"><span>Minimum fee applies<br><small>marked-up price ${$c(P.sellRaw)} is under ${$(P.minFee)}</small></span><span></span></div>` : ""}
+    <div class="pl"><span>Automatic total<br><small>${$c(P.totalRaw)} rounded ${(flame ? P.baseApplied : P.minApplied) ? "up " : ""}to $25</small></span><span>${$(P.autoTotal)}</span></div>
+    ${P.overridden ? `<div class="pl"><span>Typed total<br><small>works out to ${pct(P.effectiveMarkup)}% markup</small></span><span>${$(P.total)}</span></div>` : ""}
+    <div class="pl t"><span>Total</span><span>${$(P.total)}</span></div>
+    ${warn ? `<div class="note red">${h(warn)}</div>` : ""}
+    <p class="mut" style="margin:8px 0 0">Profit on this job: ${$(P.marginAmount)}${q.priorValue ? " · last year " + $(q.priorValue) : ""}</p></div></div></div>`;
+}
+function renewalEmailCard(q) { const e = renewalEmail(q); return `<div class="card"><h2>Renewal email (copy into your mail program and attach the proposal letter PDF)</h2>${fld("To", `<input class="w" readonly value="${h(q.contact.email || "")}">`)}${fld("Subject", `<input class="w" readonly value="${h(e.subject)}">`)}<textarea rows="9" readonly>${h(e.body)}</textarea></div>`; }
+const techOpts = cur => ["", ...new Set([...(S.company.techs || "").split(",").map(s => s.trim()).filter(Boolean), cur].filter(Boolean))].map(x => [x, x || "— choose —"]);
+function vFlame(p) {
+  const j = p[0] ? S.flameJobs.find(x => x.id === p[0]) : null;
+  if (!j) return `<h1>Flame tests</h1><p class="sub">A job appears here when its quote is marked won. NFPA 705 testing is annual: completing a job starts its one-year renewal clock.</p>${FLAME_STAGES.map(s => { const list = S.flameJobs.filter(x => x.stage === s[0]).sort((a, b) => (a.scheduledDate || "").localeCompare(b.scheduledDate || "")); return `<div class="card"><h2>${s[1]} (${list.length})</h2>${list.length ? `<table><tr><th>Job</th><th>Customer</th><th class="num">Curtains</th><th>${s[0] === "completed" ? "Tested" : "Date"}</th><th>Tech</th><th class="num">Value</th></tr>${list.map(x => `<tr class="click" ${act(() => go("flame/" + x.id))}><td><b>${x.id}</b></td><td>${h(x.customer)}<br><span class="mut">${x.venues.map(v => h(v.label)).join(", ")}</span></td><td class="num">${x.curtainsTotal}</td><td>${s[0] === "completed" ? fmtShort(x.completedAt) : fmtShort(x.scheduledDate)}</td><td>${h(x.assignedTo || "—")}</td><td class="num">${$(x.value)}</td></tr>`).join("")}</table>` : `<p class="mut">None.</p>`}</div>`; }).join("")}`;
+  if (!j.results) j.results = { overall: "pass", cert: "", performedBy: j.assignedTo || "", method: "NFPA 705 field flame test", notes: "", date: "", venues: j.venues.map(v => ({ id: v.id, label: v.label, tested: v.curtains, passed: v.curtains, failed: 0, retreated: 0, treatment: "", notes: "" })) };
+  const r = j.results, done = j.stage === "completed", t = { touch: j }, tot = flameTotals(j);
+  return `<div class="bar"><a class="btn" href="#/flame">← Flame tests</a><h1 style="flex:1;margin:0">${j.id} · ${h(j.customer)} ${stagePill(FLAME_STAGES, j.stage)}</h1>
+    ${j.quoteId ? `<a class="btn" href="#/quote/${j.quoteId}">Quote</a>` : ""}${done ? `<a class="btn" href="#/doc/flame/${j.id}/results">Results letter</a><a class="btn" href="#/doc/flame/${j.id}/summary">Summary letter</a><a class="btn" href="#/doc/flame/${j.id}/certificate">Certificate</a>` : ""}
+    <button class="d" ${act(() => { if (confirm("Delete this job? Its quote will not create another one.")) { S.flameJobs = S.flameJobs.filter(x => x !== j); save(); go("flame"); } })}>Delete</button></div>
+  <div class="row"><div class="card side"><h2>Schedule</h2>${fld("Date", inp(j, "scheduledDate", { type: "date", cls: "w", touch: j, dis: done }))}${fld("Technician", sel(j, "assignedTo", techOpts(j.assignedTo), { touch: j, dis: done }))}
+    ${j.stage === "approved" ? `<button class="p" ${act(() => { if (!j.scheduledDate) return alert("Pick a date."); j.stage = "scheduled"; j.updatedAt = Date.now(); save(); render(); })}>Schedule</button>` : ""}
+    ${j.stage === "scheduled" ? `<button ${act(() => { j.stage = "approved"; j.scheduledDate = ""; save(); render(); })}>Unschedule</button>` : ""}
+    <p class="mut">${plural(j.curtainsTotal, "curtain")} · ${$(j.value)}<br>${h((j.contact || {}).name || "")} ${h((j.contact || {}).phone || "")}</p>
+    ${done ? `<p>Tested ${fmtLong(j.completedAt)}<br>Next due <b>${fmtLong(j.dueAt)}</b></p><button ${act(() => { if (confirm("Reopen this job to correct its results?")) { j.stage = "scheduled"; j.completedAt = null; j.dueAt = null; save(); render(); } })}>Reopen</button>` : ""}</div>
+  <div class="card grow"><h2>Results</h2>
+    <table><tr><th>Venue</th><th class="num">Tested</th><th class="num">Passed</th><th class="num">IFR</th><th class="num">Failed</th><th>Treatment</th><th>Notes</th></tr>
+    ${r.venues.map(v => `<tr><td>${h(v.label)}</td>${["tested", "passed", "retreated", "failed"].map(k => `<td class="num">${inp(v, k, { num: true, min: 0, blank: 0, touch: j, dis: done })}</td>`).join("")}<td>${inp(v, "treatment", Object.assign({ dis: done }, t))}</td><td>${inp(v, "notes", Object.assign({ dis: done }, t))}</td></tr>`).join("")}</table>
+    ${tot.passed + tot.retreated + tot.failed !== tot.tested ? `<div class="note">Passed + IFR + Failed (${tot.passed + tot.retreated + tot.failed}) does not equal Tested (${tot.tested}).</div>` : ""}
+    <div class="grid2" style="margin-top:10px">${fld("Date performed", inp(r, "date", { type: "date", cls: "w", dis: done, ph: "" }))}${fld("Overall result", sel(r, "overall", [["pass", "Pass"], ["partial", "Partial"], ["fail", "Fail"]], { dis: done }))}${fld("Certificate number", inp(r, "cert", { dis: done, ph: "FT-" + new Date().getFullYear() + "-" + String(j.id).replace(/\D/g, "") }))}${fld("Performed by", inp(r, "performedBy", { dis: done }))}${fld("Method", inp(r, "method", { dis: done }))}</div>
+    ${fld("Notes", ta(r, "notes", 2, { dis: done }))}
+    ${!done ? `<button class="p" ${act(() => { const at = msOf(r.date) || Date.now(); if (!r.cert) r.cert = "FT-" + new Date(at).getFullYear() + "-" + String(j.id).replace(/\D/g, ""); r.overall = tot.failed > 0 ? (tot.passed + tot.retreated > 0 ? "partial" : "fail") : r.overall; j.stage = "completed"; j.completedAt = at; j.dueAt = at + YEAR; j.renewalOutreach = null; j.updatedAt = Date.now(); save(); render(); })}>Log results and complete</button> <span class="mut">Sets the next test due one year after the date performed.</span>` : ""}</div></div>`;
+}
+function flameTotals(j) { const t = { tested: 0, passed: 0, failed: 0, retreated: 0 }; ((j.results || {}).venues || []).forEach(v => { for (const k in t) t[k] += Number(v[k]) || 0; }); return t; }
+function vInsp(p) {
+  const r = p[0] ? S.inspections.find(x => x.id === p[0]) : null;
+  if (!r) return `<h1>Rigging inspections</h1><p class="sub">One record per venue. Level 1 renews every year, Level 2 every five years, counted from the inspection date.</p>${INSP_STAGES.map(s => { const list = S.inspections.filter(x => x.stage === s[0]); return `<div class="card"><h2>${s[1]} (${list.length})</h2>${list.length ? `<table><tr><th>Record</th><th>Customer</th><th>Level</th><th>Date</th><th>Inspector</th><th>Findings</th></tr>${list.map(x => { const c = logCounts(x); return `<tr class="click" ${act(() => go("insp/" + x.id))}><td><b>${x.id}</b></td><td>${h(x.customer)}<br><span class="mut">${h(x.venue)}</span></td><td>${pill("L" + x.level, x.level === 2 ? "pur" : "blu")}</td><td>${fmtShort(x.surveyDate || x.scheduledDate)}</td><td>${h(x.inspector || x.assignedTo || "—")}</td><td>${c.total ? `${pill(c.urgent.open + " urgent", "red")} ${pill(c.necessary.open + " necessary", "amb")} ${pill(c.basic.open + " basic", "blu")}` : `<span class="mut">—</span>`}</td></tr>`; }).join("")}</table>` : `<p class="mut">None.</p>`}</div>`; }).join("")}`;
+  const tab = UI.tab[r.id] || "details", t = { touch: r }, c = logCounts(r);
+  const setStage = s => { r.stage = s; r.updatedAt = Date.now(); save(); render(); };
+  let body = "";
+  if (tab === "details") body = `<div class="card"><div class="grid2">${fld("Customer", inp(r, "customer", t))}${fld("Venue", inp(r, "venue", t))}${fld("Venue type", sel(r, "venueType", VENUE_TYPES, { rr: false, touch: r }))}${fld("Address", inp(r, "address", t))}${fld("Contact", inp(r, "contact", t))}${fld("Contact phone", inp(r, "contactPhone", t))}${fld("Contact email", inp(r, "contactEmail", t))}
+    ${fld("Level", sel(r, "level", LEVELS.map(l => [l.key, l.long]), { num: true, touch: r }))}${fld("Line sets", inp(r, "lineSets", { num: true, min: 0, blank: 0, touch: r }))}${fld("Scheduled date", inp(r, "scheduledDate", { type: "date", cls: "w", touch: r }))}${fld("Assigned to", sel(r, "assignedTo", techOpts(r.assignedTo), { touch: r }))}
+    ${fld("Inspection date", inp(r, "surveyDate", { type: "date", cls: "w", touch: r }))}${fld("Report date", inp(r, "reportDate", { type: "date", cls: "w", touch: r }))}${fld("Inspector", inp(r, "inspector", t))}${fld("Overall venue condition", sel(r, "condition", CONDITIONS.map(x => [x[0], x[1]]), { touch: r }))}</div>
+    ${fld("Scope of this inspection", ta(r, "scope", 3, t))}${fld("Summary narrative (opens the report)", ta(r, "narrative", 5, t))}</div>`;
+  if (tab === "venue") body = `<div class="card"><h2>About the venue</h2><div class="grid2">${VENUE_FACTS.map(f => fld(f[1], inp(r.venueInfo, f[0], t))).join("")}</div><h3>Rigging system</h3><div class="grid2">${SYSTEM_FIELDS.map(f => fld(f[1], inp(r.venueInfo, f[0], t))).join("")}</div></div>
+    <div class="card"><h2>Stage measurements</h2>${MEASUREMENT_GROUPS.map(g => `<h3>${g.group}</h3><div class="grid2">${g.items.map(f => fld(f[1], inp(r.measurements, f[0], t))).join("")}</div>`).join("")}</div>`;
+  if (tab === "rubric") { const rated = r.rubric.reduce((a, s) => a + s.items.filter(i => i.rating).length, 0), all = r.rubric.reduce((a, s) => a + s.items.length, 0); let grp = "";
+    body = `<div class="card"><div class="bar"><b>${rated} of ${all} components rated</b><span style="flex:1"></span><button ${act(() => { const n = findingsFromRubricRating(r, "poor"); save(); alert(n ? n + " urgent finding(s) added." : "No un-logged Poor items."); render(); })}>Make findings from Poor items</button><button ${act(() => { const n = findingsFromRubricRating(r, "fair"); save(); alert(n ? n + " necessary finding(s) added." : "No un-logged Fair items."); render(); })}>Make findings from Fair items</button></div>
+    <p class="mut" style="margin:0">Rate every component. Poor items become Urgent findings and Fair items become Necessary findings, one finding per section; items already in a finding are skipped.</p></div>` +
+    r.rubric.map(s => { const head = s.group !== grp ? `<h3>${h(grp = s.group)}</h3>` : ""; return head + `<div class="card"><h2>${s.n}. ${h(s.title)}</h2><table>${s.items.map(it => `<tr><td style="width:28px" class="mut">${it.l}</td><td>${h(it.label)}</td><td style="text-align:right"><span class="rate">${RUBRIC_RATINGS.map(x => `<button class="${x[0]} ${it.rating === x[0] ? "on" : ""}" ${act(() => { it.rating = it.rating === x[0] ? null : x[0]; r.updatedAt = Date.now(); save(); later(); })}>${x[1]}</button>`).join("")}</span></td></tr>`).join("")}</table>
+      <div class="grid2" style="margin-top:8px">${fld("Line set(s)", inp(s, "lineSet", t))}${fld("Comments", inp(s, "comments", t))}</div>${photo(s, "photo")}</div>`; }).join(""); }
+  if (tab === "findings") { const cats = [...new Set(ISSUE_LIBRARY.map(i => i.cat))];
+    body = `<div class="card"><div class="bar"><button class="p" ${act(() => { r.logs.push(blankLog({})); renumber(r); save(); render(); })}>+ Blank finding</button>
+      <select ${bind(UI, "lib", { rr: true })}><option value="">Add from the issue library…</option>${cats.map(cat => `<optgroup label="${h(cat)}">${ISSUE_LIBRARY.map((it, i) => it.cat === cat ? `<option value="${i}">${h(sevMeta(it.severity).label + " · " + it.problem)}</option>` : "").join("")}</optgroup>`).join("")}</select>
+      <button ${UI.lib === "" ? "disabled" : ""} ${act(() => { const it = ISSUE_LIBRARY[+UI.lib]; r.logs.push(blankLog({ severity: it.severity, problem: it.problem, explanation: it.explanation, solution: it.solution, standards: it.standards.slice() })); UI.lib = ""; renumber(r); save(); render(); })}>Add</button>
+      <span style="flex:1"></span>${pill(c.urgent.open + " urgent open", "red")} ${pill(c.necessary.open + " necessary open", "amb")} ${pill(c.basic.open + " basic open", "blu")} ${pill(c.closed + " closed", "grn")}</div></div>` +
+    (r.logs.length ? r.logs.map(l => `<div class="log ${l.severity} ${l.status}"><div class="bar"><b>#${l.id}</b>${sel(l, "severity", SEVERITIES.map(s => [s.key, s.long]), { after: () => renumber(r), touch: r })}${sel(l, "status", [["open", "Open"], ["closed", "Closed"]], { touch: r })}${l.carried ? pill("Carried forward · first noted " + fmtShort(l.firstNoted), "pur") : ""}<span style="flex:1"></span><button class="s d" ${act(() => { if (confirm("Delete this finding?")) { r.logs = r.logs.filter(x => x !== l); renumber(r); save(); render(); } })}>Delete</button></div>
+      <div class="grid2">${fld("Problem", inp(l, "problem", t))}${fld("Location", inp(l, "location", t))}</div>${fld("Explanation", ta(l, "explanation", 3, t))}${fld("Recommended solution", ta(l, "solution", 2, t))}
+      ${l.status === "closed" ? fld("Work performed", ta(l, "workPerformed", 2, t)) : ""}
+      <div class="grid2">${fld("Standards (comma separated)", `<input class="w" value="${h((l.standards || []).join(", "))}" ${bind(l, "_std", { after: v => { l.standards = v.split(",").map(s => s.trim()).filter(Boolean); delete l._std; } })}>`)}${fld("Estimated hours", inp(l, "estHours", { num: true, min: 0, touch: r }))}${fld("Estimated cost $", inp(l, "estCost", { num: true, min: 0, touch: r }))}</div>
+      <div class="row"><div><span class="mut">Before photo</span>${photo(l, "beforePhoto")}</div>${l.status === "closed" ? `<div><span class="mut">After photo</span>${photo(l, "afterPhoto")}</div>` : ""}</div></div>`).join("") : `<div class="card"><p class="mut">No findings yet.</p></div>`); }
+  return `<div class="bar"><a class="btn" href="#/insp">← Inspections</a><h1 style="flex:1;margin:0">${r.id} · ${h(r.customer)} — ${h(r.venue)} ${pill(levelMeta(r.level).label, r.level === 2 ? "pur" : "blu")} ${stagePill(INSP_STAGES, r.stage)}</h1>
+    <a class="btn" href="#/doc/insp/${r.id}">Report</a>
+    ${r.stage === "requested" ? `<button class="p" ${act(() => { if (!r.scheduledDate) { UI.tab[r.id] = "details"; render(); return alert("Set a scheduled date on the Details tab first."); } setStage("scheduled"); })}>Schedule</button>` : ""}
+    ${r.stage === "scheduled" ? `<button class="p" ${act(() => { if (!r.surveyDate) r.surveyDate = todayIso(); if (!r.inspector) r.inspector = r.assignedTo; setStage("onsite"); })}>Start on-site</button><button ${act(() => setStage("requested"))}>Unschedule</button>` : ""}
+    ${r.stage === "onsite" ? `<button class="p" ${act(() => { if (!r.surveyDate) r.surveyDate = todayIso(); if (!r.reportDate) r.reportDate = todayIso(); r.renewalOutreach = null; setStage("completed"); })}>Mark complete</button>` : ""}
+    ${r.stage === "completed" ? `<button ${act(() => { const n = carryForward(r); save(); go("insp/" + n.id); })}>Start re-inspection (carry open findings)</button><button ${act(() => setStage("onsite"))}>Reopen</button>` : ""}
+    <button class="d" ${act(() => { if (confirm("Delete this inspection record?")) { S.inspections = S.inspections.filter(x => x !== r); save(); go("insp"); } })}>Delete</button></div>
+  ${r.priorInspectionId ? `<div class="note blu">Re-inspection of ${r.priorInspectionId} (${fmtLong(r.priorSurveyDate)}). Open findings were carried forward: close the ones that are resolved.</div>` : ""}
+  ${r.stage === "completed" ? `<div class="note blu">Completed. Next ${levelMeta(r.level).label} due ${fmtLong(inspDueAt(r))}.</div>` : ""}
+  <div class="tabs">${[["details", "Details"], ["venue", "Venue & measurements"], ["rubric", "Component checklist"], ["findings", "Findings (" + c.total + ")"]].map(x => `<button class="${tab === x[0] ? "on" : ""}" ${act(() => { UI.tab[r.id] = x[0]; render(); })}>${x[1]}</button>`).join("")}</div>${body}`;
+}
+function vRenewals() {
+  const table = (kind, rows) => rows.length ? `<table><tr><th>Customer</th><th>${kind === "flame" ? "Last tested" : "Last inspected"}</th><th>Due</th><th>Status</th><th>Contacted</th><th></th></tr>${rows.map(x => { const rec = x.rec, o = rec.renewalOutreach, hasQ = S.quotes.find(q => q.renewalOf === rec.id); return `<tr><td><b>${h(rec.customer)}</b><br><span class="mut">${h(rec.venue)}${rec.level ? " · Level " + rec.level : ""}</span></td><td>${fmtShort(kind === "flame" ? rec.completedAt : inspCompletedAt(rec))}</td><td>${fmtShort(x.r.dueAt)}</td><td>${pill(RENEWAL_PILL[x.r.state][0], RENEWAL_PILL[x.r.state][1])}<br><span class="mut">${dueLabel(x.r)}</span></td>
+    <td>${o ? `${fmtShort(o.at)} <button class="s" ${act(() => { rec.renewalOutreach = null; save(); render(); })}>clear</button>` : `<button class="s" ${act(() => { rec.renewalOutreach = { at: Date.now(), by: S.company.signerName || "" }; save(); render(); })}>Mark contacted</button>`}</td>
+    <td>${hasQ ? `<a class="btn" href="#/quote/${hasQ.id}">${h(hasQ.number)}</a>` : `<button class="p s" ${act(() => { const q = renewalQuote(kind, rec); save(); go("quote/" + q.id); })}>Create renewal quote</button>`}</td></tr>`; }).join("")}</table>` : `<p class="mut">No completed work yet.</p>`;
+  return `<h1>Renewals</h1><p class="sub">The latest completed job for each venue. "Due soon" starts ${RENEWAL_LEAD_DAYS} days before the anniversary. A renewal quote re-prices last year's scope at today's rates.</p>
+  <div class="card"><h2>Flame tests (annual)</h2>${table("flame", flameRenewals())}</div><div class="card"><h2>Rigging inspections (Level 1 yearly, Level 2 every five years)</h2>${table("inspection", inspRenewals())}</div>`;
+}
+function vRates() {
+  const grp = (k, title) => `<div class="card grow"><h2>${title}</h2>${Object.keys(RATE_LABELS[k]).map(f => { const L = RATE_LABELS[k][f], d = RATE_DEFAULTS[k][f]; return `<div class="pl"><span>${L[0]}<br><small>${L[1]} · default ${d}</small></span><span>${inp(S.rates[k], f, { num: true, step: "any", min: 0, blank: d })}</span></div>`; }).join("")}</div>`;
+  return `<div class="bar"><h1 style="flex:1">Rates</h1><button ${act(() => { if (confirm("Reset every rate to Peak's built-in defaults?")) { S.rates = JSON.parse(JSON.stringify(RATE_DEFAULTS)); save(); render(); } })}>Reset to defaults</button></div>
+  <p class="sub">Changing a rate re-prices every draft quote straight away. Quotes already sent keep the rates they were sent at.</p>
+  <div class="row">${grp("flame", "Flame tests")}${grp("inspection", "Rigging inspections")}${grp("travel", "Travel")}</div>
+  <div class="card"><h2>Lift rental</h2><div class="pl"><span>Default lift rate<br><small>$ per rental (one lift for up to a week)</small></span><span>${inp(S.rates, "liftRate", { num: true, min: 0, blank: 750 })}</span></div></div>
+  <div class="card"><h2>Company details (printed on letters and reports)</h2><div class="grid2">${fld("Company name", inp(S.company, "name"))}${fld("Office city", inp(S.company, "originCity"))}${fld("Address", inp(S.company, "address"))}${fld("Phone", inp(S.company, "phone"))}${fld("Email", inp(S.company, "email"))}${fld("Signer name", inp(S.company, "signerName"))}${fld("Signer title", inp(S.company, "signerTitle"))}${fld("Technicians (comma separated)", inp(S.company, "techs"))}</div></div>`;
+}
+function vRules() {
+  const F_ = S.rates.flame, I = S.rates.inspection, T = S.rates.travel;
+  const ex = computeFlame({ venues: [{ label: "Main stage", curtains: 12, oneWayMiles: 40, oneWayMin: 50 }] }, F_, T), ex2 = computeInspection({ venues: [{ label: "Main stage", lineSets: 24, oneWayMiles: 40, oneWayMin: 50 }], level: 1 }, I, T);
+  return `<h1>How pricing works</h1><p class="sub">These are the rules this program applies, with today's rates filled in. Change the numbers on the Rates tab.</p>
+  <div class="card"><h2>Flame-test quote</h2><ol>
+    <li><b>Testing</b>: curtains × ${F_.curtainMinutes} minutes at ${$(F_.laborRate)} per hour, per venue. A typed testing cost replaces the computed one for that venue.</li>
+    <li><b>Travel</b>: charged once per quote. Round trip to the farthest venue: miles × ${$c(F_.mileageRate)}, plus drive minutes rounded up to the next ${F_.travelRoundMin} at ${$(F_.laborRate)} per hour.</li>
+    <li><b>Base minimum</b>: cost = the larger of ${$(F_.baseFee)} and (travel + testing). It is a floor on the whole job, not a per-venue charge.</li>
+    <li><b>Lift rental</b>: count × rate, added to cost after the base minimum.</li>
+    <li><b>Markup</b>: total = cost × (1 + ${pct(F_.margin)}%).</li>
+    <li><b>Rounding</b>: to the nearest $25 (half rounds up). If the base minimum set the cost, round up to the next $25.</li>
+    <li><b>Typed total</b>: replaces the automatic total exactly ($1 to $10,000,000, whole dollars). It warns, never blocks, when under cost or under an ${Math.round(LOW_MARKUP_WARN * 100)}% markup.</li></ol>
+    <div class="note blu"><b>Worked example</b>: 12 curtains, 40 miles and 50 minutes one way. Testing ${$c(ex.testingSubtotal)}; travel ${ex.trip.miles} mi = ${$c(ex.trip.mileageCost)} plus ${ex.trip.minutesRaw} min billed as ${ex.trip.minutes} = ${$c(ex.trip.timeCost)}; cost ${$c(ex.cost)}; marked up ${$c(ex.totalRaw)}; quoted <b>${$(ex.total)}</b>.</div></div>
+  <div class="card"><h2>Rigging inspection quote</h2><ol>
+    <li><b>Inspection hours</b>: ${I.baseHours} base hours per visit + line sets × ${I.lineSetMinutes} minutes, across all venues. Level 2 multiplies the hours by ${I.level2Mult}. Hours round to one decimal.</li>
+    <li><b>Labor</b>: hours × ${$(I.laborRate)}.</li><li><b>Travel</b>: same shared-trip rule as flame tests.</li>
+    <li><b>Markup and minimum</b>: (labor + travel) × (1 + ${pct(I.margin)}%), but never less than the ${$(I.minFee)} minimum fee.</li>
+    <li><b>Lift rental</b>: count × rate × (1 + markup), added on top of the minimum fee.</li>
+    <li><b>Rounding</b>: nearest $25; up to the next $25 when the minimum fee applied. A typed total replaces it exactly.</li></ol>
+    <div class="note blu"><b>Worked example</b>: Level 1, 24 line sets, 40 miles and 50 minutes one way. ${ex2.inspectHours} hours = ${$c(ex2.laborCost)}; travel ${$c(ex2.trip.total)}; cost ${$c(ex2.cost)}; marked up ${$c(ex2.totalRaw)}; quoted <b>${$(ex2.total)}</b>.</div></div>
+  <div class="card"><h2>Flying instead of driving</h2><p>When one trip's drive cost reaches ${$(T.flyThreshold)} (0 means never), Auto prices travel as flights. A quote can force Drive or Fly. Flying costs, for the crew:</p><ul>
+    <li>Airfare: crew × ${$(T.airfarePerPerson)} (the quote can type a different fare).</li><li>Nights: on-site hours ÷ (crew × ${T.flyHoursPerDay} hours per day), rounded up, at least 1. Trip days = nights + 1.</li>
+    <li>Hotel: crew × nights × ${$(T.hotelPerNight)}. Per diem: crew × trip days × ${$(T.perDiemPerDay)}.</li><li>Rental car: one car per two people × trip days × ${$(T.carPerDay)}.</li><li>Travel-day labor: crew × ${T.flyTravelHoursEachWay} hours each way × 2 at the service's labor rate.</li></ul>
+    <p>The customer letter prints this as one line, "${TRAVEL_FLY_LINE}", at its share of the total.</p></div>
+  <div class="card"><h2>From quote to work to renewal</h2><ul>
+    <li>Draft quotes price at today's rates. Marking a quote <b>sent</b> freezes the rates it was priced at; <b>Revise</b> reopens it as a draft at today's rates.</li>
+    <li>Marking a flame-test quote <b>won</b> creates one job for the whole quote: Approved → Scheduled → Completed. Completing sets the next test due one year after the date performed.</li>
+    <li>Marking an inspection quote <b>won</b> creates one record per venue: Requested → Scheduled → On-site → Completed. Level 1 is due again in 1 year, Level 2 in 5 years, counted from the inspection date. Each level has its own clock.</li>
+    <li>A renewal shows "Upcoming" inside 120 days, "Due soon" inside ${RENEWAL_LEAD_DAYS} days, then "Overdue".</li>
+    <li>A renewal quote copies last year's scope and travel choice (drive or fly, crew, nights) and prices it at today's rates. A typed airfare, typed total and typed lift rate do not carry over.</li>
+    <li>Inspection findings are numbered in severity order: Urgent, Necessary, Basic. On the checklist, Poor becomes an Urgent finding and Fair becomes a Necessary finding. A re-inspection carries every open finding forward.</li></ul></div>`;
+}
+function vWording() {
+  return `<h1>Wording</h1><p class="sub">The standing text of every letter and report. Words in {{double braces}} are filled in when the document prints. Clear a box to go back to Peak's built-in wording.</p>` +
+  Object.keys(TEMPLATES).map(id => `<div class="card"><h2>${h(TEMPLATES[id].label)}</h2>${Object.keys(TEMPLATES[id].fields).map(f => { const o = S.wording[id] = S.wording[id] || {}, d = TEMPLATES[id].fields[f]; return `<label class="f"><span>${h(f)}${o[f] != null ? " · edited" : ""}</span><textarea rows="${Math.min(8, Math.max(2, Math.ceil(d.length / 110)))}" ${bind(o, f, { rr: true, after: v => { if (!v.trim() || v === d) delete o[f]; } })}>${h(o[f] != null ? o[f] : d)}</textarea></label>`; }).join("")}</div>`).join("");
+}
+function vBackup() {
+  return `<h1>Backup</h1><p class="sub">Your data lives in this browser on this computer. A backup file holds everything (customers, quotes, jobs, inspections, photos, rates and wording) and can be loaded on any computer.</p>
+  <div class="card"><h2>Export</h2><p>Last backup file: <b>${S.lastExportAt ? fmtLong(S.lastExportAt) : "never"}</b></p><button class="p" ${act(exportBackup)}>Download backup file</button></div>
+  <div class="card"><h2>Restore</h2><p>Loading a backup <b>replaces</b> everything currently in this browser.</p><input type="file" accept="application/json,.json" id="imp"> <button ${act(importBackup)}>Load backup</button></div>
+  <div class="card"><h2>Other</h2><div class="bar"><button ${act(() => { if (S.customers.length && !confirm("Add sample records to your data?")) return; sample(); save(); go("home"); })}>Load sample data</button>
+  <button class="d" ${act(() => { if (confirm("Erase everything in this browser? Export a backup first.") && confirm("Really erase all data?")) { S = blankState(); save(); go("home"); render(); } })}>Erase all data</button></div>
+  <p class="mut">${S.customers.length} customers · ${S.quotes.length} quotes · ${S.flameJobs.length} flame jobs · ${S.inspections.length} inspections</p></div>`;
+}
+function exportBackup() { S.lastExportAt = Date.now(); const blob = new Blob([JSON.stringify({ app: "peak-service", exportedAt: Date.now(), state: S })], { type: "application/json" }), a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "peak-service-backup-" + todayIso() + ".json"; document.body.appendChild(a); a.click(); a.remove(); save(); render(); }
+function importBackup() { const f = document.getElementById("imp").files[0]; if (!f) return alert("Choose a backup file first."); const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (d.app !== "peak-service" || !d.state) throw new Error("not a Peak Service backup"); if (!confirm("Replace everything in this browser with this backup from " + fmtLong(d.exportedAt) + "?")) return; S = normalizeState(d.state); save(); go("home"); render(); } catch (e) { alert("Could not load that file: " + e.message); } }; r.readAsText(f); }
+function sample() {
+  const c = newCustomer(); c.name = "Lakefront Performing Arts Center"; c.contact = { name: "Dana Whitlock", email: "dana@example.org", phone: "414-555-0142" };
+  Object.assign(newVenue(c), { label: "Main Hall", city: "Milwaukee", state: "WI", oneWayMiles: 12, oneWayMin: 20, curtains: 14, lineSets: 24 }); Object.assign(newVenue(c), { label: "Studio Theater", venueType: "Black box", city: "Milwaukee", state: "WI", oneWayMiles: 12, oneWayMin: 20, curtains: 6, lineSets: 0 });
+  const c2 = newCustomer(); c2.name = "Northwoods School District"; c2.contact = { name: "Sam Ortega", email: "sam@example.org", phone: "715-555-0177" };
+  Object.assign(newVenue(c2), { label: "High School Auditorium", city: "Rhinelander", state: "WI", oneWayMiles: 235, oneWayMin: 225, curtains: 9, lineSets: 18 });
+  const q = newQuote("flame", c.id); setQuoteStatus(q, "sent"); setQuoteStatus(q, "won"); const j = S.flameJobs[S.flameJobs.length - 1], at = Date.now() - 330 * DAY;
+  Object.assign(j, { stage: "completed", completedAt: at, dueAt: at + YEAR, assignedTo: "Nic Trapani", scheduledDate: "", results: { overall: "partial", cert: "FT-" + new Date(at).getFullYear() + "-014", performedBy: "Nic Trapani", method: "NFPA 705 field flame test", notes: "", date: "", venues: [{ id: c.venues[0].id, label: "Main Hall", tested: 14, passed: 11, retreated: 2, failed: 1, treatment: "", notes: "Upstage black traveler failed" }, { id: c.venues[1].id, label: "Studio Theater", tested: 6, passed: 6, retreated: 0, failed: 0, treatment: "", notes: "" }] } });
+  newQuote("inspection", c2.id, 1); const q3 = newQuote("flame", c2.id); q3.status = "draft";
+}
+
+/* =====================================================================
+ * 7. PRINTED DOCUMENTS (use the browser's Print → Save as PDF)
+ * ===================================================================== */
+function docBar(back) { return `<div class="bar noprint"><a class="btn" href="#/${back}">← Back</a><button class="p" onclick="window.print()">Print / Save as PDF</button><span class="mut">In the print dialog choose "Save as PDF" to make a file you can email.</span></div>`; }
+function letterhead(title, right) { const C = S.company; return `<div class="lh"><div><b style="font-size:17px">${h(C.name)}</b><br><span class="mut">${h([C.address, C.phone, C.email].filter(Boolean).join(" · "))}</span></div><div style="text-align:right"><b>${h(title)}</b><br><span class="mut">${right}</span></div></div>`; }
+const paras = s => h(s).split(/\n+/).map(x => `<p>${x}</p>`).join("");
+function vDoc(p) {
+  if (p[0] === "quote") return docQuote(quote(p[1]));
+  if (p[0] === "flame") return docFlame(S.flameJobs.find(j => j.id === p[1]), p[2]);
+  if (p[0] === "insp") return docInsp(S.inspections.find(r => r.id === p[1]));
+  return "<p>Not found.</p>";
+}
+function docQuote(q) {
+  if (!q) return "<p>Not found.</p>";
+  const P = priceQuote(q), flame = q.type === "flame", T = flame ? "flame_proposal" : "inspection_proposal", fl = P.travel.flight;
+  const venueName = q.customer + (q.venues.length === 1 && q.venues[0].label ? " — " + q.venues[0].label : "");
+  const vars = { company: S.company.name, venue: venueName, curtainsLabel: P.unitsLabel, lineSetsLabel: P.unitsLabel, price: $(P.total), originCity: S.company.originCity, contactName: q.contact.name, signerName: S.company.signerName, signerTitle: S.company.signerTitle };
+  const priceLine = fl ? "priceLineFly" : P.trip.miles > 0 ? "priceLine" : "priceLineNoTravel";
+  const lines = []; let rest = P.total;
+  if (P.lift) { lines.push(["Lift rental" + (P.lift.count > 1 ? " ×" + P.lift.count : ""), P.liftLine]); rest -= P.liftLine; }
+  if (fl) { const s = travelLineShare(fl.total, rest, P.cost - P.liftCost); lines.unshift([TRAVEL_FLY_LINE, s.travel]); rest = s.rest; }
+  lines.unshift([flame ? "Field flame inspection — " + P.unitsLabel : levelMeta(q.level).label + " rigging inspection — " + P.unitsLabel, rest]);
+  return docBar("quote/" + q.id) + `<div class="doc">${letterhead(flame ? "Field Flame Inspection Proposal" : "Rigging Inspection Proposal", h(q.number) + " · " + fmtLong(q.sentAt || Date.now()))}
+    <p><b>Prepared for</b><br>${h(q.customer)}${q.contact.name ? "<br>" + h(q.contact.name) : ""}${q.contact.email ? "<br>" + h(q.contact.email) : ""}</p>
+    <p>${h(W(T, "intro", vars))}</p><div class="callout">${h(W(T, flame ? "methodQuote" : "standardsQuote", vars))}</div>
+    ${!flame ? `<p>${h(W(T, q.level === 2 ? "cadenceNoteL2" : "cadenceNoteL1", vars))}</p>` : ""}
+    <h2>Scope</h2><table><tr><th>Venue</th><th>Location</th><th class="num">${flame ? "Curtains" : "Line sets"}</th></tr>${q.venues.map(v => `<tr><td>${h(v.label)}</td><td>${h([v.city, v.state].filter(Boolean).join(", "))}</td><td class="num">${flame ? Math.round(Number(v.curtains) || 0) : Number(v.lineSets) || 0}</td></tr>`).join("")}</table>
+    ${fl ? `<p>Given the distance from ${h(S.company.originCity)} to ${h(q.venues.map(v => v.city).filter(Boolean)[0] || q.customer)}, this visit is priced with air travel.</p>` : ""}
+    <h2>Price</h2><table>${lines.map(l => `<tr><td>${h(l[0])}</td><td class="num">${$(l[1])}</td></tr>`).join("")}<tr><td><b>Total</b></td><td class="num"><b>${$(P.total)}</b></td></tr></table>
+    <p>${h(W(T, priceLine, vars))}</p><p>${h(W(T, "costTail", vars))}</p><p>${h(W(T, "taxNote", vars))}</p><p>${h(W(T, "signoff", vars))}</p>
+    <div class="sig"><div>Accepted by (${h(q.customer)}) · date</div><div>${h(S.company.signerName || S.company.name)}${S.company.signerTitle ? ", " + h(S.company.signerTitle) : ""}</div></div></div>`;
+}
+function docFlame(j, kind) {
+  if (!j || !j.results) return "<p>Not found.</p>";
+  const r = j.results, t = flameTotals(j), loc = [...new Set(j.venues.map(v => [v.city, v.state].filter(Boolean).join(", ")).filter(Boolean))].join("; ");
+  const vars = { company: S.company.name, venue: j.customer, location: loc || "—", datePerformed: fmtLong(j.completedAt), testedLabel: fmtLong(j.completedAt), technician: r.performedBy, certNo: r.cert, unitsTested: t.tested, goodThrough: fmtMonthYear(j.dueAt), passedCount: t.passed, ifrCount: t.retreated, failedCount: t.failed };
+  const table = `<table><tr><th>Venue</th><th class="num">Tested</th><th class="num">Passed</th><th class="num">IFR</th><th class="num">Failed</th><th>Notes</th></tr>${r.venues.map(v => `<tr><td>${h(v.label)}</td><td class="num">${v.tested}</td><td class="num">${v.passed}</td><td class="num">${v.retreated}</td><td class="num">${v.failed}</td><td>${h([v.treatment, v.notes].filter(Boolean).join(" · "))}</td></tr>`).join("")}<tr><td><b>Total</b></td><td class="num"><b>${t.tested}</b></td><td class="num"><b>${t.passed}</b></td><td class="num"><b>${t.retreated}</b></td><td class="num"><b>${t.failed}</b></td><td></td></tr></table>`;
+  const facts = `<table><tr><td>Date performed</td><td>${fmtLong(j.completedAt)}</td><td>Certificate no.</td><td>${h(r.cert)}</td></tr><tr><td>Technician</td><td>${h(r.performedBy)}</td><td>Good through</td><td>${fmtMonthYear(j.dueAt)}</td></tr><tr><td>Method</td><td>${h(r.method)}</td><td>Overall</td><td>${h({ pass: "Pass", partial: "Partial", fail: "Fail" }[r.overall] || r.overall)}</td></tr></table>`;
+  let body;
+  if (kind === "certificate") body = `<div class="cert"><p class="mut">${h(S.company.name)}</p><h1>Certificate of Flame Resistance</h1><p>Certificate no. <b>${h(r.cert)}</b></p><h2 style="border:0">${h(j.customer)}</h2><p>${h(loc)}</p>${table}<p style="margin-top:18px">${h(W("flame_report", "certificateParagraph", vars))}</p>
+      <div class="sig"><div>${h(r.performedBy)} · Technician</div><div>${fmtLong(j.completedAt)} · Date tested</div></div></div>
+      <h2>About this test</h2><p><b>Passed</b> — ${h(W("flame_report", "aboutPassed", vars))}</p><p><b>IFR</b> — ${h(W("flame_report", "aboutIFR", vars))}</p><p><b>Failed</b> — ${h(W("flame_report", "aboutFailed", vars))}</p><h2>NFPA 705 in brief</h2><ul>${W("flame_report", "aboutBrief", vars).split("\n").filter(Boolean).map(x => `<li>${h(x)}</li>`).join("")}</ul>`;
+  else if (kind === "summary") body = letterhead("Flame-Test Summary Letter", h(j.id)) + `<p><b>${h(j.customer)}</b><br>${h(loc)}</p><p>${h(W("flame_summary_letter", "purpose", vars))}</p><p>${h(W("flame_summary_letter", "summaryStatement", vars))}</p><div class="callout">${h(W("flame_summary_letter", "nfpaQuote", vars))}</div><h2>Job data</h2>${facts}<h2>Observed result</h2>${table}${r.notes ? `<p>${h(r.notes)}</p>` : ""}<div class="sig"><div>${h(r.performedBy)} · ${h(S.company.name)}</div><div>Date</div></div>`;
+  else body = letterhead("Flame-Test Results Letter", h(j.id)) + `<p><b>${h(j.customer)}</b><br>${h(loc)}${(j.contact || {}).name ? "<br>Attn: " + h(j.contact.name) : ""}</p><p>${h(W("flame_results_letter", "intro", vars))}</p><div class="callout">${h(W("flame_results_letter", "nfpaQuote", vars))}</div>${facts}<h2>Findings</h2>${table}<p>${h(W("flame_results_letter", "resultsLine", vars))}</p><p>${h(W("flame_results_letter", "findingsNote", vars))}</p>${t.failed > 0 ? `<p><b>${h(W("flame_results_letter", "failedNote", vars))}</b></p>` : ""}${r.notes ? `<p>${h(r.notes)}</p>` : ""}<p>${h(W("flame_results_letter", "retainNote", vars))}</p><div class="sig"><div>${h(r.performedBy)} · ${h(S.company.name)}</div><div>Date</div></div>`;
+  return docBar("flame/" + j.id) + `<div class="doc">${body}</div>`;
+}
+function docInsp(r) {
+  if (!r) return "<p>Not found.</p>";
+  const c = logCounts(r), W_ = f => W("inspection_report", f, { company: S.company.name }), cond = CONDITIONS.find(x => x[0] === r.condition) || CONDITIONS[1];
+  const kv = (list, obj) => { const rows = list.filter(f => (obj || {})[f[0]]); return rows.length ? `<table>${rows.map(f => `<tr><td style="width:40%" class="mut">${h(f[1])}</td><td>${h(obj[f[0]])}</td></tr>`).join("")}</table>` : ""; };
+  const ratedSecs = r.rubric.filter(s => s.items.some(i => i.rating));
+  return docBar("insp/" + r.id) + `<div class="doc">${letterhead("Rigging Inspection Report", levelMeta(r.level).long)}
+    <h1>${h(r.venue || r.customer)}</h1><p>${h(r.customer)}<br>${h(r.address)}</p>
+    <table><tr><td class="mut">Inspection date</td><td>${fmtLong(r.surveyDate)}</td><td class="mut">Report date</td><td>${fmtLong(r.reportDate)}</td></tr><tr><td class="mut">Inspector</td><td>${h(r.inspector)}</td><td class="mut">Report no.</td><td>${h(r.id)}</td></tr><tr><td class="mut">Venue contact</td><td>${h(r.contact)}</td><td class="mut">Overall condition</td><td><b>${cond[1]}</b></td></tr>${r.priorSurveyDate ? `<tr><td class="mut">Previous inspection</td><td colspan="3">${fmtLong(r.priorSurveyDate)}</td></tr>` : ""}</table>
+    ${r.narrative ? `<h2>Summary</h2>${paras(r.narrative)}` : ""}${r.scope ? `<h2>Scope</h2>${paras(r.scope)}` : ""}
+    <h2>Findings at a glance</h2><table><tr><th>Category</th><th class="num">Open</th><th class="num">Closed</th></tr>${SEVERITIES.map(s => `<tr><td><b>${s.long}</b><br><span class="mut">${h(s.blurb)}</span></td><td class="num">${c[s.key].open}</td><td class="num">${c[s.key].closed}</td></tr>`).join("")}<tr><td><b>Total</b></td><td class="num"><b>${c.open}</b></td><td class="num"><b>${c.closed}</b></td></tr></table>
+    <h2>About this inspection</h2><p>${h(W_("inspectionPurpose"))}</p><p>${h(W_("howToUse"))}</p><p>${h(W_("standardsIntro"))}</p><ul>${STANDARDS_LIST.map(s => `<li><b>${s[0]}</b> — ${h(s[1])}</li>`).join("")}</ul>
+    ${kv(VENUE_FACTS, r.venueInfo) || kv(SYSTEM_FIELDS, r.venueInfo) ? `<h2 class="pb">About your venue</h2>${kv(VENUE_FACTS, r.venueInfo)}${kv(SYSTEM_FIELDS, r.venueInfo)}` : ""}
+    ${MEASUREMENT_GROUPS.some(g => g.items.some(f => (r.measurements || {})[f[0]])) ? `<h2>Stage measurements</h2>${MEASUREMENT_GROUPS.map(g => { const t = kv(g.items, r.measurements); return t ? `<h3>${g.group}</h3>${t}` : ""; }).join("")}` : ""}
+    <h2 class="pb">Rigging logs</h2>${r.logs.length ? r.logs.map(l => { const s = sevMeta(l.severity); return `<div class="log ${l.severity}"><p style="margin:0"><b>Log ${l.id} · ${h(l.problem)}</b> ${pill(s.long, s.cls)} ${pill(l.status === "closed" ? "Closed" : "Open", l.status === "closed" ? "grn" : "red")}</p>
+      <p class="mut" style="margin:2px 0 8px">${h(l.location)}${l.firstNoted ? " · first noted " + fmtLong(l.firstNoted) : ""}${(l.standards || []).length ? " · " + h(l.standards.join(", ")) : ""}</p>
+      ${l.explanation ? `<p><b>Explanation.</b> ${h(l.explanation)}</p>` : ""}${l.solution ? `<p><b>Solution.</b> ${h(l.solution)}</p>` : ""}${l.status === "closed" && l.workPerformed ? `<p><b>Work performed.</b> ${h(l.workPerformed)}</p>` : ""}
+      <div class="row">${l.beforePhoto ? `<img class="ph" src="${l.beforePhoto}" alt="Before">` : ""}${l.afterPhoto ? `<img class="ph" src="${l.afterPhoto}" alt="After">` : ""}</div></div>`; }).join("") : `<p>No deficiencies were recorded.</p>`}
+    ${ratedSecs.length ? `<h2 class="pb">Component condition checklist</h2>${ratedSecs.map(s => `<h3>${s.n}. ${h(s.title)}${s.lineSet ? " · line set " + h(s.lineSet) : ""}</h3><table>${s.items.map(i => `<tr><td style="width:24px">${i.l}</td><td>${h(i.label)}</td><td style="width:70px"><b>${h((RUBRIC_RATINGS.find(x => x[0] === i.rating) || ["", "—"])[1])}</b></td></tr>`).join("")}</table>${s.comments ? `<p class="mut">${h(s.comments)}</p>` : ""}${s.photo ? `<img class="ph" src="${s.photo}" alt="">` : ""}`).join("")}` : ""}
+    <h2>About ${h(S.company.name)}</h2><p>${h(W_("about"))}</p><p>${h(W_("mission"))}</p><h2>Disclaimer</h2><p>${h(W_("disclaimer"))}</p></div>`;
+}
+
+/* ===================================================================== */
+(async function boot() { S = normalizeState(await loadState()); chip(S.savedAt ? "Saved in this browser" : "Ready"); render(); })();
+</script>
+</body>
+</html>
