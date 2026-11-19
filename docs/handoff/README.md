@@ -14,6 +14,13 @@ programs plus written specs the long-term coding team can fold into their own ap
 | Leaves the main app | Project Management, Flame Tests, Rigging Inspections, Repairs, Rentals, Krisp/Meetings, Inbox, Design tab, Client Portal, Tasks/Calendar/Morning triage, AI features. |
 | Estimator direction | No sending to clients (files are downloaded and sent by hand). Focus on revisions: status tracked per revision, automatic backup when edits resume after a day. Done last. |
 
+### Update, later the same day (Jeff)
+
+- Repairs and Rentals: spec only; unlikely to be used.
+- Venue Assessments move INTO the Flame Tests + Inspections program (Peak Service), not kept in the app.
+- Estimator edits (revisions, backups) are on hold; focus is the spin-offs.
+- Design tab split agreed: Assembly Builder, Lineset Builder and Motor Library stay with the Estimator; the Grid, Quick Design, Specs and Consulting spin off.
+
 ## Deliverables
 
 | # | Item | Output | Status |
