@@ -30,7 +30,7 @@ programs plus written specs the long-term coding team can fold into their own ap
 | 3 | Project Management (incl. Repairs, Rentals, tasks, calendar, triage) | `project-management-spec.md` + `removal-map-project-management.md` | Spec and removal map written; code not yet removed |
 | 4 | Inbox, Krisp, AI | `inbox-krisp-ai-spec.md` + `removal-map-inbox-krisp-ai.md` | Spec and removal map written; code not yet removed |
 | 4b | Venue Assessments | `venue-assessments-spec.md`, `venue-assessment-form.json`, tab in `programs/peak-service.html` | Spec written; form, photos, recap and field sheet in the program; sketch pads and 3D preview not ported |
-| 5 | Design tab | HTML + spec | Not started |
+| 5 | Design tab (Grid, Quick Design, Specs, Consulting) | `programs/peak-design.html`, `design-spec.md`, `design-data.json`, `removal-map-design.md` | Program, spec and removal map written; code not yet removed |
 | 6 | Estimator revisions | in-app change | Not started |
 
 ## Peak Service program vs. the app
@@ -44,6 +44,16 @@ The offline program follows `flame-inspections-spec.md` except where a single of
 - Venue Assessments are drawn from `venue-assessment-form.json`, embedded in the file. Sketch pads are replaced by a photo upload per pad; the 3D preview, travel auto-fill from routing, the optional findings merge/split tools and Fill down / Mark range spare on the line set schedule are not ported.
 - Not included: the dashboard map, calendar holds, the customer portal, repairs flagged from inspections, the three report layout variants (one layout each), rewards credit.
 - The flame result column the app stores as `retreated` is labelled IFR, as the app's letters do. The spec flags this naming as an open question for Jeff.
+
+## Peak Design program vs. the app
+
+Built from `design-data.json` (embedded) and `design-spec.md`. The estimate engine reproduces the spec's worked example exactly (all 37 quantities).
+
+- Venue plans are redrawn from the templates' area outlines and stretch rules, not the original CAD line work; doors, seats and double-line walls are not drawn. The Church Contemporary drawing and movable rooms are not included.
+- Auto fill follows the spec's placement formulas; positions are stored in feet, so after changing a dimension the user presses Re-fill.
+- The pairing of equipment items to device types (which sets designator codes) is the program's own table; the app derived it from catalog categories.
+- No built-in prices: the Equipment map starts empty, as in the app. "Load sample map + parts" on the Backup tab loads invented `SAMPLE-` parts for demonstration only.
+- Not included: plan upload and calibration, spaces and the room-shape editor, wire routing, risers and conduit fill, the multi-sheet drawing set, revisions and options, Specs, Consulting, promote-to-quote, object symbols, assemblies and racks, align / copy-paste / snap.
 
 ## Sources
 
