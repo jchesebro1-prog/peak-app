@@ -120,7 +120,7 @@ Seeds and scripts: `src/db/seeds/projects.ts`, `src/db/seeds/repair-jobs.ts`,
 | `src/components/venue-availability-check.tsx` | Flame, inspection and Inbox scheduling dialogs. The venue calendar card on `/venues/<id>` uses `venue-calendar-actions.ts` directly and stays |
 | `src/lib/google/calendar.ts`, `calendar-connections.ts`, `recurrence.ts`, `meeting-link.ts` | Meetings sync, Gmail OAuth callback, `src/lib/daylite/calendar-import.ts` (kept; see G) |
 | `src/lib/templates.ts` and `src/app/(app)/templates/` | Flame and inspection letters, consulting letter. After those go, only `src/lib/settings.ts` imports it |
-| `src/lib/travel-plan.ts`, `src/lib/service-quote-inputs.ts`, most of `src/lib/service-pricing.ts` | Flame and inspection engines, portal service quotes. Keep `ceilToStep` / `roundToStep`: `src/app/(app)/estimator/pricing.ts` and `src/lib/review-limits.ts` import from `service-pricing.ts` |
+| `src/lib/travel-plan.ts`, `src/lib/service-quote-inputs.ts`, most of `src/lib/service-pricing.ts` | Flame and inspection engines, portal service quotes, `src/lib/stores/pricing.ts`. The kept files `src/app/(app)/estimator/pricing.ts`, `src/lib/review-limits.ts` and `src/components/rewards/service-credit-panel.tsx` also import from this group (the Estimator rounds system prices with `ceilToStep`), so a remnant stays |
 | `src/app/print/letter/[kind]/[id]/` | Flame and inspection letters |
 
 ### A.3 Do NOT delete — shared files that look like they belong
@@ -148,26 +148,137 @@ Each row is one import statement in a kept file that resolves to a removed file.
 
 | Kept file:line | What it uses | Suggested fix |
 | --- | --- | --- |
-<<TABLE>>
+| `src/components/address-fix/address-flag.tsx:6` | `FLAG_TEXT` from `lib/drive-plan/plan.ts` | Inline the one string (`"Address not verified — no drive time"`) or move it to `src/lib/address-verify/types.ts`. |
+| `src/components/documents/documents-card.tsx:4` | `getAllProjects` from `lib/stores/projects.ts` | Drop the project option from the Documents card's "attach to" picker (documents can stay on a company or venue). Existing project-linked documents remain readable by id. |
+| `src/app/api/sync/push/route.ts:11` | `normalizeProject, type ProjectRecord` from `lib/stores/projects.ts` | Remove the `projects` branch (lines ~154–161) once `projects` leaves `SYNCABLE_COLLECTIONS`. |
+| `src/app/api/sync/push/route.ts:20` | `taskPushDecision, TASK_PUSH_REFUSED` from `lib/sync/task-push.ts` | Remove the `tasks` branch (lines ~137–152) once `tasks` leaves `SYNCABLE_COLLECTIONS`. |
+| `src/app/api/sync/push/route.ts:21` | `getProject` from `lib/stores/projects.ts` | Same as above; `projectExists` goes with the `tasks` branch. |
+| `src/app/api/sync/today/route.ts:5` | `chicagoDayKey, chicagoDayStart, addDays` from `lib/drive-plan/day.ts` | Move `src/lib/drive-plan/day.ts` to a neutral path (for example `src/lib/chicago-day.ts`) BEFORE deleting `drive-plan/`, and repoint this import. It is a plain date helper with no drive logic. |
+| `src/app/api/sync/today/route.ts:10` | `getAll as allRepairs` from `lib/stores/repair-jobs.ts` | Drop `repairs` from the loader and from the `todaysJobs` input. |
+| `src/app/api/sync/today/route.ts:12` | `getAllProjects` from `lib/stores/projects.ts` | Drop `projects`, `loadPipelines`, `isDone` and the `done` set; pass `() => false`. |
+| `src/app/(app)/page.tsx:10` | `StartHereCard (default)` from `components/triage/start-here-card.tsx` | Delete the import and `<StartHereCard user={user} />` (line ~145). |
+| `src/app/(app)/page.tsx:84` | `syncDriveIfStale` from `lib/drive-sync/sync.ts` | Delete the `after()` block (lines ~83–86). |
+| `src/app/(app)/address-actions.ts:32` | `resyncForAddress` from `lib/drive-sync/sync.ts` | Delete the `resyncForAddress` call; a fixed address no longer has a drive plan to refresh. |
+| `src/app/(app)/venue-assessments/actions.ts:8` | `chicagoDayKey` from `lib/drive-plan/day.ts` | Move `src/lib/drive-plan/day.ts` to a neutral path (for example `src/lib/chicago-day.ts`) BEFORE deleting `drive-plan/`, and repoint this import. It is a plain date helper with no drive logic. |
+| `src/app/(app)/venue-assessments/visit-actions.ts:7` | `canChangeVisit, VISIT_EDIT_REFUSAL` from `lib/visit-edit-rights.ts` | Move `visit-edit-rights.ts` out of the delete list (it is pure and has no removed imports) or inline the rule. |
+| `src/app/(app)/venue-assessments/visit-actions.ts:8` | `validVisitSpan` from `lib/visit-plan/input.ts` | Move `validVisitSpan` (5 lines) next to the site-visits store. |
+| `src/app/(app)/venue-assessments/visit-actions.ts:9` | `cleanAttendees` from `lib/visit-plan/people.ts` | Move `cleanAttendees` / `readAttendees` next to the site-visits store, or drop attendees. Decision needed (risk R2). Venue Assessments keeps visits but loses invites, conflicts and drive time: replace with a plain date/time/lead form. |
+| `src/app/(app)/venue-assessments/visit-actions.ts:11` | `cancelVisitInvites, dispatchVisitInvite, type InviteStatus, type RecipientResult` from `lib/visit-invite.ts` | Delete the invite dispatch and cancel calls. Decision needed (risk R2). Venue Assessments keeps visits but loses invites, conflicts and drive time: replace with a plain date/time/lead form. |
+| `src/app/(app)/venue-assessments/visit-actions.ts:68` | `resyncForVisitChange` from `lib/drive-sync/sync.ts` | Delete the `after()` drive re-sync. |
+| `src/app/(app)/venue-assessments/visit-actions.ts:100` | `resyncForVisitChange` from `lib/drive-sync/sync.ts` | Delete the `after()` drive re-sync. |
+| `src/app/(app)/venue-assessments/visit-requests.tsx:10` | `BookingPanel (default)` from `components/visit-booking/booking-panel.tsx` | Decision needed (risk R2). Venue Assessments keeps visits but loses invites, conflicts and drive time: replace with a plain date/time/lead form. |
+| `src/app/(app)/venue-assessments/visit-requests.tsx:11` | `pickDayTimes` from `lib/visit-plan/pick-day.ts` | Goes with the booking panel (nearby-day picks). |
+| `src/app/(app)/venue-assessments/page.tsx:27` | `FLAG_TEXT` from `lib/drive-plan/plan.ts` | Inline the one string (`"Address not verified — no drive time"`) or move it to `src/lib/address-verify/types.ts`. |
+| `src/app/(app)/companies/page.tsx:8` | `listProjectActivityRows` from `lib/stores/projects.ts` | Drop the project rows from the directory's owner / last-activity rollup, or keep a 10-line local reader over the `projects` table. |
+| `src/app/(app)/companies/[id]/page.tsx:6` | `canChangeVisit` from `lib/visit-edit-rights.ts` | Same as `visit-actions.ts:7`. |
+| `src/app/(app)/companies/[id]/page.tsx:21` | `getAllProjects, riskFlags` from `lib/stores/projects.ts` | Delete the company record's Projects section and its risk chips (also the `/projects?id=` link at line ~679). |
+| `src/app/(app)/companies/[id]/page.tsx:65` | `EditVisitButton` from `components/visit-booking/visit-edit-button.tsx` | Delete the Edit button on scheduled visits, or point it at the simplified form. Decision needed (risk R2). Venue Assessments keeps visits but loses invites, conflicts and drive time: replace with a plain date/time/lead form. |
+| `src/app/(app)/companies/[id]/page.tsx:66` | `VisitConflictChip, VisitConflictProvider` from `components/visit-booking/visit-conflict-chips.tsx` | Delete the conflict chips and their provider (they call `GET /api/visits/conflicts`). |
+| `src/app/(app)/companies/[id]/page.tsx:85` | `FLAG_TEXT` from `lib/drive-plan/plan.ts` | Inline the one string (`"Address not verified — no drive time"`) or move it to `src/lib/address-verify/types.ts`. |
+| `src/app/(app)/estimator/actions.ts:10` | `readTierSize` from `lib/task-plan/fields.ts` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. |
+| `src/app/(app)/estimator/actions.ts:144` | `createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, removeTask as removeTaskStore, STATUSES as TASK_STATUSES, type TaskStatus` from `lib/stores/tasks.ts` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. |
+| `src/app/(app)/estimator/actions.ts:145` | `applyTaskTemplate` from `lib/stores/task-templates.ts` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. |
+| `src/app/(app)/estimator/page.tsx:38` | `tasksForQuote` from `lib/stores/tasks.ts` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. |
+| `src/app/(app)/estimator/page.tsx:40` | `taskTemplateSetsFor` from `lib/stores/task-templates.ts` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. |
+| `src/app/(app)/estimator/types.ts:7` | `TaskRecord` from `lib/stores/tasks.ts` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. |
+| `src/app/(app)/estimator/steps/send-step.tsx:8` | `TasksCard` from `components/tasks-card.tsx` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. Also remove `"tasks"` from `SendCard` in `src/lib/estimate-email/send-ui.ts` (lines 106–119). |
+| `src/app/(app)/estimator/steps/send-step.tsx:9` | `ApplyTemplateControl` from `components/apply-template-control.tsx` | Decision needed (risk R3). Either keep a slim task store for quotes, or delete the Tasks card from the Estimator's Send & track step and these actions with it. |
+| `src/app/(app)/account/actions.ts:169` | `saveUserSchedulePrefs, markDriveStale` from `lib/stores/schedule-prefs.ts` | Delete the "My drive buffer" action. |
+| `src/app/(app)/account/actions.ts:180` | `saveUserWorkHours` from `lib/stores/schedule-prefs.ts` | Delete the "My work hours" action. |
+| `src/app/(app)/account/page.tsx:22` | `getScheduleDefaults, getSchedulingSettings, getUserSchedulePrefs, getUserWorkHours` from `lib/stores/schedule-prefs.ts` | Delete the work-hours and drive-buffer cards and their loaders. |
+| `src/app/(app)/account/work-hours-card.tsx:5` | `WorkHoursEditor (default)` from `components/visit-booking/work-hours-editor.tsx` | Delete this file. |
+| `src/app/(app)/account/work-hours-card.tsx:6` | `fmtWorkHours, type WorkHours` from `lib/visit-plan/settings.ts` | Delete this file. |
+| `src/app/(app)/_dashboard/widgets/installs.tsx:2` | `ProjectRecord` from `lib/stores/projects.ts` | Delete this file with the Installs report widgets (section C.6). |
+| `src/app/(app)/_dashboard/widgets/bids.tsx:6` | `chicagoShortDate` from `lib/triage/clock.ts` | Move the four date helpers to the same neutral Chicago-day module (or `src/lib/format.ts`) and repoint. |
+| `src/app/(app)/_dashboard/widgets/backward.tsx:3` | `fmtDate, type ProjectRecord` from `lib/stores/projects.ts` | Delete the `open-projects` and `backlog` widgets from this file; keep `equipment-sold`. |
+| `src/app/(app)/_dashboard/widgets/home-cards.tsx:10` | `savePlanPins` from `lib/task-plan/load.ts` | Delete the `today-plan` card. |
+| `src/app/(app)/_dashboard/widgets/home-cards.tsx:11` | `todayRows` from `lib/task-plan/today.ts` | Delete the `today-plan` card. |
+| `src/app/(app)/_dashboard/widgets/home-cards.tsx:23` | `queueCardCounts, queueDueLabel` from `lib/queue.ts` | Delete the `my-queue` card. |
+| `src/app/(app)/_dashboard/widgets/home-cards.tsx:24` | `taskHref` from `lib/calendar-tasks.ts` | Used by the "Waiting on others" rows (line ~101); delete with the queue card. |
+| `src/app/(app)/_dashboard/widgets/home-cards.tsx:30` | `HomeToday (default)` from `app/(app)/home-today.tsx` | Delete the `today-plan` card. |
+| `src/app/(app)/_dashboard/widgets/home-cards.tsx:31` | `type QueueRow` from `app/(app)/home-queue.tsx` | Delete the `my-queue` card. |
+| `src/app/(app)/_dashboard/widgets/home-cards.tsx:38` | `HomeCalendar (default)` from `app/(app)/home-calendar.tsx` | Delete the `calendar` card. |
+| `src/app/(app)/settings/actions.ts:968` | `saveScheduleDefaults, markDriveStale` from `lib/stores/schedule-prefs.ts` | Delete the drive-buffer default action. |
+| `src/app/(app)/settings/actions.ts:982` | `saveSchedulingSettings` from `lib/stores/schedule-prefs.ts` | Delete the scheduling-defaults action. |
+| `src/app/(app)/settings/page.tsx:17` | `getScheduleDefaults, getSchedulingSettings, DEFAULT_DRIVE_BUFFER_MIN` from `lib/stores/schedule-prefs.ts` | Delete the loaders and the props they feed. |
+| `src/app/(app)/settings/page.tsx:18` | `DEFAULT_SCHEDULING` from `lib/visit-plan/settings.ts` | Delete with the loaders above. |
+| `src/app/(app)/settings/scheduling-defaults-card.tsx:4` | `WorkHoursEditor (default)` from `components/visit-booking/work-hours-editor.tsx` | Delete this file. |
+| `src/app/(app)/settings/scheduling-defaults-card.tsx:5` | `SchedulingSettings` from `lib/visit-plan/settings.ts` | Delete this file. |
+| `src/app/(app)/settings/groups/field.tsx:10` | `SchedulingSettings` from `lib/visit-plan/settings.ts` | Remove the scheduling-defaults and drive-defaults cards from the Field & Venues group. |
+| `src/app/(app)/settings/groups/types.ts:13` | `SchedulingSettings` from `lib/visit-plan/settings.ts` | Remove the `scheduling` prop from the group props type. |
+| `src/app/(app)/import/registry.ts:15` | `* as Projects` from `lib/stores/projects.ts` | Delete the `projects` import type (registry entry and `types.ts` lines ~242–258). |
+| `src/app/(app)/import/registry.ts:25` | `* as Equipment` from `lib/stores/equipment-items.ts` | Delete the `equipment` import type (`types.ts` lines ~303–320). |
+| `src/app/(app)/import/registry.ts:26` | `* as TaskTemplates` from `lib/stores/task-templates.ts` | Delete the `task_templates` import type (`types.ts` lines ~322–340; `controls.tsx:115`; the link at `import/page.tsx:1029`). |
+| `src/app/(app)/import/daylite/page.tsx:5` | `STAGE_META as REPAIR_STAGE_META` from `lib/stores/repair-jobs.ts` | Only needed while the Daylite history import still writes repair jobs (risk R6). Inline the three stage labels or delete with that import target. |
+| `src/app/print/letter/[kind]/[id]/page.tsx:4` | `RepairLetterView` from `app/(app)/repairs/letter/letter-view.tsx` | Remove the `repair` kind from this print route (lines ~33, ~41). If flame and inspection letters go too, the whole route goes. |
+| `src/lib/nav-counts.ts:5` | `getAllProjects, riskFlags` from `lib/stores/projects.ts` | Delete the `projects` count and the "Projects need attention" bell group (lines ~259–270). |
+| `src/lib/nav-counts.ts:12` | `getAll as allRepairs, flaggedFromInspections, priorityMeta` from `lib/stores/repair-jobs.ts` | Delete the `repairs` count and the "Repairs awaiting scheduling" bell group (lines ~283–294). |
+| `src/lib/nav-counts.ts:18` | `allTasks, taskBellItems, isOverdue` from `lib/stores/tasks.ts` | Delete the "Tasks needing attention" bell group (lines ~320–331). |
+| `src/lib/pipelines-server.ts:133` | `getAllProjects, setProjectStage` from `lib/stores/projects.ts` | Delete the project half of `moveStageRecords` and of `stageUsage` (line ~63); keep the quote half. |
+| `src/lib/documents-upload.ts:4` | `getProject` from `lib/stores/projects.ts` | Refuse `project` as an upload parent, or check existence with a direct `getDoc("projects", id)`. |
+| `src/lib/venue-history-server.ts:13` | `getAllProjects` from `lib/stores/projects.ts` | Drop project rows from the venue history (and the `/projects?id=` link at line ~150), or keep a local reader over the `projects` table. |
+| `src/lib/venue-history-server.ts:17` | `getAll as getAllRepairs` from `lib/stores/repair-jobs.ts` | Drop repair rows (lines ~64, ~176–178) or keep a local reader over `repair_jobs`. |
+| `src/lib/company-summary.ts:3` | `getAllProjects` from `lib/stores/projects.ts` | Drop the project lines from the company summary (link at line ~148). |
+| `src/lib/customer-feed.ts:5` | `getAllProjects` from `lib/stores/projects.ts` | Drop project rows from the customer activity feed (`customer-feed-rows.ts:284`). |
+| `src/lib/customer-feed.ts:8` | `getAll as getAllRepairs` from `lib/stores/repair-jobs.ts` | Drop repair rows from the feed (`customer-feed-rows.ts:206`, `:218`). |
+| `src/lib/vendor-tasks.ts:10` | `allAssignments, createAssignment, type Assignment` from `lib/stores/assignments.ts` | Decision needed (risk R3). Vendor price-list reminders are assignments in My Queue. Either drop `ensureVendorAssignments` and the "owner task" column on `/vendors` (links at `vendors/page.tsx:117`, `vendors/[id]/page.tsx:128`), or keep `stores/assignments.ts`. |
+| `src/lib/stores/site-visits.ts:3` | `normalizeInvites, type VisitInviteRecipient` from `lib/visit-invite-plan.ts` | Move `normalizeInvites` and its type into the store, or drop `invites` from the visit record if invites go. Decision needed (risk R2). Venue Assessments keeps visits but loses invites, conflicts and drive time: replace with a plain date/time/lead form. |
+| `src/lib/stores/site-visits.ts:4` | `readAttendees` from `lib/visit-plan/people.ts` | Move `readAttendees` (10 lines) into the store. |
+| `src/lib/stores/site-visits.ts:5` | `chicagoDayKey` from `lib/drive-plan/day.ts` | Move `src/lib/drive-plan/day.ts` to a neutral path (for example `src/lib/chicago-day.ts`) BEFORE deleting `drive-plan/`, and repoint this import. It is a plain date helper with no drive logic. |
+| `src/lib/stores/quote-spawn.ts:58` | `createFromQuote (dynamic import)` from `lib/stores/repair-jobs.ts` | Remove the `repair` case (risk R1). |
+| `src/lib/stores/quote-spawn.ts:64` | `createFromQuote (dynamic import)` from `lib/stores/equipment-bookings.ts` | Remove the `rental` case (risk R1). |
+| `src/lib/stores/quote-spawn.ts:112` | `createProjectFromQuote` from `lib/stores/projects.ts` | Remove `spawnProject` and the `default` case (risk R1). With flame, inspection and consulting also gone, delete the whole file and its two call sites in `quotes.ts` (lines ~2298, ~2449). |
+| `src/lib/stores/rewards.ts:3` | `normalizeProject, type ProjectRecord` from `lib/stores/projects.ts` | Risk R4. Lifetime spend counts done projects. Keep the read, with a local type and a local `done` test (stage id `complete`, or the last pipeline stage), or decide that spend is quotes only. |
+| `src/lib/stores/rewards.ts:5` | `RepairJobRecord` from `lib/stores/repair-jobs.ts` | Risk R4. Only Daylite-imported repairs count; replace with a local type over the `repair_jobs` table. |
+| `src/lib/stores/quotes.ts:24` | `createAssignment` from `lib/stores/assignments.ts` | Delete the "Install sold — reach out" assignment at lines ~2438–2446. |
+| `src/lib/stores/quotes.ts:31` | `isProjectExcludedQuoteType` from `lib/project-quote-types.ts` | Goes with the line above. Then `project-quote-types.ts` has no kept caller. |
+| `src/lib/stores/quotes.ts:2528` | `getProjectByQuote, updateProject` from `lib/stores/projects.ts` | Delete `syncProjectBonusPool` and its callers; the bonus record stays on the quote. |
+| `src/lib/stores/parties.ts:8` | `ProjectRecord` from `lib/stores/projects.ts` | Replace with a local structural type holding only the fields read here; the `projects` table stays, so the read keeps working. Or drop `project` from `PartyRecordType` and from the company page's Bids & roles card (`components/parties/company-roles-card.tsx:31`, `parties/actions.ts:20`). |
+| `src/lib/daylite/history-commit.ts:65` | `buildProject, normalizeProject, type ProjectNote, type ProjectRecord, type ProjectStageChange` from `lib/stores/projects.ts` | Risk R6. The Daylite history import writes projects. Either retire the project target of that import, or copy `buildProject` / `normalizeProject` into `src/lib/daylite/`. |
+| `src/lib/daylite/history-commit.ts:66` | `* as Repairs` from `lib/stores/repair-jobs.ts` | Risk R6. Same for repair jobs (`buildRepairJob`, `dayliteImportSource`). |
+| `src/lib/parties/bids.ts:3` | `chicagoShortDate, chicagoTime, dayDiff, dayKey` from `lib/triage/clock.ts` | Move the four date helpers to the same neutral Chicago-day module (or `src/lib/format.ts`) and repoint. |
+| `src/lib/estimate-output/responses-server.ts:10` | `createTask` from `lib/stores/tasks.ts` | Risk R3. A client's response on a package page creates one task per assignee. Drop the task step (the note and lead activity remain) or keep a slim task store. |
+| `src/lib/address-verify/worklist.ts:12` | `chicagoDayKey, chicagoDayStart` from `lib/drive-plan/day.ts` | Move `src/lib/drive-plan/day.ts` to a neutral path (for example `src/lib/chicago-day.ts`) BEFORE deleting `drive-plan/`, and repoint this import. It is a plain date helper with no drive logic. |
+| `src/lib/dealer-api/etc/apply.ts:33` | `chicagoDayKey, chicagoDayStart` from `lib/drive-plan/day.ts` | Move `src/lib/drive-plan/day.ts` to a neutral path (for example `src/lib/chicago-day.ts`) BEFORE deleting `drive-plan/`, and repoint this import. It is a plain date helper with no drive logic. |
+| `src/lib/estimate-email/send-server.ts:18` | `createTask` from `lib/stores/tasks.ts` | Risk R3. The follow-up task after sending an estimate (`addFollowUpTask`, line ~1004). The Estimator is losing "send to client" anyway; remove with it. |
+| `src/lib/assessments/reminders-server.ts:9` | `createTaskOnce` from `lib/stores/tasks.ts` | Risk R3. Assessment reminders ARE tasks (`T-asr-…`). Keep a slim task store, or move reminders to their own collection. |
+| `src/lib/assessments/reminder-close.ts:8` | `setTaskStatus` from `lib/stores/tasks.ts` | Same as above; this file also queries `DOC_TABLES.tasks` directly (line ~17). |
+| `src/lib/sync/today-jobs.ts:24` | `RepairJobRecord` from `lib/stores/repair-jobs.ts` | Remove the `repairs` input, the `repair_job` kind and its label. |
+| `src/lib/sync/today-jobs.ts:27` | `ProjectRecord` from `lib/stores/projects.ts` | Remove the `projects` input, the `project` kind and its label. |
+| `src/lib/vendor-quotes/threads-server.ts:13` | `getProject` from `lib/stores/projects.ts` | Remove the project branch of "File to estimate / project…" (the Inbox side of this is leaving anyway). |
+| `src/lib/dashboard/metrics.ts:7` | `ProjectRecord` from `lib/stores/projects.ts` | Delete the project metrics (lines ~96–230: `openProjects`, `backlogProjects`, `projectedProfit`, the forward book). |
+| `src/lib/dashboard/data.ts:9` | `getAllProjects` from `lib/stores/projects.ts` | Delete the `projects` loader. |
+| `src/lib/dashboard/data.ts:17` | `loadQueue` from `lib/queue.ts` | Delete the `queueItems` loader. |
+| `src/lib/dashboard/data.ts:18` | `openWaitingTasksBy` from `lib/stores/tasks.ts` | Delete the `waitingOnOthers` loader. |
+| `src/lib/dashboard/data.ts:19` | `loadHomeAgenda` from `lib/agenda.ts` | Delete the `agenda` loader. |
+| `src/lib/dashboard/data.ts:21` | `loadTaskPlans, VIEW_PLAN_CALENDAR_MS, type PersonPlan` from `lib/task-plan/load.ts` | Delete the `taskPlan` loader. |
+| `src/db/seed-data.ts:13` | `repairJobsSeed` from `db/seeds/repair-jobs.ts` | Delete the `repair_jobs` seed row (line ~120). |
+| `src/db/seed-data.ts:15` | `projectsSeed` from `db/seeds/projects.ts` | Delete the `projects` seed row. |
+| `src/db/seed-data.ts:18` | `equipmentLocationsSeed, equipmentItemsSeed` from `db/seeds/equipment.ts` | Delete the two equipment seed rows (lines ~125–126). |
 
 Summary by removed module (how many kept import statements point at it)
 
 | Removed module | Kept imports | Kept callers |
 | --- | --- | --- |
-| `stores/projects.ts` | 24 | sync push, sync today, companies list and record, documents, import registry, nav counts, pipelines-server, venue history, company summary, customer feed, quote-spawn, rewards, quotes, parties, Daylite history import, vendor quote threads, dashboard data and metrics, two report widget files |
-| `stores/tasks.ts` | 10 | Estimator (actions, page, types), nav counts, client response on a package page, estimate email follow-up, assessment reminders (two files), dashboard data |
+| `stores/projects.ts` | 24 | sync push, sync today, today-jobs, companies list and record, documents (card and upload), import registry, nav counts, pipelines-server, venue history, company summary, customer feed, quote-spawn, rewards, quotes, parties, Daylite history import, vendor quote threads, dashboard data and metrics, two report widget files |
+| `stores/tasks.ts` | 9 | Estimator (actions, page, types), nav counts, client response on a package page, estimate email follow-up, assessment reminders (two files), dashboard data |
 | `stores/repair-jobs.ts` | 9 | sync today, today-jobs, Daylite import page and commit, nav counts, venue history, customer feed, quote-spawn, rewards |
 | `stores/schedule-prefs.ts` | 6 | Account, Settings |
-| `drive-plan/day.ts` | 6 | sync today, venue-assessments actions, site-visits store, address worklist, ETC price sync |
-| `visit-plan/settings.ts` | 5 | Account, Settings |
-| `drive-plan/plan.ts` (`FLAG_TEXT`) | 3 | address flag component, venue-assessments page, company record |
-| `drive-sync/sync.ts` | 4 | Home page, address actions, venue-assessments visit actions |
-| `stores/task-templates.ts` | 3 | Estimator, import registry |
-| `stores/assignments.ts` | 2 | quotes store, vendor tasks |
+| `drive-plan/day.ts` | 5 | sync today, venue-assessments actions, site-visits store, address worklist, ETC price sync |
+| `visit-plan/*` | 9 | Account, Settings (`settings.ts`, 5); venue-assessments and site-visits store (`people.ts`, `input.ts`, `pick-day.ts`, 4) |
 | `components/visit-booking/*` | 5 | venue-assessments, company record, Account, Settings |
-| `task-plan/*`, `queue.ts`, `calendar-tasks.ts`, `agenda.ts`, home cards | 12 | Home cards and dashboard data |
-| `triage/clock.ts`, `components/triage/*` | 3 | bids widget, `parties/bids.ts`, Home page |
-| everything else | 15 | see the rows above |
+| `drive-sync/sync.ts` | 4 | Home page, address actions, venue-assessments visit actions |
+| `drive-plan/plan.ts` (`FLAG_TEXT`) | 3 | address flag component, venue-assessments page, company record |
+| `stores/task-templates.ts` | 3 | Estimator, import registry |
+| `visit-edit-rights.ts`, `visit-invite.ts`, `visit-invite-plan.ts` | 4 | venue-assessments, company record, site-visits store |
+| `task-plan/*`, `queue.ts`, `calendar-tasks.ts`, `agenda.ts`, the three Home card files | 10 | Home cards, dashboard data, Estimator actions (`task-plan/fields.ts`) |
+| `triage/clock.ts`, `components/triage/start-here-card.tsx` | 3 | bids widget, `parties/bids.ts`, Home page |
+| `stores/assignments.ts` | 2 | quotes store, vendor tasks |
+| `components/tasks-card.tsx`, `apply-template-control.tsx` | 2 | Estimator Send & track step |
+| `stores/equipment-items.ts`, `stores/equipment-bookings.ts` | 2 | import registry, quote-spawn |
+| `project-quote-types.ts`, `sync/task-push.ts`, `repairs/letter/letter-view.tsx` | 3 | quotes store, sync push, print route |
+| `db/seeds/*` | 3 | `src/db/seed-data.ts` |
+| Total | 107 | |
 
 ### B.2 Route links and type strings in kept code (not imports)
 
@@ -220,14 +331,14 @@ Management is deleted before those features, these break the build.
 
 | Area | Files | Main removed modules used |
 | --- | --- | --- |
-| Design: consulting engagements (`src/app/(app)/design/engagements/*`, `src/lib/stores/engagements.ts`) | 9 | `consulting-schedule`, `engagement-activity*`, `stores/tasks`, `stores/task-templates`, `components/gantt` |
-| Design: designs (`src/app/(app)/design/designs/*`) | 3 | `stores/tasks`, `stores/task-templates`, `tasks-card`, `apply-template-control`, `task-plan/fields` |
-| Inbox (`src/app/(app)/inbox/*`, `src/lib/inbox-*`, `src/lib/inbox-org/*`, `src/lib/gmail/bridge.ts`, `src/lib/task-thread-share.ts`) | 20 | `stores/tasks`, `task-plan/due`, `visit-invite*`, `visit-plan/*`, `components/visit-booking`, `triage/*` |
-| Meetings and recordings (`src/lib/meetings/*`, `src/lib/krisp/write-back.ts`, `src/app/(app)/recordings/*`, `src/components/meetings/*`) | 8 | `stores/tasks`, `stores/assignments`, `stores/projects`, `queue` |
-| Assist and daily brief (`src/lib/assist/*`, `src/lib/brief/*`, `src/components/brief/*`, `src/components/ask/*`) | 19 | `triage/*`, `stores/tasks`, `task-plan/*` |
-| Flame tests and inspections (`flame-tests/actions.ts`, `inspections/actions.ts`, `src/lib/inspection-engine.ts`, `src/lib/stores/inspections.ts`) | 4 | `service-calendar`, `repair-engine` (`tripTravel`), `stores/projects` (`spawnServiceLinkedProject`) |
-| Portal (`src/app/portal/page.tsx`, `src/lib/portal-projects.ts`, `src/lib/portal-quotes.ts`) | 3 | `stores/projects`, `stores/tasks` |
-| Gmail cron (`src/app/api/gmail/sync/route.ts`) | 1 | `google/tasks-sync`, `triage/service` |
+| Design: consulting engagements (`src/app/(app)/design/engagements/*`, `src/lib/stores/engagements.ts`), 20 imports | 9 | `consulting-schedule`, `engagement-activity*`, `stores/tasks`, `stores/task-templates`, `components/gantt` |
+| Design: designs (`src/app/(app)/design/designs/*`), 8 imports | 3 | `stores/tasks`, `stores/task-templates`, `tasks-card`, `apply-template-control`, `task-plan/fields` |
+| Inbox (`src/app/(app)/inbox/*` except meetings, `src/lib/inbox-*`, `src/lib/inbox-org/*`, `src/lib/gmail/bridge.ts`, `src/lib/task-thread-share.ts`), 32 imports | 18 | `stores/tasks`, `task-plan/due`, `visit-invite*`, `visit-plan/*`, `components/visit-booking`, `triage/*` |
+| Meetings and recordings (`src/app/(app)/inbox/meetings/*`, `src/lib/meetings/*`, `src/lib/krisp/write-back.ts`, `src/app/(app)/recordings/*`, `src/components/meetings/*`), 14 imports | 8 | `stores/tasks`, `stores/assignments`, `stores/projects`, `queue` |
+| Assist and daily brief (`src/lib/assist/*`, `src/lib/brief/*`, `src/components/brief/*`, `src/components/ask/*`, `inbox/assist-*`), 41 imports | 18 | `triage/*`, `stores/tasks`, `task-plan/*` |
+| Flame tests and inspections (`flame-tests/actions.ts`, `inspections/actions.ts`, `src/lib/inspection-engine.ts`, `src/lib/stores/inspections.ts`), 4 imports | 4 | `service-calendar`, `repair-engine` (`tripTravel`), `stores/projects` (`spawnServiceLinkedProject`) |
+| Portal (`src/app/portal/page.tsx`, `src/lib/portal-projects.ts`, `src/lib/portal-quotes.ts`), 3 imports | 3 | `stores/projects`, `stores/tasks` |
+| Gmail cron (`src/app/api/gmail/sync/route.ts`), 2 imports | 1 | `google/tasks-sync`, `triage/service` |
 
 ---
 
@@ -237,12 +348,12 @@ Management is deleted before those features, these break the build.
 
 | File:line | Entry |
 | --- | --- |
-| `src/components/nav/nav-data.ts:72–75, :78–79` | Projects, My Projects, Schedule, Field Work, Repairs, Rentals in the `pm` group. Lines 76–77 (Flame Tests, Rigging Inspections) go separately; when they go, delete the whole `pm` group (lines 66–81) |
+| `src/components/nav/nav-data.ts:72–75, :78–79` | Projects, My Projects, Schedule, Field Work, Repairs, Rentals in the `pm` group. Lines 76–77 (Flame Tests, Rigging Inspections) go separately; when they go, delete the whole `pm` group (~lines 66–81) |
 | `src/components/nav/nav-data.ts:160–162` | `activeKeyFor` map: `/queue`, `/triage`, `/calendar` |
 | `src/components/nav/nav-data.ts:171–173, :176–177, :190` | Map: `/projects`, `/schedule`, `/field-work`, `/repairs`, `/rentals`, `/task-templates` |
 | `src/app/(app)/home-tabs-keys.ts:15–16` | Home tabs "My Queue" and "Calendar". `HOME_TABS` also feeds the Home nav group, so removing them here removes both |
 | `src/components/nav/SyncChip.tsx` | Uses `download-today`; keep, but check the wording once projects and repairs leave today's jobs |
-| `src/lib/nav-counts.ts:~95, ~98` | Badge counts `projects` and `repairs` |
+| `src/lib/nav-counts.ts` (the `counts` object, ~lines 175–185) | Badge counts `projects` and `repairs` |
 
 ### C.2 Cron routes (`vercel.json`)
 
@@ -258,16 +369,16 @@ Move it (for example to `src/lib/cron-auth.ts`) before deleting `src/lib/triage/
 ### C.3 Middleware (`src/middleware.ts`)
 
 Remove `api/triage/build` from the matcher's exemption list, and its sentence from the header
-comment. Keep `api/drive/sync` while that route stays. `api/queue` is not exempt (it checks its
-own token after the session check fails), so nothing to remove for it; delete the
-`QUEUE_API_TOKEN` environment variable from the deployment and from `.env.example`.
+comment. Keep `api/drive/sync` while that route stays. `api/queue` is not in the exemption list,
+so there is nothing to remove for it. The `QUEUE_API_TOKEN` environment variable is read only by
+`src/app/api/queue/route.ts`; remove it from the deployment (it is not in `.env.example`).
 
 ### C.4 Settings and Account
 
 | Where | What to remove |
 | --- | --- |
 | `src/app/(app)/settings/settings-sections.ts:51` and the `data` row of `GROUP_LINKS` | The "Task Templates" link tile |
-| `src/app/(app)/settings/settings-sections.ts` (`SETTINGS_CARDS`) | Any scheduling or drive-defaults card keys (not all card rows were read; search for `scheduling` and `drive`) |
+| `src/app/(app)/settings/settings-sections.ts` (`SETTINGS_CARDS`) | No card key mentions scheduling or drive defaults (searched); those two cards are rendered by `groups/field.tsx` without a registry row |
 | `src/app/(app)/settings/groups/field.tsx:10`, `groups/types.ts:13`, `settings/page.tsx:17–18`, `settings/actions.ts:~968, ~982` | Company work hours, same-area minutes, daily drive limit, look-ahead days, drive buffer |
 | `src/app/(app)/settings/pipelines-card.tsx`, `pipeline-stage-row.tsx`, `groups/sales.tsx` | The PROJECT pipelines half of Settings → Pipelines. Keep the quote pipelines half |
 | Settings → Field & Venues → "Site visits — reason picklist" | Keep; Venue Assessments uses visit reasons |
@@ -415,7 +526,7 @@ Fields inside the main app settings record (`app_settings`, id `main`): `project
 
 Fields on kept records that become write-only or dead: `Quote.repair`, `Quote.rental` (old
 quotes keep them), `ProjectRecord.performanceBonusPool` (no writer once `syncProjectBonusPool`
-goes), task link fields on nothing.
+goes).
 
 External state that is NOT in the database and will be left behind: Google Calendar events the
 app created (crew bookings; repair scheduling events with ids starting `qzre`; drive events
@@ -493,8 +604,8 @@ anything else.
     `apply-template-control.tsx`, `task-ids.ts`, `sync/task-push.ts`, or reduce `stores/tasks.ts`
     to what assessment reminders need. Remove `tasks`, `projects`, `repair_jobs` from
     `SYNCABLE_COLLECTIONS` and `FIELD_COLLECTIONS` in the same commit.
-11. Clean up: `package.json` scripts, `scripts/`, `AGENTS.md` phase notes, `.env.example`
-    (`QUEUE_API_TOKEN`), `MASTER-HOWTO.md` sections that describe these screens.
+11. Clean up: `package.json` scripts, `scripts/`, `AGENTS.md` phase notes, the `QUEUE_API_TOKEN`
+    deployment variable, `MASTER-HOWTO.md` sections that describe these screens.
 
 ---
 

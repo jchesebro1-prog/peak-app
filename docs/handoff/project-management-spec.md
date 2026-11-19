@@ -401,8 +401,9 @@ Projects list (`/projects`)
   (shown only when such records exist).
 - An owner filter (`?who=mine` or a teammate's name, exact match) that applies to the tiles, the
   list, the board and the "ready to start" strip alike.
-- List view (master-detail) or Board view. The board shows projects only (not orders), in columns
-  by stage. Cards are not draggable; a stage is changed from the detail view.
+- List view (master-detail) or Board view. The board shows projects only (not orders), one column
+  per stage of the install pipeline as named in settings. Cards are not draggable; a stage is
+  changed from the detail view.
 - Each card shows a due chip: "Closed <date>" when done, "Nd overdue", "Due today" or "Due in Nd".
 - A "Won — ready to start" strip with one Start button per unconverted won quote.
 - `/projects?id=<id>` redirects to `/projects/<id>`.
@@ -748,7 +749,7 @@ Documents
 | Document | Route | Content |
 | --- | --- | --- |
 | Proposal letter | `/repairs/letter?id=<quoteId>` | Cover letter for a saved repair quote: scope, service line, parts, one "Travel (air, lodging & per diem)" line when flying, lift line, total |
-| Service report | `/repairs/report?job=<id>&variant=letter|summary|report` | Completion document in three layouts; default is the formal report. Says "Results not logged yet" for an incomplete job |
+| Service report | `/repairs/report?job=<id>&variant=<letter, summary or report>` | Completion document in three layouts; default is the formal report. Says "Results not logged yet" for an incomplete job |
 | Report options | `/repairs/report/options` | The same sample rendered three ways, to compare |
 | Completion letter | `/repairs/completion-letter?job=<id>` | One-page customer confirmation of completed work |
 | Warranty & repair record | `/repairs/warranty-record?job=<id>` | Internal one-page tracker for a warranty callback |
@@ -1663,7 +1664,7 @@ line by line.
 - The Calendar screen's event editor fields and the filter rail, beyond the action names.
 - The Project timeline band layout and the by-person merge of install bookings, beyond the file
   header comments.
-- The Projects Board view's exact column set (per stage or per tag) and card contents.
+- The Projects Board view's card contents.
 - How Daylite-imported projects and repairs are built (`src/lib/daylite/`). Only the fields they
   set on these records were noted.
 - The lead first-response deadline rule used by triage. It belongs to the CRM

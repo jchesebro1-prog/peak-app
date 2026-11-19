@@ -27,8 +27,9 @@ programs plus written specs the long-term coding team can fold into their own ap
 | --- | --- | --- | --- |
 | 1 | Client Portal | `client-portal-spec.md` | Spec written; code not yet removed |
 | 2 | Flame Tests + Rigging Inspections | `programs/peak-service.html` + `flame-inspections-spec.md` | Program and spec written; code not yet removed |
-| 3 | Project Management | spec, then removal | Not started |
-| 4 | Krisp + Inbox | spec, then removal | Not started |
+| 3 | Project Management (incl. Repairs, Rentals, tasks, calendar, triage) | `project-management-spec.md` + `removal-map-project-management.md` | Spec and removal map written; code not yet removed |
+| 4 | Inbox, Krisp, AI | `inbox-krisp-ai-spec.md` + `removal-map-inbox-krisp-ai.md` | Spec and removal map written; code not yet removed |
+| 4b | Venue Assessments | `venue-assessments-spec.md`, `venue-assessment-form.json`, tab in `programs/peak-service.html` | Spec written; form, photos, recap and field sheet in the program; sketch pads and 3D preview not ported |
 | 5 | Design tab | HTML + spec | Not started |
 | 6 | Estimator revisions | in-app change | Not started |
 
@@ -40,6 +41,7 @@ The offline program follows `flame-inspections-spec.md` except where a single of
 - A quote's price freezes at the rates in force when it is marked sent; Revise reopens it at today's rates. (The app re-prices on each builder save.)
 - Rates are edited only on the Rates tab, never from inside a quote.
 - Renewal emails are text to copy; nothing is sent.
+- Venue Assessments are drawn from `venue-assessment-form.json`, embedded in the file. Sketch pads are replaced by a photo upload per pad; the 3D preview, travel auto-fill from routing, the optional findings merge/split tools and Fill down / Mark range spare on the line set schedule are not ported.
 - Not included: the dashboard map, calendar holds, the customer portal, repairs flagged from inspections, the three report layout variants (one layout each), rewards credit.
 - The flame result column the app stores as `retreated` is labelled IFR, as the app's letters do. The spec flags this naming as an open question for Jeff.
 
