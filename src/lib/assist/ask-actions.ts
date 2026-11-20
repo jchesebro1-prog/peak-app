@@ -5,7 +5,6 @@ import { requireUser } from "@/lib/session";
 import { recordAskConfirm } from "@/lib/stores/assist-runs";
 import { ASK_CARD_KINDS, type AskCardKind } from "./features/ask-cards";
 import { ASK_RUN_ID_MAX } from "./features/ask-body";
-import { createAskTask, type AskTaskRequest } from "./ask-task-write";
 
 const RUN_ID_RE = /^AR-[a-z0-9-]+$/;
 
@@ -24,20 +23,9 @@ export async function recordAskCardAction(runId: string, kind: AskCardKind): Pro
   return { ok: await recordAskConfirm(id, me.id, kind) };
 }
 
-/**
- * Ask AI — a task card. requireUser + `createAskTask`, which re-checks every
- * link the card shows (a thread through loadThreadFor), files an email task
- * under "Email" like the Inbox, and leaves the due default to createTask (#327).
- */
-export async function createAskTaskAction(req: AskTaskRequest): Promise<{ ok: true } | { ok: false; error: string }> {
-  const me = await requireUser();
-  try {
-    const r = await createAskTask(req, { id: me.id, name: me.name });
-    if (!r.ok) return r;
-  } catch (error) {
-    console.error("createAskTaskAction: task create failed", error);
-    return { ok: false, error: "Couldn’t create the task — please try again." };
-  }
-  revalidatePath("/", "layout");
-  return { ok: true };
+/** Ask AI — a task card. Tasks were removed from the app, so the card can no longer be confirmed. */
+export async function createAskTaskAction(_req: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
+  void _req;
+  await requireUser();
+  return { ok: false, error: "Tasks were removed from the app." };
 }

@@ -22,7 +22,6 @@ import { isDone } from "@/lib/pipelines";
 import type { CommThread } from "@/lib/stores/comms";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import { OPEN_STAGES } from "@/lib/stores/leads";
-import { projectsForCustomer } from "@/lib/stores/projects";
 import { isPlaceholderCompany } from "./placeholder";
 import type { Filing, NoiseFlag } from "./types";
 
@@ -235,9 +234,8 @@ export async function customerRecordCandidates(
   cname: string,
   limit: number = MAX_RECORD_CANDIDATES
 ): Promise<FilingCandidate[]> {
-  const [quotes, projects, leads] = await Promise.all([
+  const [quotes, leads] = await Promise.all([
     listDocsByField<QuoteDoc>("quotes", "customerId", [cid]).catch(() => [] as QuoteDoc[]),
-    projectsForCustomer(cid).catch(() => []),
     listDocsByField<LeadDoc>("leads", "customerId", [cid]).catch(() => [] as LeadDoc[]),
   ]);
   const records: Array<FilingCandidate & { at: number }> = [
@@ -251,9 +249,6 @@ export async function customerRecordCandidates(
         customerName: cname,
         at: Number(q.updatedAt) || 0,
       })),
-    ...projects
-      .filter((p) => !isDone(p))
-      .map((p) => ({ id: p.id, type: "project" as const, label: `${p.id} ${p.name || ""}`.trim(), customerId: cid, customerName: cname, at: p.updatedAt || 0 })),
     ...leads
       .filter((l) => (OPEN_STAGES as readonly string[]).includes(String(l.stage || "new")))
       .map((l) => ({

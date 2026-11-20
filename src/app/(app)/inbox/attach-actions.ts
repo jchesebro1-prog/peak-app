@@ -2,7 +2,6 @@
 
 import { requireUser } from "@/lib/session";
 import { ownThread } from "@/lib/inbox-thread-guard";
-import { getProject } from "@/lib/stores/projects";
 import { documentsForCustomer } from "@/lib/stores/documents";
 import { nameFor } from "@/lib/stores/customers";
 import { emailDocContext, finalizeMailUpload } from "@/lib/mail-attachments-server";
@@ -55,11 +54,7 @@ export async function attachableDocumentsAction(input: { threadId?: string | nul
   // #356 review — the picker's header names the company and project the files come from
   const names: string[] = [];
   if (ctx.customerId) names.push((await nameFor(ctx.customerId)) || ctx.customerId);
-  if (ctx.projectId) {
-    const p = await getProject(ctx.projectId);
-    if (p?.customerId) companies.add(p.customerId);
-    names.push(p ? `${p.id} · ${p.name}` : ctx.projectId);
-  }
+  if (ctx.projectId) names.push(ctx.projectId);
   const heading = names.join(" — ");
   if (!companies.size) return { ok: true, docs: [], heading };
   const rows = (await Promise.all([...companies].map((c) => documentsForCustomer(c)))).flat();

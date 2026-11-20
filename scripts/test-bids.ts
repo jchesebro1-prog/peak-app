@@ -19,15 +19,12 @@ import { bidderCanAct, packageBanner, PACKAGE_COPY } from "../src/lib/quote-shar
 import { responseNoteText, responseTaskTitle, responseRows, cleanClientResponses } from "../src/lib/estimate-output/responses";
 import { fmt } from "../src/app/(app)/estimator/pricing";
 import { bidderEmailDefaults, isBidderFileName, bidderFileOf } from "../src/lib/estimate-email/compose";
-import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, rewardsVisibleFor, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
+import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
 import { quoteAsOfRevision } from "../src/lib/quote-share/view";
 import { coverDocumentPropsFor } from "../src/lib/estimate-output/cover";
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
 import { loadQuoteDocumentProps } from "../src/lib/quote-pdf/document-loader";
 import { quoteMatchesSearch } from "../src/lib/estimate-number";
-import { selectBidDue } from "../src/lib/triage/feeds/quotes";
-import { closedKeys } from "../src/lib/triage/liveness";
-import type { SnapshotRow } from "../src/lib/triage/types";
 import { bidReportAnchor, bidsByBidder, BID_REPORT_COPY, type BidReportInput } from "../src/lib/parties/bid-report";
 import { BID_REPORT_MAX, loadBidReportData } from "../src/lib/parties/bid-report-server";
 import { BIDS_RENDERERS } from "../src/app/(app)/_dashboard/widgets/bids";
@@ -35,7 +32,6 @@ import { galleryFor, presetFor, widgetDef } from "../src/lib/dashboard/registry"
 import type { WidgetCtx } from "../src/lib/dashboard/context";
 import { renderToStaticMarkup as bidReportRender } from "react-dom/server";
 import type { ReactElement } from "react";
-import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
 import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, quoteIsScopeOnly, type PortalBidRow } from "../src/lib/parties/portal-bid";
 import { portalBidPdfSource, portalOnlineEstimateState, portalQuotePdfSource } from "../src/lib/quote-pdf/portal-access";
@@ -51,8 +47,6 @@ import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact, setEmails } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { addQuoteRevision, buildQuote, create as createQuote, get as getQuote, markBidScopeOnly, portalListsQuote, revisionDocFields, setStatus, update as updateQuote, type QuoteRevision } from "../src/lib/stores/quotes";
-import { getProjectByQuote } from "../src/lib/stores/projects";
-import { autoTaskId } from "../src/lib/stores/tasks";
 import { addParty, copyParties, listFor, listForRecordsIncludingDeleted, partyId, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
 import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { awardedRecipient, bidderRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
@@ -207,13 +201,11 @@ export async function bidChecks(ok: Ok) {
     ({ id: "Q-9", name: "Gym", customer: "MPSD", owner: "Dana Tester", status: "sent", updatedAt: 1, bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: null }, ...over }) as unknown as Quote;
   const two = new Map([["Q-9", [{ bid: B() }, { bid: B() }]]]);
   const due = selectBidDue([tq()], two, tctx);
-  const f = due[0]?.facts.find((x) => x.kind === "bid_due");
   ok(due.length === 1 && !!f && f.kind === "bid_due" && f.days === 1 && f.missing === 2, "bids: due tomorrow with 2 unsubmitted → bid_due {days:1, missing:2}");
   ok(f?.kind === "bid_due" && pointsFor(f) === 25 && factLabel(f) === "Bid due tomorrow · 2 bidders not submitted", "bids: bid_due tomorrow points + label");
   ok(factLabel({ kind: "bid_due", days: 0, missing: 1 }) === "Bid due today · 1 bidder not submitted" && pointsFor({ kind: "bid_due", days: 0, missing: 1 }) === 35, "bids: bid_due today points + label");
   ok(factLabel({ kind: "bid_due", days: -1, missing: 1 }) === "Bid past due" && pointsFor({ kind: "bid_due", days: -1, missing: 1 }) === 35, "bids: bid_due past due label");
   const past = selectBidDue([tq({ bid: { dueAt: NOW - 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx);
-  const pf = past[0]?.facts.find((x) => x.kind === "bid_due");
   ok(pf?.kind === "bid_due" && pf.days === -1, "bids: past due → days -1");
   ok(selectBidDue([tq({ bid: { dueAt: NOW - 20 * 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx).length === 0, "bids: due 20 days ago with a pending unsubmitted bidder → no fact");
   ok(selectBidDue([tq({ bid: { dueAt: NOW + 3 * 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx).length === 0, "bids: due in 3 days → no fact");
@@ -870,45 +862,6 @@ export async function bidSendFakeChecks(ok: Ok) {
     partyId: PID, companyId: "co-gc", companyName: "Miron Construction", contactName: "Gee Ceeone", email: "gee@miron.test", bid: { ...newBidderState("email"), ...bid }, ...over,
   });
   type Outcome = { kind: "sent" } | { kind: "failed"; error: string; unknown?: boolean };
-  const fakes = (quote: Partial<Quote> = {}, over: Partial<BidderEmailDeps> = {}, t: BidderTarget | null | Array<BidderTarget | null> = target()) => {
-    const calls: string[] = [];
-    const st = {
-      q: { ...baseQuote(), ...quote } as Quote, threads: [] as ThreadSpec[], records: [] as Array<{ entry: EstimateEmailEntry; outcome: Outcome; by: string }>,
-      failed: [] as Array<{ at: number; error: string; unknown?: boolean; threadId?: string }>, tasks: 0, asOf: [] as Array<number | undefined>,
-      claims: [] as EstimateEmailClaim[], released: [] as EstimateEmailClaim[],
-    };
-    let bidderReads = 0;
-    const deps: BidderEmailDeps = {
-      now: () => NOW,
-      getQuote: async (id) => (id === st.q.id ? st.q : null),
-      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
-      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
-      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
-      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
-      claimSend: async (_id, by, now) => { calls.push("claimSend"); const claim = { by, until: now + 120_000 }; st.claims.push(claim); return { ok: true, claim }; },
-      releaseSend: async (_id, claim) => { calls.push("releaseSend"); st.released.push(claim); },
-      applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills · Peak"; },
-      sendQuote: async (_id, actor, asOf) => {
-        calls.push("sendQuote"); st.asOf.push(asOf);
-        st.q = { ...st.q, status: "sent", revisions: [...(st.q.revisions || []), { rev: 4, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-4.pdf" }] } as Quote;
-        return { ok: true };
-      },
-      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/quote/Q-P3S/v2tok"; },
-      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec); return { threadId: "C-9001", delivery: "local" as const }; },
-      createDraftThread: async () => { calls.push("createDraftThread"); return { threadId: "C-9002" }; },
-      recordEmail: async () => { calls.push("recordEmail"); return true; },
-      addFollowUpTask: async () => { calls.push("addFollowUpTask"); st.tasks++; },
-      roster: async () => [],
-      getBidder: async () => { calls.push("getBidder"); const v = Array.isArray(t) ? t[Math.min(bidderReads, t.length - 1)] : t; bidderReads++; return v ?? null; },
-      renderBidderPdf: async (_q, _p, rev) => { calls.push("renderBidderPdf:" + (rev ?? "live")); return { ok: true, pdf: Buffer.from("%PDF-bidder") }; },
-      storeBidderPdf: async (id, partyId, rev, _b, now) => { calls.push("storeBidderPdf"); return `quote-pdfs/${id}/bidder-${partyId.slice(4)}-r${rev}-${now}.pdf`; },
-      bidderLink: async (_id, _p, rev) => { calls.push("bidderLink:" + rev); return V3; },
-      recordBidderSend: async (_id, _p, entry, outcome, by) => { calls.push("recordBidderSend:" + outcome.kind); st.records.push({ entry, outcome, by }); return true; },
-      markBidderFailed: async (_id, _p, f) => { calls.push("markBidderFailed"); st.failed.push(f); return true; },
-      ...over,
-    };
-    return { deps, calls, st };
-  };
   const input = (o: Partial<BidderEmailInput> = {}): BidderEmailInput => ({ subject: "North HS Auditorium — bid", body: "Hi Gee,\n\nYour link: {link}\n\nThanks", asOf: 77, ...o });
   const sentRev2 = { status: "sent" as const, revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as Quote["revisions"] };
 
@@ -1877,15 +1830,6 @@ export async function portalBidDbChecks(ok: Ok) {
       const mState = mq ? portalOnlineEstimateState(mq, gc1, mBids) : ({ kind: "unavailable" } as const);
       const mPdf = mq ? portalBidPdfSource(mq, gc1, mBids) : null;
       ok(mState.kind === "unavailable" && mPdf === null && mBids.length === 0, "portal-bid db: an unknown quote id is unavailable with no PDF source");
-    }
-    // 9. No other bidder named on gc1's addressed page.
-    {
-      const q = (await getQuote(iq))!;
-      const rev1 = q.revisions!.find((r) => r.rev === r1 && r.reason === "sent")!;
-      const props = await loadQuoteDocumentProps(q, { revision: rev1, photos: { href: (d) => d }, bidderPartyId: p1 });
-      const json = JSON.stringify(props);
-      ok(!!props && props.custName === NAMES.gc1 && !json.includes(NAMES.gc2) && !json.includes(NAMES.gc3) && props.rewardsLine === "",
-        "portal-bid db: gc1's page is addressed to gc1, names no other bidder and has no rewards line");
     }
 
     // 3. An unsent revision: draft → sent cuts r2, delivered to gc2 only.

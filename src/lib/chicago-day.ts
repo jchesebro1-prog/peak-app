@@ -76,3 +76,8 @@ export function chicagoTime(ms: number): string {
 export function chicagoShortDate(ms: number): string {
   return plainSpace(new Date(ms).toLocaleDateString("en-US", { timeZone: DRIVE_TZ, month: "short", day: "numeric" }));
 }
+
+/** epoch-ms of 00:00 Chicago on the day `ms` falls on. */
+export function chicagoMidnight(ms: number): number {
+  return chicagoDayStart(chicagoDayKey(ms));
+}

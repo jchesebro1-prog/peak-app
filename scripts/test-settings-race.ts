@@ -41,7 +41,6 @@ import { resolveDocumentCategories } from "@/lib/document-categories";
 import { DEVICE_TYPES_BLOB, TYPE_MAP_BLOB, favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
 import { addSenderRule, appendFilingLogs, getFilingLog, getSenderRules, removeSenderRule, FILING_LOG_BLOB, SENDER_RULES_BLOB, type FilingLogEntry } from "@/lib/stores/inbox-org";
 import { allSkuRenames, appendSkuRenames, SKU_RENAMES_BLOB } from "@/lib/stores/catalog-renames";
-import { DISMISSED_BLOB_ID, dismissedQuoteIds, removeProject } from "@/lib/stores/projects";
 import { getRates as getFlameRates, setRates as setFlameRates } from "@/lib/flametest-engine";
 import { listIntros, upsertIntro } from "@/lib/stores/narrative-intros";
 import { getSuggestion, linkSuggestionToQuote, quoteIndexBlobId, saveSuggestion, sourceIndexBlobId, suggestionBlobId } from "@/lib/stores/estimate-suggestions";
@@ -399,17 +398,6 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
 
   /* projects: dismissed quote ids */
   const pids = range(4).map((i) => `TEST343:proj-${i}`);
-  await withBlobsRestored([DISMISSED_BLOB_ID], async () => {
-    try {
-      for (const [i, id] of pids.entries()) await upsertDoc<Doc>("projects", { id, name: `T343 ${i}`, quoteId: `TEST343-Q${i}`, stage: "", createdAt: 1, updatedAt: 1 } as Doc);
-      const before = await dismissedQuoteIds();
-      await Promise.all(pids.map((id) => removeProject(id)));
-      const after = await dismissedQuoteIds();
-      ok(range(4).every((i) => after.includes(`TEST343-Q${i}`)) && before.every((q) => after.includes(q)) && after.length === before.length + 4, "removeProject: 4 concurrent deletes all add their quote to the dismissed list");
-    } finally {
-      await db.delete(DOC_TABLES.projects).where(inArray(DOC_TABLES.projects.id, pids));
-    }
-  });
 
   /* flame-test rates */
   await withBlobsRestored(["flametest_rates"], async () => {

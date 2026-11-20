@@ -52,9 +52,7 @@ import { leadsSeed } from "../src/db/seeds/leads";
 import { surveysSeed } from "../src/db/seeds/surveys";
 import { commsSeed } from "../src/db/seeds/comms";
 import { flameJobsSeed } from "../src/db/seeds/flame-jobs";
-import { repairJobsSeed } from "../src/db/seeds/repair-jobs";
 import { inspectionsSeed } from "../src/db/seeds/inspections";
-import { projectsSeed } from "../src/db/seeds/projects";
 import { designsSeed } from "../src/db/seeds/designs";
 
 /** Mirrors DEMO_SEEDS in src/db/seed-data.ts, the surface a go-live reset wipes. */

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { checkRecording } from "@/lib/krisp/check";
 import { startKrispImport } from "@/lib/krisp/import";
-import { acceptActionItem, dismissActionItem, insertPrefill, postFeedNote } from "@/lib/krisp/write-back";
+import { dismissActionItem, insertPrefill, postFeedNote } from "@/lib/krisp/write-back";
 import { requireUser } from "@/lib/session";
 import { getRecording, removeRecording, setKrispPendingForRetry, type KrispStatus, type RecordingRecord } from "@/lib/stores/recordings";
 
@@ -94,27 +94,6 @@ export async function retryImportAction(id: string): Promise<ActionResult> {
     }
   } catch (err) {
     return { ok: false, error: errorText(err, "Retry failed.") };
-  }
-}
-
-/** Accept one action item into the Home Queue (spec §4.2). */
-export async function acceptActionItemAction(
-  id: string,
-  key: string,
-  assigneeUserId: string | null,
-  dueAt: number | null,
-  tierSize?: { priority?: string; size?: string }
-): Promise<{ ok: boolean; assignmentId?: string; error?: string }> {
-  const user = await requireUser();
-  try {
-    const rec = await loadRecording(id);
-    const r = await acceptActionItem(rec, key, assigneeUserId, dueAt, user.name, tierSize);
-    revalidatePath(recPath(id));
-    revalidatePath("/");
-    revalidatePath("/queue");
-    return { ok: true, assignmentId: r.assignmentId };
-  } catch (err) {
-    return { ok: false, error: errorText(err, "Could not accept the action item.") };
   }
 }
 

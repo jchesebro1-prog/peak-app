@@ -12,12 +12,9 @@ import { matchAssignee, routePrefill, summarySectionKey, normalizeActionTitle } 
 import { StatusChip } from "@/components/recordings/status-chip";
 import { EmptyState } from "@/components/ui";
 import { ConfirmButton } from "@/components/confirm-button";
-import TierSizeChips from "@/components/task-plan/tier-size-chips";
-import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 import { initialTranscriptShown } from "@/lib/recording-deep-link";
 import type { PrefillTarget } from "../data";
 import {
-  acceptActionItemAction,
   checkRecordingAction,
   deleteRecordingAction,
   dismissActionItemAction,
@@ -444,8 +441,6 @@ function ActionItemRow({
   const fallback = users.some((u) => u.id === rec.recordedByUserId) ? rec.recordedByUserId : viewerId ?? "";
   const [assignee, setAssignee] = useState<string>(matched?.id ?? fallback);
   const [due, setDue] = useState<string>(toDateInput(item.dueDate));
-  const [tier, setTier] = useState<TaskTier>("normal");
-  const [size, setSize] = useState<TaskSize>("m");
   const pending = item.disposition === "pending";
   const dismissed = item.disposition === "dismissed";
 
@@ -473,23 +468,6 @@ function ActionItemRow({
       </div>
       {pending ? (
         <>
-          <select value={assignee} onChange={(e) => setAssignee(e.target.value)} style={INPUT}>
-            <option value="">Unassigned</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} style={INPUT} />
-          <TierSizeChips tier={tier} size={size} onTier={setTier} onSize={setSize} disabled={busy} />
-          <button
-            style={ACCENT_BTN}
-            disabled={busy}
-            onClick={() => run(() => acceptActionItemAction(rec.id, item.key, assignee || null, due ? dateInputToMs(due) : null, { priority: tier, size }))}
-          >
-            Accept
-          </button>
           <button style={SMALL_BTN} disabled={busy} onClick={() => run(() => dismissActionItemAction(rec.id, item.key))}>
             Dismiss
           </button>
@@ -497,11 +475,6 @@ function ActionItemRow({
       ) : item.disposition === "accepted" ? (
         <span style={{ fontSize: 11.5, color: "#1f7a52", display: "inline-flex", alignItems: "center", gap: 6 }}>
           ✓ Accepted
-          {item.assignmentId && (
-            <Link href="/queue" style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#1f7a52" }} title="Open the Home Queue">
-              → assignment {item.assignmentId}
-            </Link>
-          )}
         </span>
       ) : (
         <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>Dismissed</span>

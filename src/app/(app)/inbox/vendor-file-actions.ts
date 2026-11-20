@@ -12,7 +12,6 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { getAll as getAllQuotes, type Quote } from "@/lib/stores/quotes";
-import { getAllProjects } from "@/lib/stores/projects";
 import { fileThreadTo } from "@/lib/vendor-quotes/threads-server";
 import { filingLinkLabel } from "@/lib/vendor-quotes/rules";
 import type { FilingTargetVM } from "@/lib/vendor-quotes/vm";
@@ -74,11 +73,6 @@ export async function searchFilingTargetsAction(q: string, kinds: Array<"quote" 
         type: "quote", id: quote.id, label: filingLinkLabel({ type: "quote", number: displayQuoteNumber(quote), name: quote.name }),
         sub: [quote.customer, quote.status].filter(Boolean).join(" · "),
       });
-  }
-  if (want.has("project")) {
-    const t = term.toLowerCase();
-    const hits = (await getAllProjects()).filter((p) => p.id.toLowerCase().includes(t) || (p.name || "").toLowerCase().includes(t)).slice(0, 8);
-    for (const p of hits) out.push({ type: "project", id: p.id, label: filingLinkLabel({ type: "project", id: p.id, name: p.name }), sub: p.customer || "" });
   }
   return out;
 }

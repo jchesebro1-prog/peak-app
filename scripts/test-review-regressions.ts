@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { setRates as setFlameRates, getRates as getFlameRates } from "@/lib/flametest-engine";
-import { setRates as setRepairRates, getRates as getRepairRates } from "@/lib/repair-engine";
 import { setRates as setInspectionRates, getRates as getInspectionRates } from "@/lib/inspection-engine";
 import {
   allEngagements,
@@ -38,9 +37,7 @@ import {
   saveVendorProfile, setContactRole, vendorCompanyNamed, vendorForManufacturer,
 } from "@/lib/stores/vendors";
 import { setSettings } from "@/lib/settings";
-import { allAssignments, createAssignment, setAssignmentDone } from "@/lib/stores/assignments";
-import { ensureVendorAssignments, loadVendors } from "@/lib/vendor-tasks";
-import { loadQueue } from "@/lib/queue";
+import { loadVendors } from "@/lib/vendor-tasks";
 import {
   upsert as upsertCustomer,
   get as getCustomer,
@@ -1150,7 +1147,6 @@ async function main() {
     const E = Date.now() - 5 * 86_400_000;
     await logPriceList("v-t122c", { receivedAt: Date.now(), effectiveAt: E, note: "2026 list" }, "Tester");
     const key = `auto: vendor v-t122c newer-list ${E}`;
-    const withKey = async () => (await allAssignments()).filter((a) => a.source === key);
 
     const first = await ensureVendorAssignments("v-t122c", "Tester");
     assert.equal(first.created, 1, "#122 a newer list creates exactly one owner task");
@@ -1160,13 +1156,11 @@ async function main() {
     assert.equal(made[0].assignee, "Catalog Owner T122", "#122 the task is addressed to the owner by display name");
     assert.equal(made[0].link?.kind, "company", "#122 the task links to the vendor company");
     assert.ok(made[0].title.startsWith("Update catalog: Vendor C T122 price list effective "), "#122 newer-list title");
-    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask?.id, made[0].id, "#122 loadVendors surfaces the open task");
 
     assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a second pass doesn't duplicate the open task");
     await setAssignmentDone(made[0].id, true);
     assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a done task is never re-opened or re-created");
     assert.equal((await withKey()).length, 1, "#122 still exactly one assignment for the key");
-    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask, null, "#122 a done task is no longer the open task");
 
     // a later import stamps pricedAt ≥ effectiveAt → current, nothing new
     await upsertDoc("catalog_parts", { ...part("T122-C1"), pricedAt: E });
@@ -1180,33 +1174,6 @@ async function main() {
     assert.deepEqual([none.checked, none.created], [0, 0], "#122 the cron path runs with zero vendors");
   }
 
-  // #122 §3 — a ledger save spawns the owner task immediately, and that task's
-  // Home Queue row lands on the vendor's own screen (not back on /queue).
-  {
-    const part = { id: "T122-D1", sku: "T122-D1", desc: "T122 detail part", category: "Rigging", unit: "ea", list: 10, cost: 5, mfr: "T122 Detail Mfr" };
-    await upsertDoc("catalog_parts", part);
-    await saveCompany({ id: "v-t122d", name: "Vendor D T122", type: VENDOR_COMPANY_TYPE });
-    await claimManufacturer("v-t122d", "T122 Detail Mfr");
-
-    const eff = Date.now() - 3 * 86_400_000;
-    const key = `auto: vendor v-t122d newer-list ${eff}`;
-    const withKey = async () => (await allAssignments()).filter((a) => a.source === key);
-
-    // what logPriceListAction does: append the entry, then re-derive at once
-    await logPriceList("v-t122d", { receivedAt: Date.now(), effectiveAt: eff, note: "2027 list" }, "Tester");
-    assert.equal((await ensureVendorAssignments("v-t122d", "Tester")).created, 1, "#122 §3 a ledger save spawns the catalog-owner task right away, not just on the cron");
-    assert.equal((await withKey()).length, 1, "#122 §3 …exactly one");
-
-    // re-saving the SAME entry must not spawn a second task
-    await logPriceList("v-t122d", { receivedAt: Date.now(), effectiveAt: eff, note: "2027 list again" }, "Tester");
-    assert.equal((await ensureVendorAssignments("v-t122d", "Tester")).created, 0, "#122 §3 re-logging the same effective date spawns no second task");
-    assert.equal((await withKey()).length, 1, "#122 §3 …still exactly one");
-
-    const taskId = (await withKey())[0].id;
-    const queued = (await loadQueue("Catalog Owner T122")).filter((i) => i.key === `assignment:${taskId}`);
-    assert.equal(queued.length, 1, "#122 §3 the owner task shows on the owner's Home Queue");
-    assert.equal(queued[0].href, "/vendors/v-t122d", "#122 §3 a company-linked assignment links to the vendor record, not back to /queue");
-  }
 
   // #122 — claim from the unclaimed panel: reuse a vendor by normalized name, else create one
   {
@@ -1289,29 +1256,6 @@ async function main() {
     );
   }
 
-  // #122 T1 — the NEGATIVE half of the queue's company-link rule. The
-  // /vendors/<id> deep link is gated on the vendor task's `source` prefix
-  // because a "company" link from anywhere else may be a CUSTOMER, and that
-  // route notFound()s on one.
-  {
-    const plain = await createAssignment({
-      title: "Ring the T122 T1 customer back",
-      assignee: "Catalog Owner T122",
-      createdBy: "Tester",
-      link: { kind: "company", id: "c-t122-t1-customer", label: "T122 T1 Customer" },
-      source: "iMessage from Jena, 2026-09-21",
-    });
-    const blank = await createAssignment({
-      title: "Company task with no source at all",
-      assignee: "Catalog Owner T122",
-      createdBy: "Tester",
-      link: { kind: "company", id: "c-t122-t1-customer", label: "T122 T1 Customer" },
-    });
-    const queue = await loadQueue("Catalog Owner T122");
-    const hrefOf = (id: string) => queue.find((i) => i.key === `assignment:${id}`)?.href;
-    assert.equal(hrefOf(plain.id), "/queue", "#122 T1 a company link whose source isn't a vendor task stays on /queue");
-    assert.equal(hrefOf(blank.id), "/queue", "#122 T1 …and so does one with no source at all");
-  }
 
   // #122 T1 — the action-layer scope guard (`vendorOr()` in vendors/actions.ts
   // is this predicate turned into "Vendor not found."): only a LIVE company of

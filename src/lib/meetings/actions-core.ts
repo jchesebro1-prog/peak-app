@@ -22,8 +22,6 @@ import { getCompany } from "@/lib/identity/companies";
 import { getContact, saveContact, setEmails } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
 import { contactsByEmails } from "@/lib/identity/lookup";
-import { createTaskOnce } from "@/lib/stores/tasks";
-import { tierSizeOf } from "@/lib/task-plan/fields";
 import { addNoteRecord } from "@/lib/stores/notes";
 import * as MS from "@/lib/stores/meetings";
 import { chicagoAt } from "./chicago-day";
@@ -472,29 +470,9 @@ export async function decideTodo(
     };
 
     let createdId: string | null = null;
-    if (kind === "task") {
-      const users = await activeUsers();
-      let assignee: { id: string; name: string } | null = null;
-      if (opts.assigneeUserId) {
-        assignee = users.find((u) => u.id === opts.assigneeUserId) ?? null;
-        if (!assignee) throw new MeetingUserError("Pick someone on the team");
-      } else {
-        assignee = defaultAssignee(m, todo, label, users);
-      }
-      const t = await createTaskOnce({
-        id: todoRecordId("task", m.id, key),
-        title, ...base, assigneeUserId: assignee?.id ?? null, assigneeName: assignee?.name ?? "",
-        dueAt: due ?? null, notes: `From meeting: ${m.krisp.title}`, ...tierSizeOf(opts),
-      }, me);
-      createdId = t.id;
-    } else if (kind === "waiting") {
-      const t = await createTaskOnce({
-        id: todoRecordId("task", m.id, key),
-        title, ...base, assigneeUserId: me.id, assigneeName: me.name, dueAt: due ?? Date.now() + WAITING_DEFAULT_MS,
-        waitingOn: { contactId: waitingContactId(m, label), name: await waitingName(m, label) },
-        notes: `Waiting on customer — from meeting: ${m.krisp.title}`,
-      }, me);
-      createdId = t.id;
+    if (kind === "task" || kind === "waiting") {
+      // Tasks were removed from the app: a to-do can be filed as a note or dismissed.
+      throw new MeetingUserError("Tasks were removed — file this as a note, or dismiss it.");
     } else if (kind === "note") {
       const parent = noteParentFor(m.links);
       if (!parent) throw new MeetingUserError("Link the meeting to a company or venue first");

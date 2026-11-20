@@ -16,10 +16,6 @@
 import { z } from "zod";
 import { cleanPromptField, UNTRUSTED_NOTE } from "@/lib/assist/features/thread-text";
 import type { CommMessage, CommThread } from "@/lib/stores/comms";
-import { createTaskOnce } from "@/lib/stores/tasks";
-import { resolveDue } from "./due";
-import { ownTextNames } from "./names";
-import { promiseTaskId } from "./ids";
 import type { Court, CourtOwner, Promise_ } from "./types";
 
 export const CourtSchema = z.strictObject({
@@ -140,59 +136,15 @@ const titleOf = (text: string) => {
 };
 
 /**
- * Create one task per promise on `msg` (§7): owner = the team member the
- * model named, only when the message's own text (quotes stripped) names them
- * by first or full name (D899), else the message's internal author, else the
- * thread owner; due =
- * `resolveDue(dueText, msg.at)` (5 pm Chicago, default 2 business days);
- * section "Email"; linked to the thread, its customer / venue and the
- * quote / project / lead the filing points at. Idempotent by id. Nothing on
- * backlog mail or mail older than PROMISE_MAX_AGE_MS. Returns the promises
- * as stored on `court.promise` (first one) — with their task ids.
+ * Promise tasks were removed with Tasks: nothing is created, and no promise
+ * is stored on `court.promise`. Kept so the AI pass's call site is unchanged.
  */
 export async function applyPromises(
-  thread: CommThread,
-  msg: Pick<CommMessage, "id" | "at"> & { body?: string },
-  promises: CourtReading["promises"],
-  nowMs: number,
-  opts: { owner: TeamMember; authorUserId: string | null; users: TeamMember[]; backlog?: boolean }
+  _thread: CommThread,
+  _msg: Pick<CommMessage, "id" | "at"> & { body?: string },
+  _promises: CourtReading["promises"],
+  _nowMs: number,
+  _opts: { owner: TeamMember; authorUserId: string | null; users: TeamMember[]; backlog?: boolean }
 ): Promise<Promise_[]> {
-  if (opts.backlog || !promises.length) return [];
-  if (nowMs - (msg.at || 0) > PROMISE_MAX_AGE_MS) return [];
-  const byId = new Map(opts.users.map((u) => [u.id, u]));
-  const f = thread.filing;
-  const fileOk = !!f && !f.noise && (f.state === "filed" || f.strength === "strong");
-  const customerId = thread.customerId || (fileOk ? f!.customerId : null) || null;
-  const siteId = thread.siteId || (fileOk ? f!.siteId : null) || null;
-  const work = (fileOk ? f!.work : null) ?? (thread.link && ["quote", "project", "lead"].includes(thread.link.type) ? thread.link : null);
-  const out: Promise_[] = [];
-  for (const p of promises.slice(0, MAX_PROMISES)) {
-    // the model's owner only when the newest message's own words name them
-    // (D899) — a quoted customer line or an injected name can't steer it
-    const named = byId.get(p.ownerUserId);
-    const picked = named && ownTextNames(msg.body || "", named.name) ? named : undefined;
-    const owner = picked ?? (opts.authorUserId ? byId.get(opts.authorUserId) : undefined) ?? opts.owner;
-    const due = resolveDue(p.dueText, msg.at);
-    const id = promiseTaskId(thread.id, msg.id, p.text);
-    const task = await createTaskOnce(
-      {
-        id,
-        title: titleOf(p.text),
-        section: "Email",
-        assigneeUserId: owner.id,
-        assigneeName: owner.name,
-        dueAt: due,
-        threadId: thread.id,
-        ...(customerId ? { customerId } : {}),
-        ...(siteId ? { siteId } : {}),
-        ...(work?.type === "quote" ? { quoteId: work.id } : {}),
-        ...(work?.type === "project" ? { projectId: work.id } : {}),
-        ...(work?.type === "lead" ? { leadId: work.id } : {}),
-        notes: "From email: " + p.text,
-      },
-      { id: owner.id, name: owner.name }
-    );
-    out.push({ text: p.text, ownerUserId: owner.id, due, taskId: task.id, messageId: msg.id });
-  }
-  return out;
+  return [];
 }

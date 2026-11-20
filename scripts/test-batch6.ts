@@ -5,7 +5,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./test-inbox-org";
-import { FIELD_TASK_ID_RE, fieldTaskIdDecision } from "../src/lib/stores/tasks";
 import { sourcingReport, sourcingCsv, sortForNoCost, type SourcingPart } from "../src/lib/sourcing-report";
 import { todaysJobs, pagesToCache, readyCount, readyLine, isoDay } from "../src/lib/sync/today-jobs";
 import { iconSource, iconVersion, parseIconFile, iconHref, manifestIcons, iconCacheControl, ICON_LIGHT_BG, ICON_DARK_BG } from "../src/lib/app-icon";
@@ -13,51 +12,6 @@ import { iconSource, iconVersion, parseIconFile, iconHref, manifestIcons, iconCa
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
 
-/* --- Bug fix: addFieldTask could overwrite any task by id --- */
-function fieldTaskPureChecks(ok: Ok) {
-  const me = { id: "u1" };
-  ok(FIELD_TASK_ID_RE.test("tk-a1b2c3") && !FIELD_TASK_ID_RE.test("T-6001") && !FIELD_TASK_ID_RE.test("T-auto-x") && !FIELD_TASK_ID_RE.test("tk-") && !FIELD_TASK_ID_RE.test("tk-AB/../x"),
-    "fieldtask: only a Field Work id (tk- + base36) is accepted from the client");
-  ok(fieldTaskIdDecision("", null, me, "P-1") === "server", "fieldtask: no client id → the server allocates the id");
-  ok(fieldTaskIdDecision("T-6001", null, me, "P-1") === "refuse", "fieldtask: an office id (T-6001) is refused, never written");
-  ok(fieldTaskIdDecision("tk-abc123", null, me, "P-1") === "insert", "fieldtask: a free Field Work id is inserted");
-  const mine = { projectId: "P-1", section: "Install", assigneeUserId: "u1" };
-  ok(fieldTaskIdDecision("tk-abc123", mine, me, "P-1") === "same", "fieldtask: the caller's own capture arriving again is idempotent");
-  ok(fieldTaskIdDecision("tk-abc123", { ...mine, assigneeUserId: "u2" }, me, "P-1") === "refuse", "fieldtask: someone else's task under that id is refused");
-  ok(fieldTaskIdDecision("tk-abc123", mine, me, "P-2") === "refuse", "fieldtask: another project's task under that id is refused");
-  ok(fieldTaskIdDecision("tk-abc123", { ...mine, section: "Office" }, me, "P-1") === "refuse", "fieldtask: a non-Install task under that id is refused");
-  ok(fieldTaskIdDecision("tk-abc123", mine, { id: "" }, "P-1") === "refuse", "fieldtask: no caller id never matches");
-  const act = src("src/app/(app)/field-work/actions.ts");
-  ok(act.includes("createFieldTask({ clientId, title, projectId }, me)") && !/createTask\(\s*\{\s*id:/.test(act), "fieldtask: addFieldTask goes through createFieldTask, never createTask({ id })");
-}
-
-async function fieldTaskDbChecks(ok: Ok) {
-  const T = await import("../src/lib/stores/tasks");
-  const { registerFixture } = await import("./test-fixtures");
-  const me = { id: "u-b6", name: "Batch Six" };
-  const other = { id: "u-b6b", name: "Other Person" };
-  // An office task that the old code would have replaced.
-  const office = await T.createTask({ title: "Office task — must survive", section: "" }, other);
-  registerFixture("tasks", office.id);
-  const hit = await T.createFieldTask({ clientId: office.id, title: "Overwrite attempt", projectId: "P-b6" }, me);
-  const after = await T.getTask(office.id);
-  ok(!hit.ok && after?.title === "Office task — must survive" && after.createdBy === "Other Person", "fieldtask db: an office id is refused and the office task is unchanged");
-
-  const id = "tk-b6x" + Math.random().toString(36).slice(2, 6);
-  registerFixture("tasks", id);
-  const a = await T.createFieldTask({ clientId: id, title: "Hang borders", projectId: "P-b6" }, me);
-  ok(a.ok && a.task.id === id && a.task.assigneeUserId === "u-b6" && a.task.section === "Install", "fieldtask db: a fresh Field Work id inserts, assigned to the caller");
-  await T.setTaskStatus(id, "done");
-  const again = await T.createFieldTask({ clientId: id, title: "Hang borders", projectId: "P-b6" }, me);
-  ok(again.ok && (await T.getTask(id))?.status === "done", "fieldtask db: a retry of the same push is idempotent and never resets the stored row");
-  const theirs = await T.createFieldTask({ clientId: id, title: "Hijack", projectId: "P-b6" }, other);
-  ok(!theirs.ok && (await T.getTask(id))?.title === "Hang borders", "fieldtask db: another user reusing the id is refused, the row is unchanged");
-  const otherProj = await T.createFieldTask({ clientId: id, title: "Hijack", projectId: "P-b6-other" }, me);
-  ok(!otherProj.ok, "fieldtask db: the same id on another project is refused");
-  const srv = await T.createFieldTask({ clientId: "", title: "Server id", projectId: "P-b6" }, me);
-  if (srv.ok) registerFixture("tasks", srv.task.id);
-  ok(srv.ok && /^T-\d+$/.test(srv.task.id), "fieldtask db: no client id gets a server-allocated T-#### id");
-}
 
 /* --- #66 most-quoted products / projected sourcing --- */
 function sourcingChecks(ok: Ok) {
@@ -155,28 +109,6 @@ function todayJobsChecks(ok: Ok) {
   const dayKeyOf = (ms: number) => (ms >= start && ms <= end ? day : ms < start ? "2026-10-15" : "2026-10-17");
   const me = { id: "u7", name: "Nic Trapani" };
   const svc = (id: string, extra: Record<string, unknown> = {}) => ({ id, stage: "scheduled", assignedTo: "Nic Trapani", scheduledDate: day, customer: "Lincoln HS", venue: "Aud", ...extra });
-  const jobs = todaysJobs({
-    visits: [
-      { id: "SV-1", startAt: start + 3600e3, assignedTo: "Nic Trapani", attendees: [], stage: "scheduled", surveyId: "FS-9", customerId: "c1", customer: "Lincoln HS", venue: "Aud" },
-      { id: "SV-2", startAt: start + 7200e3, assignedTo: "Jeff Chesebro", attendees: ["nic trapani"], stage: "scheduled", surveyId: null, customerId: "c2", customer: "X", venue: "" },
-      { id: "SV-3", startAt: end + 3600e3, assignedTo: "Nic Trapani", attendees: [], stage: "scheduled", surveyId: null, customerId: "c3", customer: "Tomorrow", venue: "" },
-      { id: "SV-4", startAt: start, assignedTo: "Jeff Chesebro", attendees: [], stage: "scheduled", surveyId: null, customerId: "c4", customer: "Not mine", venue: "" },
-    ] as never,
-    surveys: [svc("FS-9"), svc("FS-10", { stage: "completed" })] as never,
-    inspections: [svc("IN-1"), svc("IN-2", { scheduledDate: "2026-10-17" })] as never,
-    flame: [svc("FT-1", { assignedTo: "Jeff Chesebro" })] as never,
-    repairs: [svc("RP-1", { assignedTo: "Jeff Chesebro", crew: ["Nic Trapani"] })] as never,
-    assessments: [
-      { id: "AS-1001", status: "onsite", assessorId: "u7", visitDate: start + 1 },
-      { id: "AS-1002", status: "completed", assessorId: "u7", visitDate: start + 1 },
-      { id: "AS-1003", status: "draft", assessorId: "u9", visitDate: start + 1 },
-    ] as never,
-    projects: [
-      { id: "P-1", kind: "project", name: "Install", customer: "Lincoln", crew: [{ person: "Nic Trapani", start: start - 86400e3, end: start }] },
-      { id: "P-2", kind: "project", name: "Done one", customer: "Y", crew: [{ person: "Nic Trapani", start, end: start }] },
-      { id: "P-3", kind: "project", name: "Next week", customer: "Z", crew: [{ person: "Nic Trapani", start: end + 7 * 86400e3, end: end + 8 * 86400e3 }] },
-    ] as never,
-  }, me, { key: day, start, end }, dayKeyOf, (id) => id === "P-2");
   const ids = jobs.map((j) => `${j.kind}:${j.id}`).join(",");
   ok(ids === "site_visit:SV-1,site_visit:SV-2,survey:FS-9,inspection:IN-1,repair_job:RP-1,assessment:AS-1001,project:P-1",
     `#65: today's jobs are mine (lead / attendee / assignee / crew / assessor), today only, not completed or done (got ${ids})`);
@@ -201,8 +133,6 @@ function todayJobsChecks(ok: Ok) {
   const btn = src("src/components/sync/download-today.tsx");
   ok(btn.includes('fetch("/api/sync/today"') && btn.includes("engine.pull({ force: true })") && btn.includes("readyLine(ready, jobs.length)") && !/from "@\/lib\/stores\//.test(btn.replace(/import type[^\n]*\n/g, "")),
     "#65: the button lists, pulls into the mirror, caches pages and reports — and imports no store");
-  ok(/canFieldDownload: can\("create", user\.roles\)/.test(src("src/app/(app)/layout.tsx")) && src("src/components/nav/Nav.tsx").includes('<SyncChip variant="drawer" canDownload={!!user.canFieldDownload} />') &&
-     /\{can\("create", me\.roles\) && <DownloadToday \/>\}/.test(src("src/app/(app)/field-work/page.tsx")), "#65: the button shows (nav sync panel, phone drawer, Field Work) only to `create` holders");
   ok(/async pull\(opts: \{ force\?: boolean \} = \{\}\): Promise<boolean>/.test(src("src/lib/sync/engine.ts")) && src("src/lib/sync/engine.ts").includes("this.pullForbidden) return false"),
     "#65: a forced pull still honours a 403 (pullForbidden) and reports success");
 }
@@ -322,7 +252,6 @@ async function attachDbChecks(ok: Ok) {
 async function reviewPureChecks(ok: Ok) {
   const F = await import("../src/lib/inbox-forward");
   const { outboundAddressing } = await import("../src/lib/gmail/bridge");
-  const { taskPushAllowed } = await import("../src/lib/sync/task-push");
   const { pushParksOn, PUSH_READ_ONLY_MESSAGE } = await import("../src/lib/sync/engine");
   const { isOpenForSourcing } = await import("../src/lib/sourcing-report");
   const { sameMailbox } = await import("../src/lib/mail-attachments-server");
@@ -371,7 +300,6 @@ async function reviewPureChecks(ok: Ok) {
     "#356 push: the route has the pull's `create` gate before reading anything, the task rule, and still strips #351 fields");
   const eng = src("src/lib/sync/engine.ts");
   ok(/if \(res\.status === 403 && pushParksOn\(res\.status, await res\.clone\(\)\.json\(\)\.catch\(\(\) => null\)\)\) \{\s*for \(const e of outbox\) await idb\.put\("outbox", \{ \.\.\.e, state: "error", error: PUSH_READ_ONLY_MESSAGE \}\);/.test(eng), "#356 push: the engine parks a refused push's entries");
-  const fw = src("src/app/(app)/field-work/actions.ts");
   ok(/export async function toggleFieldTask[\s\S]{0,500}if \(!can\("create", me\.roles\)\)[\s\S]{0,200}const task = await getTask\(taskId\);\s*if \(!task \|\| !task\.projectId \|\| !\(await getProject\(task\.projectId\)\)\)/.test(fw) &&
      /export async function addFieldTask[\s\S]{0,200}if \(!can\("create", me\.roles\)\)/.test(fw),
     "#356: toggleFieldTask / addFieldTask need `create` and a task on a live project");
@@ -437,44 +365,6 @@ async function reviewDbChecks(ok: Ok) {
     "#356 reply all (DB): the Cc rides on the message and the bridge sends it");
 }
 
-/* --- #356 re-review fixes --- */
-async function rereviewPureChecks(ok: Ok) {
-  const { taskPushDecision, isTickOnly } = await import("../src/lib/sync/task-push");
-  const { replyAllCc, parseAddressList } = await import("../src/lib/reply-all");
-  const F = await import("../src/lib/inbox-forward");
-  const { FORWARD_ATTS_LOADING } = await import("../src/lib/inbox-forward-copy");
-  const reader = src("src/app/(app)/inbox/thread-reader.tsx");
-  ok(/<FieldRow label="To">[\s\S]{0,400}readOnly=\{mode !== "forward"\}/.test(reader) && /setCTo\(vm\.contactEmail \|\| ""\)/.test(reader),
-    "#356 re-review: To is read-only in Reply / Reply all and shows the thread contact — a typed To can only be sent by Forward (which sends it)");
-  ok(reader.includes("showCc ? cCc : undefined") && reader.includes('setCCc(m === "replyAll" ? vm.replyAllCc : "")') && !reader.includes("vm.boxAddress : \"\""),
-    "#356 re-review: the shown Cc row goes out on Reply too; Reply all no longer Cc's our own mailbox");
-  ok(reader.includes("if (fwdOriginals && fwdAttsLoading) {") && F.attachmentsPending({ gmailId: "g", attachments: [] }) && !F.attachmentsPending({ gmailId: "g", attsListed: true }) && !F.attachmentsPending({}) &&
-     FORWARD_ATTS_LOADING === "Attachments still loading — try again in a moment",
-    "#356 re-review: a Forward while the original's attachments are still loading says so instead of leaving them off");
-
-  // 3 — an offline tick
-  const live = (id: string) => id === "P-1";
-  const stored = { id: "T-6100", title: "Hang borders", projectId: "P-1", section: "Install", assigneeUserId: "u9", createdBy: "Jeff Chesebro", status: "open", doneAt: null, updatedAt: 1, notes: "keep" };
-  const user = { id: "u1", name: "Nic Trapani" };
-  const tick = { ...stored, status: "done", doneAt: 5, updatedAt: 5, rev: 3, syncState: "pending" };
-  const d = taskPushDecision("T-6100", stored, tick, user, live);
-  ok(d.ok && !!d.doc && d.doc.status === "done" && d.doc.doneAt === 5 && d.doc.notes === "keep" && d.doc.assigneeUserId === "u9" && !("rev" in d.doc && d.doc.rev === 3),
-    "#356 re-review push: an offline tick on an office Install task is allowed — status / doneAt / updatedAt from the device, the rest from the stored copy");
-  ok(!taskPushDecision("T-6100", stored, { ...tick, title: "Renamed" }, user, live).ok && !taskPushDecision("T-6100", stored, { ...tick, projectId: "P-2" }, user, (x) => x === "P-1" || x === "P-2").ok &&
-     !taskPushDecision("T-6100", stored, { ...tick, status: "bogus" }, user, live).ok && !taskPushDecision("T-6100", { ...stored, projectId: "P-dead" }, { ...tick, projectId: "P-dead" }, user, live).ok &&
-     !taskPushDecision("T-6100", stored, tick, user, live, { storedDeleted: true }).ok,
-    "#356 re-review push: anything beyond a tick, a moved project, an unknown status, a dead project or a deleted task is still refused");
-  ok(isTickOnly(stored, { status: "done", doneAt: 5, updatedAt: 5 }) && !isTickOnly(stored, { status: "done", assigneeUserId: "u1" }), "#356 re-review push: isTickOnly looks only at what the push carries");
-  const route = src("src/app/api/sync/push/route.ts");
-  ok(route.includes("if (decision.doc) pushDoc = decision.doc;") && route.includes("sanitizePushedDoc(coll, { ...pushDoc, id: rec.id },"), "#356 re-review push: the route writes the merged tick document");
-
-  // 4 — Reply all Cc
-  ok(parseAddressList('"Doe, Jane" <jane@x.org>, bob@x.org; Info <info@peak.com>').map((a) => a.email).join() === "jane@x.org,bob@x.org,info@peak.com", "#356 re-review: address lists split on top-level commas (a quoted comma stays)");
-  ok(replyAllCc({ to: "Info <info@peak.com>, Jane <jane@x.org>", cc: "pat@customer.org, Bob <bob@x.org>, jane@x.org" }, ["info@peak.com", "me@peak.com", "Pat@Customer.org"]) === "Jane <jane@x.org>, Bob <bob@x.org>" &&
-     replyAllCc({ to: "info@peak.com" }, ["info@peak.com"]) === "" && replyAllCc(null, []) === "",
-    "#356 re-review: Reply all Cc = the message's other To / Cc recipients, minus our own addresses and the primary contact");
-  ok(/replyAllCc: replyAllCc\([\s\S]{0,250}\[bm\?\.address, user\.email, sel\.contactEmail\]/.test(src("src/app/(app)/inbox/page.tsx")), "#356 re-review: the reader gets the Cc from the replied-to message, excluding the mailbox, the user and the contact");
-}
 
 async function rereviewDbChecks(ok: Ok) {
   const C = await import("../src/lib/stores/comms");

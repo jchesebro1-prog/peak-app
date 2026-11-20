@@ -18,7 +18,6 @@ import { activeUsers } from "@/lib/users";
 import { allVisits } from "@/lib/stores/site-visits";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { open as openLeads } from "@/lib/stores/leads";
-import { getAllProjects } from "@/lib/stores/projects";
 import { isActive } from "@/lib/pipelines";
 import { allEngagements } from "@/lib/stores/engagements";
 import { OPEN_ENGAGEMENT_STAGES } from "@/lib/consulting-stages";
@@ -33,8 +32,8 @@ const DEFAULT_VISIT_MS = 2 * 3600_000;
 
 export async function buildMatchIndex(): Promise<MatchIndex> {
   const db = await getDb();
-  const [companies, sites, contacts, users, visits, surveys, leads, projects, engagements, emailRows, domainRows, settings] = await Promise.all([
-    allCompanies(), getAllSites(), allContacts(), activeUsers(), allVisits(), allSurveys(), openLeads(), getAllProjects(), allEngagements(),
+  const [companies, sites, contacts, users, visits, surveys, leads, engagements, emailRows, domainRows, settings] = await Promise.all([
+    allCompanies(), getAllSites(), allContacts(), activeUsers(), allVisits(), allSurveys(), openLeads(), allEngagements(),
     db.select({ contactId: contactEmails.contactId, email: contactEmails.email }).from(contactEmails),
     db.select({ domain: customerDomains.domain, customerId: customerDomains.customerId }).from(customerDomains),
     // the venue-type labels ("Gym Stage", "Black box"…) are the type half of every derived venue name
@@ -74,7 +73,6 @@ export async function buildMatchIndex(): Promise<MatchIndex> {
 
   const work: MatchWork[] = [];
   for (const l of leads) if (l.customerId) work.push({ type: "lead", id: l.id, label: l.org || l.id, companyId: l.customerId });
-  for (const p of projects) if (p.customerId && isActive(p)) work.push({ type: "project", id: p.id, label: p.name || p.id, companyId: p.customerId });
   for (const e of engagements) {
     if (e.companyId && OPEN_ENGAGEMENT_STAGES.includes(e.status)) work.push({ type: "engagement", id: e.id, label: e.name || e.id, companyId: e.companyId });
   }

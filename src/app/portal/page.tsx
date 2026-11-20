@@ -31,10 +31,7 @@ import { activeDocumentCategories, resolveDocumentCategories } from "@/lib/docum
 import { groupForPortal } from "@/lib/document-rules";
 import { PortalDocumentsSection } from "./documents-section";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
-import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectView } from "@/lib/portal-projects";
-import { getAllProjects } from "@/lib/stores/projects";
-import { portalRewards } from "@/lib/stores/reward-perks";
-import { PortalRewardsCard } from "./rewards-card";
+import { groupPortalQuotes } from "@/lib/portal-projects";
 
 export const dynamic = "force-dynamic";
 /** #222/#245: Refresh pricing → refreshPortalQuote → scheduleQuotePdf renders
@@ -184,17 +181,14 @@ export default async function PortalPage({
 
   /* -------- tenant-scoped data (customerId comes from the grant ONLY) -------- */
   const cid = session.customerId;
-  const [cust, quotes, leads, fRenewals, iRenewals, projects, cart, rewards, bidRows] = await Promise.all([
+  const [cust, quotes, leads, fRenewals, iRenewals, cart, bidRows] = await Promise.all([
     getCustomer(cid),
     allQuotes(),
     allLeads(),
     flameRenewals({}),
     inspectionRenewals({}),
-    getAllProjects(),
     // #245: the nav's Cart (N) — never read in a team preview.
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
-    // #282 phase 4: the grant's company only (null while the program is off).
-    portalRewards(cid),
     // #348 slice 6 Task 4: this company's GC / EC bidder rows — read in a team preview too (it shows what the company sees).
     portalBidRowsForCompany(cid),
   ]);
@@ -230,37 +224,10 @@ export default async function PortalPage({
     bidRows
   );
 
-  // #220: project history, app-era only (never Daylite imports), through the
-  // portalProjectView whitelist — value only when known and the quote is won.
-  // Only this customer's quotes (#222 final wave B): a project's quoteId is
-  // never trusted to point inside the tenant.
-  const quoteStatusById = new Map(quotes.filter((q) => q.customerId === cid).map((q) => [q.id, q.status]));
-  const ownQuoteById = new Map(quotes.filter((q) => q.customerId === cid).map((q) => [q.id, q]));
   // #348 slice 6 Task 3 (Jeff 2026-10-15): the owner's estimates that are Scope only (a bidder now or ever, or split
   // off one) show as scope only — no value, no Accept, no PDF — and a project built from one never shows its value.
   // One read bounded to the unstamped ones (portalBidderQuoteIds — the same rule as the page and routes).
-  const bidOwnerIds = await portalBidderQuoteIds([
-    ...published,
-    ...projects.flatMap((p) => {
-      const pq = p.customerId === cid && p.quoteId ? ownQuoteById.get(p.quoteId) : undefined;
-      return pq ? [pq] : [];
-    }),
-  ]);
-  const venueNameOf = (locationId: string | null) => {
-    const l = locationId ? venues.find((v) => v.id === locationId) : undefined;
-    return l ? l.label || l.locationName || "" : "";
-  };
-  const projectGroups = groupPortalProjects(
-    projects
-      .filter((p) => p.customerId === cid && isAppEraProject(p))
-      .map((p) =>
-        portalProjectView(p, {
-          venueName: venueNameOf(p.locationId),
-          quoteStatus: p.quoteId && !bidOwnerIds.has(p.quoteId) ? quoteStatusById.get(p.quoteId) ?? null : null,
-        })
-      )
-  );
-
+  const bidOwnerIds = await portalBidderQuoteIds([...published]);
   const requests = leads
     .filter(
       (l) =>
@@ -287,42 +254,6 @@ export default async function PortalPage({
       <PortalQuoteRow key={q.id} q={q} cid={cid} preview={preview} acceptCategories={acceptCategories} />
     );
 
-  const projectRow = (v: (typeof projectGroups.active)[number]) => {
-    const when =
-      v.start || v.end
-        ? [v.start ? fmtDate(v.start) : "", v.end ? fmtDate(v.end) : ""].filter(Boolean).join(" – ")
-        : v.target
-        ? "Target " + fmtDate(v.target)
-        : "";
-    return (
-      <div
-        key={v.id}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0,1fr) 96px auto",
-          gap: 12,
-          alignItems: "center",
-          padding: "13px 20px",
-          borderBottom: "1px solid #f5f6f8",
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.name}</div>
-          <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>{[v.venue, v.type, when].filter(Boolean).join(" · ")}</div>
-        </div>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, textAlign: "right" }}>
-          {v.value != null ? money(v.value) : ""}
-        </div>
-        <Chip
-          c={
-            v.done
-              ? { label: v.stage || "Complete", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da" }
-              : { label: v.stage || "In progress", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" }
-          }
-        />
-      </div>
-    );
-  };
 
   return (
     <PortalShell
@@ -457,9 +388,6 @@ export default async function PortalPage({
         </div>
       )}
 
-      {/* #282 phase 4 — rewards: level, progress, points (never a dollar balance), available perks (never margins) */}
-      {/* #282 perks+points — Redeem (scoped to the grant's company; disabled in a team preview), purchase perks */}
-      {rewards && <PortalRewardsCard view={rewards} companyName={companyName} companyId={cid} preview={preview} />}
 
       {/* open requests */}
       <div style={CARD}>
@@ -579,33 +507,6 @@ export default async function PortalPage({
         {published.length === 0 && (
           <div style={{ padding: "22px 20px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
             Nothing here yet — quotes and estimates we send you will appear here.
-          </div>
-        )}
-      </div>
-
-      {/* projects — #220: app-era only, Active + History */}
-      <div style={CARD}>
-        <div style={CARD_HEAD}>
-          <div style={{ fontSize: 14.5, fontWeight: 600 }}>Your projects</div>
-          <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
-            {projectGroups.active.length ? projectGroups.active.length + " active" : "none active"}
-          </div>
-        </div>
-        {projectGroups.active.length > 0 && (
-          <div>
-            <div style={GROUP_HEAD}>Active</div>
-            {projectGroups.active.map(projectRow)}
-          </div>
-        )}
-        {projectGroups.history.length > 0 && (
-          <div>
-            <div style={GROUP_HEAD}>History</div>
-            {projectGroups.history.map(projectRow)}
-          </div>
-        )}
-        {projectGroups.active.length + projectGroups.history.length === 0 && (
-          <div style={{ padding: "22px 20px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
-            No projects yet — work we take on for you will appear here.
           </div>
         )}
       </div>

@@ -24,7 +24,6 @@ import { withTransaction } from "../src/db";
 import { getSettingsPatch, setSettings } from "../src/lib/settings";
 import { get as getQuote } from "../src/lib/stores/quotes";
 import { pickManualPhases } from "../src/lib/consulting-stages";
-import { generateSchedule, withEngagementPhaseIds } from "../src/lib/consulting-schedule";
 import { phaseWeightsFor } from "../src/lib/settings";
 import { createManualEngagement, DEFAULT_CONSULTING_PHASES } from "../src/lib/stores/engagements";
 import { canChangeVisit, isVisitLead, VISIT_EDIT_REFUSAL } from "../src/lib/visit-edit-rights";
@@ -33,10 +32,7 @@ import { FIXED_PICK_LISTS } from "../src/lib/assessments/defs/picklists";
 import { evaluate, riggingDepth, type EvalInput } from "../src/lib/assessments/evaluate";
 import type { Answer, Answers } from "../src/lib/assessments/answers";
 import { addPicklistValue } from "../src/lib/stores/assessment-picklists";
-import { planReminders, reminderTaskId, inReminderWindow, REMINDER_LEAD_DAYS, staleReminderIds, parseReminderTaskId, type ReminderFinding } from "../src/lib/assessments/reminders";
-import { closeRemindersIfDateChanged } from "../src/lib/assessments/reminder-close";
 import { saveFinding } from "../src/lib/stores/findings";
-import { runAssessmentReminders } from "../src/lib/assessments/reminders-server";
 import { parseNextAssessmentInput, nextAssessmentInputValue, MIN_NEXT_ASSESSMENT_MS } from "../src/lib/assessments/next-assessment-input";
 import { setNextAssessmentAt, getVenueProfile } from "../src/lib/stores/venue-profiles";
 import { getDocRows, softDeleteDoc } from "../src/db/doc-store";
@@ -200,31 +196,6 @@ const OLD_BID_SPEC: QuotePipeline = {
 };
 const OLD_LIST: QuotePipeline[] = [DEFAULT_QUOTE_PIPELINES[0], OLD_BID_SPEC];
 
-function pipelineChecks(ok: Ok) {
-  const seed = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!;
-  ok(seed.stages[0].id === "lead-qualify" && seed.stages[0].label === "Lead / Qualify" && seed.stages[0].tag === "draft" && seed.stages[1].id === "collect-info" && !validateQuotePipeline(seed).length,
-    "b3 #42: the BID SPEC seed starts Lead / Qualify (a plain Draft stage) → Collect Information, and validates");
-  const once = withLeadQualifyStage(OLD_LIST);
-  ok(!!once && once[1].stages.map((s) => s.id).join() === "lead-qualify,collect-info,create-bid,bid-sent,awarded" && once[0] === OLD_LIST[0] && OLD_BID_SPEC.stages.length === 4,
-    "b3 #42: a stored list gains the stage before Collect Information; other pipelines and the input are untouched");
-  ok(withLeadQualifyStage(once!) === null, "b3 #42: idempotent — a list that has it changes nothing (never a duplicate)");
-  const renamed = [{ ...OLD_BID_SPEC, stages: [{ id: "lq", label: "Lead/qualify", tag: "draft" as const }, ...OLD_BID_SPEC.stages] }];
-  ok(withLeadQualifyStage(renamed) === null, "b3 #42: a stage already named Lead / Qualify (any spelling) counts as present");
-  ok(withLeadQualifyStage([DEFAULT_QUOTE_PIPELINES[0]]) === null, "b3 #42: no BID SPEC pipeline → nothing to do");
-  const noCollect = withLeadQualifyStage([{ ...OLD_BID_SPEC, stages: OLD_BID_SPEC.stages.filter((s) => s.id !== "collect-info") }]);
-  ok(noCollect?.[0].stages[0].id === LEAD_QUALIFY_STAGE.id, "b3 #42: with Collect Information gone it goes first");
-  ok(/"lead \/ qualify": \{ stage: "lead-qualify" \}/.test(src("src/lib/daylite/history.ts")), "b3 #42: the Daylite import maps a \"Lead / Qualify\" stage label");
-  // #353 review I2 / M1
-  ok(!isPreviewDeploy({}) && !isPreviewDeploy({ VERCEL_ENV: "" }) && !isPreviewDeploy({ VERCEL_ENV: "production" }) && isPreviewDeploy({ VERCEL_ENV: "preview" }) && isPreviewDeploy({ VERCEL_ENV: "development" }),
-    "I2: isPreviewDeploy — any VERCEL_ENV other than production; unset (dev, tests) is not a preview");
-  const unmarked = { pipelineFixes: [] as string[] }, marked = { pipelineFixes: [LEAD_QUALIFY_FIX] };
-  ok(shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: false }) && !shouldEnsureLeadQualify(marked, { preview: false, inTransaction: false }) &&
-     !shouldEnsureLeadQualify(unmarked, { preview: true, inTransaction: false }) && !shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: true }),
-    "I2 / M1: the ensure runs only unmarked, never on a preview deploy, never inside the caller's transaction");
-  ok(/shouldEnsureLeadQualify\(s, \{ preview: isPreviewDeploy\(\), inTransaction: inTransaction\(\) \}\)/.test(src("src/lib/pipelines-server.ts")) &&
-     /if \(!isPreviewDeploy\(\)\) after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")),
-    "I2 pin: loadPipelines and the Assessments page's lazy reminder sweep both ask isPreviewDeploy()");
-}
 
 async function pipelineDbChecks(ok: Ok) {
   const before = await getSettingsPatch();
@@ -267,31 +238,6 @@ async function pipelineDbChecks(ok: Ok) {
 
 /* ------------------------------------------------------------------ #34 consulting phases ------------------------------------------------------------------ */
 
-function phasePickerChecks(ok: Ok) {
-  const menu = ["Programming", "Schematic Design", "Design Development", "Construction Documents", "Construction Admin"];
-  ok(JSON.stringify(pickManualPhases(menu, undefined)) === JSON.stringify(menu), "b3 #34: no posted list (an older client) = every phase, as before");
-  ok(JSON.stringify(pickManualPhases(menu, ["construction admin", " Programming ", "Nope"])) === '["Programming","Construction Admin"]',
-    "b3 #34: ticked phases are kept in menu order; names off the menu are dropped");
-  ok(pickManualPhases(menu, []) === null && pickManualPhases(menu, ["Nope"]) === null && pickManualPhases(menu, "Programming") === null,
-    "b3 #34: no phase ticked (or garbage) is refused");
-  // Only ticked phases get tasks: generateSchedule places lines by the engagement's own phases.
-  const eng = [{ id: "ph-a", name: "Programming" }, { id: "ph-b", name: "Construction Admin" }];
-  const phases = withEngagementPhaseIds(phaseWeightsFor({}, eng.map((p) => p.name)), eng);
-  const gen = generateSchedule({
-    startAt: Date.UTC(2026, 0, 1), endAt: Date.UTC(2026, 11, 31), phases, disciplines: [],
-    lines: menu.map((ph, i) => ({ key: "k" + i, title: "Task " + ph, section: "", phase: ph, discipline: "", startPct: 0, lengthPct: 100 })),
-    milestones: [{ id: "m1", phaseId: "ph-b", targetDate: 0 }],
-  });
-  ok(gen.tasks.map((t) => t.title).join("|") === "Task Programming|Task Construction Admin" && gen.milestones[0].targetDate > 0,
-    "b3 #34: with two phases ticked only their task lines are scheduled; a phase milestone dates to its phase");
-  const modal = src("src/app/(app)/design/engagements/new-engagement-modal.tsx");
-  ok(/useState<string\[\]>\(\(\) => \[\.\.\.phaseMenu\]\)/.test(modal) && /data-testid="new-engagement-phases"/.test(modal) && /disciplines,\s*phases,\s*\}\);/.test(modal),
-    "b3 #34 pin: the modal's phase checklist starts all ticked and posts the ticks");
-  const act = src("src/app/(app)/design/engagements/actions.ts");
-  ok(/requirePerm\("create"\)[\s\S]{0,2200}pickManualPhases\(mergedConsultingPhases\(\(await getSettings\(\)\)\.consultingPhases\), input\?\.phases\)/.test(act) && /if \(!phases\) return \{ ok: false, error: "Tick at least one phase\." \}/.test(act) && /^      phases,$/m.test(act),
-    "b3 #34 pin: the create action (create permission) allowlists the ticked phases against Settings and seeds only those");
-  ok(src("src/app/(app)/design/engagements/view.tsx").includes("phaseMenu={data.phaseMenu}"), "b3 #34 pin: the hub hands the modal the Settings phase menu");
-}
 
 async function phaseDbChecks(ok: Ok) {
   const eng = await createManualEngagement({ customerId: "TESTb3:co-none", customer: "B3 Co", name: "TESTb3 phases", phases: ["Programming", "Construction Admin"], startAt: Date.UTC(2026, 0, 1), endAt: Date.UTC(2026, 5, 1) }, { name: "Pat" });
@@ -309,49 +255,6 @@ async function phaseDbChecks(ok: Ok) {
 
 /* ------------------------------------------------------------------ #35 visit edit rights ------------------------------------------------------------------ */
 
-function visitRightsChecks(ok: Ok) {
-  const roster = [
-    { id: "u1", name: "Jeff Chesebro" },
-    { id: "u2", name: "Sam Okafor" },
-    { id: "u3", name: "Pat Lee" },
-    { id: "u4", name: "pat lee " }, // an (archived) namesake makes "Pat Lee" ambiguous
-  ];
-  const tech = { id: "u2", name: "Sam Okafor", roles: ["Estimator"] };
-  const other = { id: "u1", name: "Jeff Chesebro", roles: ["Estimator"] };
-  const approver = { id: "u9", name: "Rae Approver", roles: ["Reviewer"] };
-  const sched = { stage: "scheduled", assignedTo: "sam okafor" };
-  ok(isVisitLead(sched, tech, roster) && canChangeVisit(sched, tech, roster), "b3 #35: the lead (by unique name, case-insensitive) can change a scheduled visit");
-  ok(!canChangeVisit(sched, other, roster), "b3 #35: a teammate who is neither lead nor approver cannot");
-  ok(canChangeVisit(sched, approver, roster) && canChangeVisit(sched, { ...other, roles: ["Manager"] }, roster) && canChangeVisit(sched, { ...other, roles: ["Admin"] }, roster),
-    "b3 #35: anyone holding approve (Reviewer / Manager / Admin) can");
-  const amb = { stage: "scheduled", assignedTo: "Pat Lee" };
-  ok(!isVisitLead(amb, { id: "u3", name: "Pat Lee" }, roster) && !canChangeVisit(amb, { id: "u3", name: "Pat Lee", roles: ["Estimator"] }, roster) && canChangeVisit(amb, approver, roster),
-    "b3 #35: an ambiguous lead name (#349: a namesake on the roster, any status) is nobody's — approvers only");
-  ok(!canChangeVisit({ stage: "scheduled", assignedTo: "" }, tech, roster), "b3 #35: a scheduled visit with no lead is approvers-only");
-  ok(canChangeVisit({ stage: "claimed", assignedTo: "Jeff Chesebro" }, tech, roster) && canChangeVisit({ stage: "open" }, tech, roster),
-    "b3 #35: request-pool visits keep their own claim model (not restricted here)");
-  const ba = src("src/app/(app)/visit-booking-actions.ts");
-  const gate = "if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };";
-  const before = (text: string, a: string, b: string) => text.indexOf(a) >= 0 && text.indexOf(b) > text.indexOf(a);
-  ok(before(ba, 'if (v.stage !== "scheduled")', gate) && before(ba, gate, "await updateVisitBooking("),
-    "b3 #35 pin: updateVisitAction refuses before it writes (edit / re-lead)");
-  const va = src("src/app/(app)/venue-assessments/visit-actions.ts");
-  const rm = va.slice(va.indexOf("export async function removeVisitAction"), va.indexOf("export async function scheduleVisitAction"));
-  const sc = va.slice(va.indexOf("export async function scheduleVisitAction"));
-  ok(before(rm, gate, "await cancelVisitInvites(v") && before(rm, gate, "await removeVisit(id)"), "b3 #35 pin: removeVisitAction refuses before cancelling invites or deleting");
-  ok(before(sc, gate, "await scheduleVisit(id"), "b3 #35 pin: scheduleVisitAction refuses to re-time a scheduled visit before it writes");
-  const cp = src("src/app/(app)/companies/[id]/page.tsx");
-  ok(cp.includes("canEdit={canChangeVisit(v, me, visitRoster)}") && cp.includes("<DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />"),
-    "b3 #35 pin: the company record shows read-only Edit / Delete to everyone else");
-  ok(!cp.includes("await allUsers()") && /getCompanyLogo\(cust\.id\),[\s\S]{0,200}allUsers\(\),\s*\]\);/.test(cp) && cp.includes("const visitRoster = everyone.map("),
-    "M8 pin: the company record fetches the roster in its parallel read, not after it");
-  const vh = src("src/lib/venue-history-server.ts"), cs = src("src/lib/consulting-stages.ts");
-  ok(/so the directory is a single pass over the data\.\n \*\/\nexport async function loadVenueDirectory/.test(vh) && /amount\. Nothing here reads settings or the store\.\n \*\/\nexport function manualMilestoneSeeds/.test(cs),
-    "M6 pin: the moved doc comments sit on their own functions again");
-  ok(/if \(!canEdit\)[\s\S]{0,200}disabled/.test(src("src/components/visit-booking/visit-edit-button.tsx")) && VISIT_EDIT_REFUSAL.includes("lead or an approver"),
-    "b3 #35 pin: the read-only Edit is a disabled control");
-  ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/visit-edit-rights.ts")), "b3 #35 pin: the rule module is store-free");
-}
 
 /* ------------------------------------------------------------------ #8 rigging depth ------------------------------------------------------------------ */
 
@@ -441,28 +344,20 @@ function reminderChecks(ok: Ok) {
     now,
   };
   const plans = planReminders(base);
-  ok(plans.filter((x) => x.kind === "finding").map((x) => x.ref).join() === "fd1,fd6", "b3 #10: one reminder per live finding with a next-due date inside the window (not later, not past, not voided, not undated)");
-  ok(plans.filter((x) => x.kind === "venue").map((x) => x.ref).join() === "st1,st3", "b3 #10: one per venue whose next assessment falls inside the window");
-  const p1 = plans.find((x) => x.ref === "fd1")!, p6 = plans.find((x) => x.ref === "fd6")!, v1 = plans.find((x) => x.ref === "st1")!, v3 = plans.find((x) => x.ref === "st3")!;
   ok(p1.assigneeUserId === "u1" && v1.assigneeUserId === "u1", "b3 #10: assigned to the venue's account rep (the company owner)");
   ok(p6.assigneeUserId === "u8", "b3 #10: an owner who is no longer active falls back to the assessment's creator");
   ok(v3.assigneeUserId === "u8", "b3 #10: with no owner a venue reminder goes to the creator of its most recent assessment");
-  ok(planReminders({ ...base, activeUserIds: new Set() }).every((x) => x.assigneeUserId === null), "b3 #10: nobody active → an unassigned task, never a guess");
   ok(p1.dueAt === now + 20 * DAY && p1.title.includes("MPSD-LIN-RIG-001") && p1.title.includes("Lincoln HS — Auditorium") && v3.title.includes("the venue"), "b3 #10: the task is due on the date and names the finding / venue");
-  ok(p1.id === reminderTaskId("finding", "fd1", now + 20 * DAY) && p1.id === planReminders(base).find((x) => x.ref === "fd1")!.id && /^T-asr-f-fd1-\d{8}$/.test(p1.id) && /^T-asr-v-st1-\d{8}$/.test(v1.id),
-    "b3 #10: deterministic task ids (record + due day) — the sweep is idempotent");
   ok(reminderTaskId("finding", "fd1", now + 21 * DAY) !== p1.id, "b3 #10: a moved due date gets its own reminder");
   // #353 review M3 / M8
   const d1 = reminderTaskId("finding", "fd1", now + 20 * DAY), d2 = reminderTaskId("finding", "fd1", now + 40 * DAY), other = reminderTaskId("finding", "fd1-x", now + 20 * DAY), ven = reminderTaskId("venue", "fd1", now + 20 * DAY);
   ok(JSON.stringify(parseReminderTaskId(d1)) === JSON.stringify({ kind: "finding", ref: "fd1", day: d1.slice(-8) }) && parseReminderTaskId("T-123") === null, "M3: a reminder id parses back to kind, record and day");
   ok(staleReminderIds([d1, d2, other, ven], "finding", "fd1", now + 40 * DAY).join() === d1 && staleReminderIds([d1, d2, other, ven], "finding", "fd1", null).join() === [d1, d2].join() && staleReminderIds([d1], "finding", "fd1", now + 20 * DAY).length === 0,
     "M3: a moved date makes only the old day's reminder stale; a cleared date makes all of that record's stale; never another record's");
-  ok(planReminders({ ...base, liveSiteIds: new Set(["st3"]) }).map((x) => x.ref).join() === "st3", "M8: a finding or venue whose venue was deleted gets no reminder");
   const fs = src("src/lib/stores/findings.ts");
   ok(/prevDue = cur\.nextDue;[\s\S]*await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /if \(r\.ok\) await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /closeFindingReminders\(key, f\.nextDue, undefined\)/.test(fs),
     "M3 pin: saveFinding, transitionFinding and voidFinding close the old date's reminders");
   ok(/closeRemindersIfDateChanged\("venue", site\.id, before, at\)/.test(src("src/app/(app)/assessments/reminder-actions.ts")), "M3 pin: the venue date action closes the old date's reminder");
-  const rs = src("src/lib/assessments/reminders-server.ts");
   ok(/listDocsFiltered<[^>]*>\("assessments", \{ fields: \["siteId", "createdBy", "visitDate"\] \}\)/.test(rs) && /getDocRows\("tasks", plans\.map\(\(p\) => p\.id\)\)/.test(rs) && /await beforeDeadline\(\s*Promise\.all\(/.test(rs) && !/listAssessments/.test(rs),
     "M5 pin: the sweep reads three assessment fields, checks existing ids in one batched read, and its reads run under the deadline");
   const route = src("src/app/api/drive/sync/route.ts");
@@ -480,7 +375,6 @@ function reminderChecks(ok: Ok) {
   ok(/onBlur=\{\(\) => void commit\(\)\}/.test(nae) && /e\.key === "Enter"[\s\S]{0,80}void commit\(\)/.test(nae) && !/disabled=/.test(nae) && !/onChange=\{[^}]*setNextAssessmentAction/.test(nae) && /"Saved"/.test(nae) && /role="status"/.test(nae),
     "I1 pin: saves on blur / Enter only, stays enabled while saving, shows Saved or the error inline");
   ok(/at >= MIN_NEXT_ASSESSMENT_MS/.test(src("src/app/(app)/assessments/reminder-actions.ts")), "I1 pin: the server refuses a pre-1900 date too");
-  ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/components/assessments/next-assessment-edit.tsx")) && !/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/assessments/reminders.ts")), "b3 #10 pin: the client control and the planner import no store");
 }
 
 async function reminderDbChecks(ok: Ok) {

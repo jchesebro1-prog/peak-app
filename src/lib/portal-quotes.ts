@@ -24,7 +24,6 @@ import { acceptanceLine, chicagoDayEnd, cleanPoNumber, leadEstimator, RESPONSE_N
 import { can } from "@/lib/team";
 import { cleanText } from "@/lib/document-files";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { createTask } from "@/lib/stores/tasks";
 import { allUsers } from "@/lib/users";
 import type { CartLine } from "@/lib/portal-cart-types";
 import { addLine, clearCart, getCart, type PortalCart } from "@/lib/stores/portal-carts";
@@ -307,63 +306,21 @@ export async function acceptPortal(
     console.error("acceptPortal failed", q.id, e);
     return { ok: false, error: ACCEPT_FAIL_COPY };
   }
-  // The Lead estimator hears about it (a bell to-do — see notifyPortalAcceptance). Never fails the accept.
+  // An optional notifier (tests); the acceptance task itself was removed with Tasks — the portal bell group still lists it.
   try {
-    await (deps.notify ?? notifyPortalAcceptance)(q, { signerName, signerTitle, poNumber }, now);
+    if (deps.notify) await deps.notify(q, { signerName, signerTitle, poNumber }, now);
   } catch (e) {
     console.error("[portal-accept] notify failed", q.id, e instanceof Error ? e.message : e);
   }
   return { ok: true };
 }
 
-/**
- * Jeff 2026-10-15 #15 — tell the Lead estimator a customer accepted online:
- * "Accepted by <name>, <title> — PO <po>". The app has no system / sender
- * mailbox to email from (every outbound email is a person's own Gmail), so
- * the notice is a to-do for the Lead estimator — their bell and Home queue —
- * falling back to the active ADMINS (manage_users) when the lead isn't an
- * active roster member (#352 review M6 — not every approver). Emailing it needs a sender
- * mailbox first (PUNCHLIST). Each assignee on its own: one failing never
- * stops the rest.
- */
 /** #352 review M6 — who hears about a portal acceptance: the active Lead estimator, else the active admins. Pure. */
 export function portalAcceptanceAssignees<T extends RosterUser>(owner: string | null | undefined, preparedBy: string | null | undefined, users: readonly T[]): T[] {
   const active = (u: RosterUser) => (u.status ?? "active") === "active";
   const lead = leadEstimator(owner, preparedBy, users);
   if (lead && active(lead)) return [lead];
   return users.filter((u) => active(u) && can("manage_users", u.roles || []));
-}
-
-export async function notifyPortalAcceptance(
-  q: Quote,
-  a: { signerName: string; signerTitle: string; poNumber: string },
-  now: number,
-  deps: { users?: () => Promise<RosterUser[]>; createTask?: typeof createTask } = {}
-): Promise<void> {
-  const users = await (deps.users ?? allUsers)();
-  const make = deps.createTask ?? createTask;
-  const line = acceptanceLine({ name: a.signerName, title: a.signerTitle, po: a.poNumber });
-  const number = displayQuoteNumber(q);
-  for (const u of portalAcceptanceAssignees(q.owner, q.preparedBy, users)) {
-    try {
-      await make(
-        {
-          title: `${number} accepted online — ${line}`.slice(0, 300),
-          section: "Review",
-          quoteId: q.id,
-          assigneeUserId: u.id,
-          assigneeName: u.name,
-          dueAt: chicagoDayEnd(now),
-          notes: `${line}.\n${q.name || number} was accepted in the customer portal. Confirm it, then mark the quote Won.`,
-          ...(q.customerId ? { customerId: q.customerId } : {}),
-          ...(q.leadId ? { leadId: q.leadId } : {}),
-        },
-        { id: "system", name: "Customer portal" }
-      );
-    } catch (e) {
-      console.error("[portal-accept] task failed", q.id, e instanceof Error ? e.message : e);
-    }
-  }
 }
 
 const REFRESH_NOT_EXPIRED_COPY = "This quote hasn't expired yet.";

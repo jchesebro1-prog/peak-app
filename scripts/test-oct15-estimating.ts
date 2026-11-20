@@ -49,7 +49,7 @@ import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
 import { walkPhotoSides } from "../src/lib/package-doc/photo-sides";
 import { onlineShowsCutSheets } from "../src/lib/curtain-cut-sheets/online";
 import { acceptanceLine, cleanPoNumber, sanitizeClientResponse, responseNoteText, responseRows, cleanClientResponses, CLIENT_ACTION_COPY } from "../src/lib/estimate-output/responses";
-import { notifyPortalAcceptance, ACCEPT_SIGNER_NAME_COPY, ACCEPT_SIGNER_TITLE_COPY, ACCEPT_PO_NUMBER_COPY } from "../src/lib/portal-quotes";
+import { ACCEPT_SIGNER_NAME_COPY, ACCEPT_SIGNER_TITLE_COPY, ACCEPT_PO_NUMBER_COPY } from "../src/lib/portal-quotes";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { generateQuotePdf } from "../src/lib/quote-pdf/generate";

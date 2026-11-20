@@ -2,28 +2,11 @@
 
 import { requireUser } from "@/lib/session";
 import { draftReplyForThread, type ReplyTone } from "@/lib/assist/reply-server";
-import { suggestTasksForThread } from "@/lib/assist/tasks-server";
 import { getRun, setRunOutcome } from "@/lib/stores/assist-runs";
-import type { TaskSuggestion } from "@/lib/assist/features/task-suggest";
 import type { AssistFeature, AssistOutcome } from "@/lib/assist/types";
-
-/** #334 Assist — Suggest tasks. Suggestions only: nothing is created here;
- *  the dialog creates ticked rows through the existing #215 task action.
- *  The work is `suggestTasksForThread` (src/lib/assist/tasks-server.ts),
- *  shared with the daily brief's draft queue. */
 
 const OUTCOMES: AssistOutcome[] = ["accepted", "edited", "discarded"];
 const CLIENT_OUTCOME_FEATURES: AssistFeature[] = ["tasks", "reply"];
-
-export async function suggestTasksAction(threadId: string): Promise<
-  | { ok: true; runId: string; suggestions: TaskSuggestion[]; team: { id: string; name: string }[]; links: { key: string; label: string }[] }
-  | { ok: false; error: string }
-> {
-  const me = await requireUser();
-  const r = await suggestTasksForThread(threadId, { id: me.id, name: me.name });
-  if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, runId: r.runId, suggestions: r.suggestions, team: r.team, links: r.links };
-}
 
 /** #334 Assist — Draft reply. Returns text for the composer only: nothing
  *  is sent or saved here. The work is `draftReplyForThread`

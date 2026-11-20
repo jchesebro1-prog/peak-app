@@ -9,10 +9,7 @@ import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { signatureFor } from "@/lib/stores/signatures";
 import { withSignature } from "@/lib/inbox-signature";
 import { ASK_COMPOSE_PARAM } from "@/lib/assist/ask-compose";
-import { nudgePrefill, prefillRecipient } from "@/lib/inbox-compose-prefill";
-import { recordNudgeOpened } from "@/lib/brief/nudge-outcome";
 import { after } from "next/server";
-import { readerPreDraft } from "@/lib/brief/reader-predraft";
 import { attachmentHref } from "@/lib/comms-attachments";
 import { attachKey } from "@/lib/mail-attachments";
 import { replyAllCc } from "@/lib/reply-all";
@@ -22,10 +19,7 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { get as getQuote, getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
-import { getAllProjects } from "@/lib/stores/projects";
-import { tasksForThread } from "@/lib/stores/tasks";
 import { isDone } from "@/lib/pipelines";
-import { threadTaskLinkCandidates, threadTaskRows } from "@/lib/inbox-task";
 import {
   domainOf,
   GMAIL_MODIFY_SCOPE,
@@ -107,7 +101,6 @@ import { cleanupVMOf, getCleanupState } from "@/lib/inbox-org/cleanup";
 import { ORGANIZE_BASE_HREF, organizeArchiveTarget, organizeTabOf } from "./organize/format";
 import { threadGmailLabels } from "./row-labels";
 import { cardGmailChips } from "@/lib/gmail/user-label-rules";
-import { getTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import HomeTabs from "../home-tabs";
 import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
@@ -225,7 +218,6 @@ function linkHref(link: { type: string; id: string }): string {
   if (link.type === "lead") return `/leads?lead=${id}`;
   if (link.type === "survey") return `/venue-assessments?id=${id}`;
   if (link.type === "inspection") return `/inspections?id=${id}`;
-  if (link.type === "project") return `/projects`;
   if (link.type === "flame_job") return `/flame-tests/results?job=${id}`;
   return "#";
 }
@@ -737,17 +729,14 @@ export default async function InboxPage({
     // Loaded only for a resolved customer (the link picker + the sidebar's
     // customer card); an unlinked thread has nothing to count.
     let quotes: Awaited<ReturnType<typeof allQuotes>> = [];
-    let projects: Awaited<ReturnType<typeof getAllProjects>> = [];
     if (resolvedCid) {
-      const [q, surveys, inspections, p, leads] = await Promise.all([
+      const [q, surveys, inspections, leads] = await Promise.all([
         allQuotes(),
         allSurveys(),
         allInspections(),
-        getAllProjects(),
         allLeads(),
       ]);
       quotes = q;
-      projects = p;
       linkOptions = {
         quote: quotes
           .filter(
@@ -771,12 +760,7 @@ export default async function InboxPage({
             value: i.id,
             label: `${i.id} · ${i.venue || "Inspection"}`,
           })),
-        project: projects
-          .filter((p) => p.customerId === resolvedCid)
-          .map((p) => ({
-            value: p.id,
-            label: `${p.id} · ${p.name || "Project"}`,
-          })),
+        project: [],
       };
     }
 
@@ -873,9 +857,7 @@ export default async function InboxPage({
               ((q.customerId && q.customerId === linkedCustomer.id) ||
                 nameToId.get((q.customer || "").toLowerCase()) === linkedCustomer.id)
           ).length,
-          openProjects: projects.filter(
-            (p) => p.customerId === linkedCustomer.id && !isDone(p)
-          ).length,
+          openProjects: 0,
           contactName:
             (senderEmailLc &&
               (linkedCustomer.contacts || []).find(
@@ -893,29 +875,6 @@ export default async function InboxPage({
       .filter((c): c is NonNullable<typeof c> => !!c)
       .map((c) => ({ id: c.id, name: contactDisplayName(c), primary: c.id === linkedIds[0] }));
 
-    // #215 — the task dialog's link candidates (labels resolved here; the
-    // writer re-derives the same candidates from the stored thread) and the
-    // sidebar's open tasks on this thread.
-    const taskCandidates = threadTaskLinkCandidates({
-      threadId: sel.id,
-      // Fix wave 1 — resolvedCid can be an id resolveCustomerId still
-      // returns but that no longer maps to a real customer record; only
-      // offer/link the company (and, transitively, its venue) once it
-      // actually resolves to one (mirrors inbox-task-write.ts).
-      customerId: linkedCustomer ? resolvedCid : null,
-      siteId,
-      link: sel.link,
-      primaryContactId: sel.resolvedContactId ?? null,
-      contactIds: sel.linkedContactIds ?? [],
-    });
-    const taskContactRows = await Promise.all(
-      taskCandidates.filter((c) => c.kind === "contact").map((c) => getContact(c.id))
-    );
-    const taskContactName = new Map(
-      taskContactRows
-        .filter((r): r is NonNullable<typeof r> => !!r)
-        .map((r) => [r.id, contactDisplayName(r)] as const)
-    );
     // #223 — stored link labels were written as "<internal id> · name"; show
     // each linked quote/lead by its current estimate number instead.
     const linkedRefs: Array<{ type: string; id: string }> = [];
@@ -930,64 +889,14 @@ export default async function InboxPage({
         k.id,
         k.type === "quote" ? linkQuoteNos.get(k.id) : k.type === "lead" ? linkLeadNos.get(k.id) : null
       );
-    const workKindLabel = sel.link ? sel.link.type.charAt(0).toUpperCase() + sel.link.type.slice(1) : "";
-    const taskLinks: ReaderVM["taskLinks"] = taskCandidates.flatMap((c): ReaderVM["taskLinks"] => {
-      switch (c.kind) {
-        case "thread":
-          return [{ key: c.key, kind: c.kind, label: "This email thread" }];
-        case "contact": {
-          const name = taskContactName.get(c.id);
-          return name ? [{ key: c.key, kind: c.kind, label: name }] : [];
-        }
-        case "customer":
-          return [{ key: c.key, kind: c.kind, label: linkedCustomer?.name || resolvedCustomer || c.id }];
-        case "site":
-          return [{ key: c.key, kind: c.kind, label: siteOptions.find((o) => o.value === c.id)?.label || "Venue" }];
-        default:
-          return [
-            {
-              key: c.key,
-              kind: c.kind,
-              label:
-                `${workKindLabel} · ${sel.link ? linkLabel(sel.link) : c.id}` +
-                (c.kind === "survey" || c.kind === "inspection" ? " (noted in the task)" : ""),
-            },
-          ];
-      }
-    });
-    const threadTasks = threadTaskRows(await tasksForThread(sel.id), (n) => initialsOf(n));
-
     // #335 — the reader's organization strip (court, noise, filing, promise-task)
-    const promiseTaskId = sel.court?.promise?.taskId;
-    const promiseTask = promiseTaskId ? await getTask(promiseTaskId).catch(() => null) : null;
     const customerNameOf = new Map(customers.map((c) => [c.id, c.name]));
     const org = buildReaderOrg(sel, {
       customerName: (id) => customerNameOf.get(id) ?? null,
       teammateName: (id) => roster.find((u) => u.id === id)?.name ?? null,
-      task: promiseTask ? { id: promiseTask.id, title: promiseTask.title, dueAt: promiseTask.dueAt, status: promiseTask.status } : null,
+      task: null,
       isAdmin: can("manage_users", user.roles),
     });
-
-    // AI daily brief §4 — a fresh, court-me pre-draft of mine (else null). The
-    // stored suggestions keep only this dialog's link keys and team ids.
-    const storedDraft = readOnly ? null : readerPreDraft(sel, viewer);
-    const linkKeySet = new Set(taskLinks.map((l) => l.key));
-    const teamIds = new Set(roster.map((u) => u.id));
-    const preDraft: ReaderVM["preDraft"] = storedDraft
-      ? {
-          ...storedDraft,
-          tasks: storedDraft.tasks
-            ? {
-                runId: storedDraft.tasks.runId,
-                suggestions: storedDraft.tasks.suggestions.map((s) => ({
-                  ...s,
-                  linkKeys: s.linkKeys.filter((k) => linkKeySet.has(k)),
-                  assigneeUserId: teamIds.has(s.assigneeUserId) ? s.assigneeUserId : "",
-                })),
-              }
-            : null,
-        }
-      : null;
 
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
@@ -1102,10 +1011,7 @@ export default async function InboxPage({
             : []
       ),
       linkedPeople,
-      taskLinks,
-      taskTeam: roster.map((u) => ({ id: u.id, name: u.name })),
       meId: user.id,
-      threadTasks,
       org: readOnly ? null : org,
       // #346 — the sidebar's Labels card (own threads only: a read-only
       // thread has no sidebar and no label to change)
@@ -1133,7 +1039,6 @@ export default async function InboxPage({
         return vc && isVendorPickerType(vc.type) ? { id: vc.id, name: vc.name } : null;
       })(),
       readOnlyLinkedTo: "",
-      preDraft,
     };
     // #341 — a read-only thread carries none of the link / task data the
     // hidden sidebar and pickers would use, and names its customer only when
@@ -1148,8 +1053,6 @@ export default async function InboxPage({
         resolvedCustomerName: "",
         needsAdopt: false,
         linkOptions: { quote: [], lead: [], survey: [], inspection: [], project: [] },
-        taskLinks: [],
-        threadTasks: [],
         customerCard: null,
         suggested: null,
         candidates: [],
@@ -1216,16 +1119,6 @@ export default async function InboxPage({
   // Body wait in the tab's sessionStorage; the shell opens the composer from
   // them on the client, and only when nothing above claimed the composer.
   const askCompose = str(params.compose) === ASK_COMPOSE_PARAM;
-  const nudgeId = str(params.nudge).slice(0, 100);
-  const nudgeQuote = nudgeId ? await getQuote(nudgeId).catch(() => null) : null;
-  const nudge = nudgePrefill(nudgeQuote, { id: user.id, name: me });
-  // the report's "nudges opened": the composer opening is the hook. A write,
-  // so it runs after the response (not in the render); first write wins.
-  if (nudge) {
-    const nudgeRunId = nudgeQuote?.assistNudge?.runId;
-    const nudgeUserId = user.id;
-    after(() => recordNudgeOpened(nudgeRunId, nudgeUserId));
-  }
   const customerParam = str(params.customer);
   const logCust = str(params.log) === "1" ? customerParam : "";
   const newCust = logCust ? "" : str(params.new) || customerParam;
@@ -1247,20 +1140,6 @@ export default async function InboxPage({
         size: a.size,
         key: attachKey(a, i),
       })),
-    };
-  } else if (nudge) {
-    const c = nudge.customerId ? customerVMs.find((x) => x.id === nudge.customerId) : undefined;
-    const who = prefillRecipient(c, nudge.contact);
-    initialCompose = {
-      id: null,
-      mailbox: "personal",
-      to: who.to,
-      cc: "",
-      showCc: false,
-      subject: nudge.subject,
-      body: withSignature(nudge.body, signature, "add"),
-      customerId: c ? c.id : "",
-      contactName: who.contactName,
     };
   } else if (newCust) {
     const c = customerVMs.find((x) => x.id === newCust);

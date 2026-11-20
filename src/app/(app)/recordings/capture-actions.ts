@@ -18,8 +18,6 @@ import { getVisit } from "@/lib/stores/site-visits";
 import * as surveys from "@/lib/stores/surveys";
 import * as inspections from "@/lib/stores/inspections";
 import * as flameJobs from "@/lib/stores/flame-jobs";
-import * as repairJobs from "@/lib/stores/repair-jobs";
-import { getProject } from "@/lib/stores/projects";
 import { getEngagement } from "@/lib/stores/engagements";
 
 /**
@@ -64,15 +62,10 @@ async function resolveParent(kind: RecordingParentKind, id: string): Promise<Par
       const j = await flameJobs.get(id);
       return j ? { customerId: j.customerId, customer: j.customer, locationId: j.locationId, venue: j.venue } : null;
     }
-    case "repair_job": {
-      const j = await repairJobs.get(id);
-      return j ? { customerId: j.customerId, customer: j.customer, locationId: j.locationId, venue: j.venue } : null;
-    }
-    case "project": {
-      const p = await getProject(id);
-      // Projects carry no venue label — the title falls back to the customer.
-      return p ? { customerId: p.customerId, customer: p.customer, locationId: p.locationId, venue: "" } : null;
-    }
+    // Repairs and Projects were removed: nothing new records against them.
+    case "repair_job":
+    case "project":
+      return null;
     case "engagement": {
       const e = await getEngagement(id);
       return e

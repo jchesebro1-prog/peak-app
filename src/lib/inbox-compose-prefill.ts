@@ -6,10 +6,6 @@
  * picks the recipient. Nothing travels in the URL but the quote id, and
  * nothing sends until the person presses Send. Pure, client-safe.
  */
-import { nudgeFreshFor } from "@/lib/brief/fresh";
-import { quoteIsMine } from "@/lib/brief/quiet";
-import type { AssistNudge } from "@/lib/brief/types";
-import type { QuoteHistoryEntry, QuoteStatus } from "@/lib/stores/quotes";
 
 /** Server-side caps on a prefilled composer. */
 export const COMPOSE_SUBJECT_MAX = 200;
@@ -36,35 +32,6 @@ export function capLine(v: unknown, max: number): string {
 /** A body: CRLF → LF, other control characters out (tabs and newlines kept); trimmed; capped. */
 export function capBody(v: unknown, max: number): string {
   return (typeof v === "string" ? v : "").replace(/\r\n?/g, "\n").replace(CTRL_BODY, "").trim().slice(0, max);
-}
-
-type NudgeQuote = {
-  status: QuoteStatus | string;
-  history: readonly Pick<QuoteHistoryEntry, "at" | "to">[];
-  owner: string;
-  preparedBy?: string;
-  customerId: string | null;
-  contactName?: string;
-  assistNudge?: AssistNudge | null;
-};
-
-/**
- * The prefill for `?nudge=<quoteId>`, or null: only a fresh nudge
- * (`nudgeFreshFor`: still sent, same send, made for the viewer) with no error
- * and a body, on a quote that is the viewer's to follow up (owner, else
- * preparedBy). A nudge made for the quote's previous owner is stale.
- */
-export function nudgePrefill(q: NudgeQuote | null | undefined, me: { id: string; name: string }): ComposePrefill | null {
-  const n = q?.assistNudge;
-  if (!q || !n || n.error || !nudgeFreshFor(q, me.id) || !quoteIsMine(q, me.name)) return null;
-  const body = capBody(n.emailBody, COMPOSE_BODY_MAX);
-  if (!body) return null;
-  return {
-    subject: capLine(n.emailSubject, COMPOSE_SUBJECT_MAX),
-    body,
-    customerId: q.customerId || null,
-    contact: capLine(q.contactName, COMPOSE_CONTACT_MAX),
-  };
 }
 
 type CustomerLike = { contacts: ReadonlyArray<{ name: string; email: string }> };

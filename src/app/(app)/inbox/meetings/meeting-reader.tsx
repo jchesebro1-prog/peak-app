@@ -23,9 +23,7 @@ import {
   setAttendeeContactAction,
   setSpeakerAction,
 } from "./actions";
-import TierSizeChips from "@/components/task-plan/tier-size-chips";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
-import type { TaskSize, TaskTier } from "@/lib/task-plan/types";
 import MeetingSidebar, { LinkSearch, useMeetingAction } from "./meeting-sidebar";
 import { SCOPE_META } from "./meetings-box";
 
@@ -348,8 +346,6 @@ function Todos({ vm }: { vm: MeetingReaderVM }) {
 function TodoRow({ vm, t, pending, run }: { vm: MeetingReaderVM; t: MeetingReaderVM["todos"][number]; pending: boolean; run: Run }) {
   const [kind, setKind] = useState<TodoKind>(t.suggested);
   const [assignee, setAssignee] = useState("");
-  const [tier, setTier] = useState<TaskTier>("normal");
-  const [size, setSize] = useState<TaskSize>("m");
   const decided = t.decision && t.decision.kind !== "dismiss";
   const locked = pending || !vm.filed;
   return (
@@ -380,9 +376,8 @@ function TodoRow({ vm, t, pending, run }: { vm: MeetingReaderVM; t: MeetingReade
               {vm.team.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           )}
-          {kind === "task" && <TierSizeChips tier={tier} size={size} onTier={setTier} onSize={setSize} disabled={locked} />}
           <button type="button" style={{ ...BTN, padding: "4px 9px" }} disabled={locked}
-            onClick={() => run(() => decideTodoAction(vm.id, t.key, kind, kind === "task" ? { ...(assignee ? { assigneeUserId: assignee } : {}), priority: tier, size } : {}))}>
+            onClick={() => run(() => decideTodoAction(vm.id, t.key, kind, kind === "task" ? { ...(assignee ? { assigneeUserId: assignee } : {}) } : {}))}>
             Confirm
           </button>
         </span>

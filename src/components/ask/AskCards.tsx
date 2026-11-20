@@ -28,7 +28,6 @@ import { ASK_COMPOSE_HREF, ASK_COMPOSE_KEY, askComposePayload } from "@/lib/assi
 import { SUGGEST_BUSY_LABEL, SUGGEST_START_ERROR, startSuggestion } from "@/lib/assist/suggest-client";
 import { addCustomerNoteAction, addVenueNoteAction } from "@/app/(app)/companies/actions";
 import { logActivityAction } from "@/app/(app)/leads/actions";
-import { addProjectNoteAction } from "@/app/(app)/projects/actions";
 import { postChanged } from "@/lib/popout/channel";
 
 export type AskTeamMember = { id: string; name: string };
@@ -198,8 +197,7 @@ function NoteCardView({ card, runId, streaming, whitelist }: CardProps & { card:
         const r = await logActivityAction(id, { type: "note", note: card.text });
         if (!r.ok) return r;
       } else {
-        const r = await addProjectNoteAction(id, card.text);
-        if (!r.ok) return r;
+        return { ok: false as const, error: "Projects were removed — this note can't be filed there." };
       }
       await recordConfirm(runId, "note");
     });

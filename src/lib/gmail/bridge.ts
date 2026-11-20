@@ -59,8 +59,6 @@ import {
 import { attachmentMimePart, messageTooLargeError } from "@/lib/comms-attachments";
 import { readMailRefForThread } from "@/lib/mail-attachments-server";
 import { readPdfForThread as readThreadPdf } from "@/lib/thread-pdf-read";
-import { icsMimeType } from "@/lib/ics";
-import { sendWithMailboxFallback, visitInviteGmailIds, type InviteVisitShape } from "@/lib/visit-invite-plan";
 import { buildRaw, findPart, headerValue, listAttachmentParts, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
@@ -531,65 +529,6 @@ async function syncLabels(key: MailboxKey): Promise<void> {
   await replaceLabels(key, labels);
 }
 
-/* ---- site-visit invites (D76) --------------------------------------------- */
-
-/**
- * Email a site-visit .ics invite to the assignee (D76 decisions B/E: the
- * scheduler's own connected mailbox sends it; no customer is ever an
- * attendee). Sender preference (pickInviteMailbox): for an update or
- * cancellation, the mailbox that sent the person's invite while it is still
- * connected (the ORGANIZER must not change); else the scheduler's personal
- * mailbox, else the first connected shared box. The mailbox actually used is
- * returned so the visit records it; a preferred mailbox whose owner is inactive
- * is ignored, and an authorization failure from it retries once from the usual
- * pick (sendWithMailboxFallback). Returns the sent ids for stamping on the visit
- * record (D76-I), or null when no mailbox can send. The X-Peak-Site-Visit
- * header keeps the import poll from re-recording the mail as an inbox thread.
- */
-export async function sendSiteVisitInvite(opts: {
-  siteVisitId: string;
-  schedulerUserId: string | null;
-  toAddr: string;
-  subject: string;
-  body: string;
-  /** the mailbox that sent this person's original invite (updates / cancels) */
-  preferMailbox?: string | null;
-  /** builds the .ics with the sending mailbox as its ORGANIZER */
-  ics: (organizerAddr: string) => string;
-}): Promise<{ gmailId: string; gmailThreadId: string; fromMailbox: string } | null> {
-  const keys = await connectedMailboxKeys();
-  // The preferred (original-sender) mailbox is ignored when its owner is no
-  // longer an active user; a token / grant failure sending from it retries once
-  // from the usual pick. The mailbox that actually sent is what gets recorded.
-  const isActive = async (k: string) => {
-    if (!k.startsWith("personal:")) return true;
-    const u = await getUser(k.slice("personal:".length));
-    return !!u && u.status === "active";
-  };
-  const out = await sendWithMailboxFallback(keys, opts, isActive, async (key) => {
-    const info = await getConnectionInfo(key);
-    if (!info) return null;
-    const icsText = opts.ics(info.address);
-    const raw = buildRaw({
-      from: info.address,
-      to: opts.toAddr,
-      subject: opts.subject,
-      body: opts.body,
-      attachments: [
-        {
-          name: "site-visit.ics",
-          mime: icsMimeType(icsText),
-          dataBase64: Buffer.from(icsText, "utf8").toString("base64"),
-        },
-      ],
-      extraHeaders: { "X-Peak-Site-Visit": opts.siteVisitId },
-    });
-    const sent = await sendRaw(key, raw);
-    return { gmailId: sent.id, gmailThreadId: sent.threadId, fromMailbox: key };
-  });
-  return out ? out.result : null;
-}
-
 /* ---- two-way archive (D74) ------------------------------------------------ */
 
 /**
@@ -717,10 +656,19 @@ async function buildImportDedup(): Promise<Set<string>> {
       if (m.gmailId) known.add(m.gmailId);
     }
   }
-  for (const d of await listDocs<InviteVisitShape>("site_visits")) {
-    // Spec 2026-10-09 site-visit scheduling — every invite, update and
-    // cancellation sent per recipient, plus the old single stamp.
-    for (const id of visitInviteGmailIds(d)) known.add(id);
+  // Invite mail sent while site-visit invites existed: the old single stamp,
+  // each recipient's sends, and the sends to people since removed.
+  type StoredInvites = { id: string; invite?: { gmailId?: string } | null; invites?: unknown; inviteGmailIds?: unknown };
+  const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x) : []);
+  for (const d of await listDocs<StoredInvites>("site_visits")) {
+    if (d.invite?.gmailId) known.add(d.invite.gmailId);
+    for (const e of Array.isArray(d.invites) ? d.invites : []) {
+      const r = e && typeof e === "object" ? (e as { gmailId?: unknown; gmailIds?: unknown }) : null;
+      if (!r) continue;
+      if (typeof r.gmailId === "string" && r.gmailId) known.add(r.gmailId);
+      for (const id of strs(r.gmailIds)) known.add(id);
+    }
+    for (const id of strs(d.inviteGmailIds)) known.add(id);
   }
   return known;
 }

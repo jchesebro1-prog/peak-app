@@ -51,7 +51,6 @@ import { contactByEmail } from "@/lib/identity/lookup";
 import { firstRecipient } from "@/lib/inbox-identity";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import { resolveQuoteInput } from "@/lib/stores/estimate-numbers";
-import { getProject } from "@/lib/stores/projects";
 import { getSettings } from "@/lib/settings";
 import { assistGate, assistSettingsOf } from "@/lib/assist/config";
 import { getAssistEnv } from "@/lib/assist/key-store";
@@ -319,13 +318,6 @@ async function findByNumbers(texts: string[]): Promise<NumberHit | null> {
           return { customerId: q.customerId || null, work: { type: "quote", id: q.id, label }, reason: `${n.raw} in ${where(i)}` };
         }
       } else if (n.suffix === null) leadNos.push({ n, i });
-    }
-  }
-  for (let i = 0; i < texts.length; i++) {
-    for (const pid of findRecordIds(texts[i]).projects) {
-      if (lookups++ >= MAX_NUMBER_LOOKUPS) break;
-      const p = await getProject(pid);
-      if (p) return { customerId: p.customerId || null, work: { type: "project", id: p.id, label: `${p.id} ${p.name || ""}`.trim() }, reason: `${pid} in ${where(i)}` };
     }
   }
   for (const { n, i } of leadNos) {

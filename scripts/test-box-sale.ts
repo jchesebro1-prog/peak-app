@@ -379,24 +379,6 @@ function sendPackageChecks(ok: Ok) {
   ok(/\{!m\.boxSale && \(\s*<nav aria-label="Estimate view"/.test(rd("src/components/estimate-output/package-view.tsx")), "box sale package page (source): PackageView drops the toggle when the model says so");
 }
 
-function intakeChecks(ok: Ok) {
-  const card = SERVICE_TYPES.find((t) => t.key === "box_sale");
-  ok(!!card && card.label === BOX_SALE_COPY.label && card.sub === BOX_SALE_COPY.cardSub && SERVICE_TYPES[1]?.key === "box_sale" && isServiceType("box_sale"),
-    "box sale intake: + New quote has a Box goods sale card, right after System / equipment quote");
-  ok(BUILDER_BASE.box_sale === "/estimator" && builderPath("box_sale", "c1") === "/estimator?customer=c1&box=1" && !new URLSearchParams(builderPath("system", "c1").split("?")[1]).has("box"),
-    "box sale intake: the card opens the Estimator with ?box=1 (a system quote never carries it)");
-  ok(readHandoff({ box: "1" }).boxSale === true && readHandoff({}).boxSale === false && readHandoff({ box: "yes" }).boxSale === false, "box sale intake: the Estimator reads ?box=1 and nothing else");
-  ok(quoteServiceType({ quoteType: "system", boxSale: true }) === "box_sale" && quoteServiceType({ boxSale: true, category: "Gear" }) === "box_sale" && quoteServiceType({ quoteType: "repair", boxSale: true }) === "repair" &&
-     quoteEditPath({ id: "Q-1", boxSale: true }) === "/estimator?id=Q-1" && sameBuilder("box_sale", "system"),
-    "box sale intake: a stored box sale reads as the Box goods sale card and edits in the Estimator (switching it to System is not a replace)");
-  const act = rd("src/app/(app)/quotes/new/actions.ts");
-  ok(act.includes('quoteType: input.type === "custom" || input.type === "box_sale" ? "system" : input.type,') && act.includes('...(input.type === "box_sale" ? { boxSale: true } : {}),'),
-    "box sale intake (source): a draft minted from an Inbox thread is a system quote with the flag");
-  const link = rd("src/lib/gmail/linking.ts");
-  ok(link.includes("...(input.boxSale === true ? { boxSale: true } : {}),") && /boxSale\?: boolean;/.test(link), "box sale intake (source): linkThreadToNewQuote passes the flag to create");
-  ok(rd("src/app/(app)/estimator/page.tsx").includes("if (!q && handoff?.boxSale) initial.boxSale = true;"), "box sale intake (source): a new estimate opened with ?box=1 starts with the switch on");
-}
-
 
 /** Final review (I1–I4 + minors) — behavioural where the code takes injected deps. */
 async function finalReviewChecks(ok: Ok) {
@@ -406,33 +388,6 @@ async function finalReviewChecks(ok: Ok) {
     id: "Q-fr", name: "Gym", status: "draft", updatedAt: 77, estNo: 1042,
     pdf: { status: "ready", at: 20, savedAt: 20, blobPath: "quote-pdfs/Q-fr/cur.pdf" }, contentChangedAt: 10, revisions: [], ...extra,
   } as never);
-  const fakes = (quote: Quote) => {
-    const calls: string[] = [];
-    const st = { q: quote, threads: [] as Array<{ attachments: Array<{ name: string }> }>, drafts: [] as Array<{ attachments: Array<{ name: string }> }> };
-    const deps: EstimateEmailDeps = {
-      now: () => NOW,
-      getQuote: async (id) => (id === st.q.id ? st.q : null),
-      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
-      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
-      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
-      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
-      claimSend: async (_id, by, now) => { calls.push("claimSend"); return { ok: true, claim: { by, until: now + 120_000 } }; },
-      releaseSend: async () => { calls.push("releaseSend"); },
-      applySignature: async (body) => { calls.push("applySignature"); return body; },
-      sendQuote: async (_id, actor) => {
-        calls.push("sendQuote");
-        st.q = { ...st.q, status: "sent", revisions: [{ rev: 1, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-fr/rev-1.pdf" }] } as never;
-        return { ok: true };
-      },
-      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/x"; },
-      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec as never); return { threadId: "C-1", delivery: "local" as const }; },
-      createDraftThread: async (spec) => { calls.push("createDraftThread"); st.drafts.push(spec as never); return { threadId: "C-2" }; },
-      recordEmail: async () => { calls.push("recordEmail"); return true; },
-      addFollowUpTask: async () => { calls.push("addFollowUpTask"); },
-      roster: async () => [{ id: "u1", name: "Sam Mills", status: "active" }],
-    };
-    return { deps, calls, st };
-  };
   const input = (o: Record<string, unknown> = {}) => ({ to: "pat@school.org", cc: "", subject: "S", body: "B {link}", attachEstimate: true, attachCover: false, followUpDays: 0, asOf: 77, ...o });
   const laborSecs = { sections: [sys("s1", "Rigging", [line(1)]), sys("s2", "Install", [line(2, { labor: true })])], mobs: [], document: DOC };
 

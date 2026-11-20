@@ -4,7 +4,6 @@ import { estimateRunOutcome, estimateRunQuoteId, suggestionCatalogLines, suggest
 import { getSuggestion, suggestionForSource } from "@/lib/stores/estimate-suggestions";
 import { askReport, assistReport, briefReport, filingReport, recentMonthKeys, vendorPdfReport, type BriefBuildRow, type FilingReport } from "@/lib/assist/report";
 import { modelFor } from "@/lib/assist/models";
-import { briefIdsInMonth } from "@/lib/brief/slots";
 import { getBlob, listBlobIds } from "@/db/doc-store";
 import { cleanupRuleSuggestions } from "@/lib/inbox-org/cleanup";
 import { loadOrgContext } from "@/lib/inbox-org/pipeline";
@@ -74,37 +73,13 @@ export async function loadAssistVM(settings: AppSettingsData, monthParam?: strin
     months: Array.from(new Set([...recentMonthKeys(now, 3, monthKeyChicago), month])),
     spendUsd: runs.reduce((sum, r) => sum + (r.costUsd || 0), 0),
     report: assistReport(runs, estOutcomes),
-    brief: briefReport(runs, await loadBriefBuilds(month)),
+    brief: briefReport(runs, []),
     ask: askReport(runs),
     askModels: { ask: modelFor("ask", env), askHard: modelFor("askHard", env) },
     vendorPdf: vendorPdfReport(runs),
     vendorPdfModels: { read: modelFor("vendorpdf", env), hard: modelFor("vendorpdfHard", env) },
     org,
   };
-}
-
-/** Most stored briefs read for one month's report (≈ 2 a day × a team's pilot users — far under it). */
-export const BRIEF_REPORT_MAX = 1500;
-
-/**
- * The month's stored briefs → their `builtBy`. The blob ids carry the day
- * (`brief:<userId>:<day>:<slot>`), so the month is filtered before anything
- * is read, and at most BRIEF_REPORT_MAX are. Never throws: a failure reads
- * as no briefs (the rest of the report still shows).
- */
-async function loadBriefBuilds(month: string): Promise<BriefBuildRow[]> {
-  try {
-    const ids = briefIdsInMonth(await listBlobIds("brief:"), month).slice(0, BRIEF_REPORT_MAX);
-    const out: BriefBuildRow[] = [];
-    for (let i = 0; i < ids.length; i += 50) {
-      const rows = await Promise.all(ids.slice(i, i + 50).map((id) => getBlob<Record<string, unknown>>(id, {})));
-      for (const b of rows) if (typeof b.builtBy === "string") out.push({ builtBy: b.builtBy });
-    }
-    return out;
-  } catch (e) {
-    console.error("[brief] loading the brief report failed", e instanceof Error ? e.name : "error");
-    return [];
-  }
 }
 
 /** #335 — the Inbox-organization half of the card: the month's filing report

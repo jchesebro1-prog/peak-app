@@ -24,13 +24,10 @@ import { getSite } from "@/lib/identity/sites";
 import { suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
 import { activeUsers } from "@/lib/users";
 import { can } from "@/lib/team";
-import { getTask } from "@/lib/stores/tasks";
 import { getNote } from "@/lib/stores/notes";
-import { taskHref } from "@/lib/calendar-tasks";
 import { isOpen as leadIsOpen, type LeadRecord } from "@/lib/stores/leads";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import type { SurveyRecord } from "@/lib/stores/surveys";
-import type { ProjectRecord } from "@/lib/stores/projects";
 import type { ConsultingEngagement } from "@/lib/stores/engagements";
 import type { Quote } from "@/lib/stores/quotes";
 import { displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
@@ -243,11 +240,10 @@ async function workOptionsFor(companyId: string | null): Promise<MeetingReaderVM
   const out = Object.fromEntries(WORK_TYPES.map((t) => [t, [] as { id: string; label: string }[]])) as MeetingReaderVM["workOptions"];
   if (!companyId) return out;
   // company-scoped reads only (never six full collections); each collection's own company field
-  const [leads, visits, surveys, projects, engagements, quotes] = await Promise.all([
+  const [leads, visits, surveys, engagements, quotes] = await Promise.all([
     listDocsByField<LeadRecord>("leads", "customerId", [companyId]),
     listDocsByField<SiteVisit>("site_visits", "customerId", [companyId]),
     listDocsByField<SurveyRecord>("surveys", "customerId", [companyId]),
-    listDocsByField<ProjectRecord>("projects", "customerId", [companyId]),
     listDocsByField<ConsultingEngagement>("consulting_engagements", "companyId", [companyId]),
     listDocsByField<Quote>("quotes", "customerId", [companyId]),
   ]);
@@ -258,8 +254,6 @@ async function workOptionsFor(companyId: string | null): Promise<MeetingReaderVM
     .map((v) => ({ id: v.id, label: `${v.id} · ${v.venue || v.reason || "Site visit"}${v.startAt ? ` · ${DAY.format(v.startAt)}` : ""}` })).slice(0, CAP);
   out.survey = surveys.filter((s) => s.customerId === companyId)
     .map((s) => ({ id: s.id, label: `${s.id} · ${s.venue || s.venueType || "Survey"}` })).slice(0, CAP);
-  out.project = projects.filter((p) => p.customerId === companyId)
-    .map((p) => ({ id: p.id, label: `${p.id} · ${p.name || "Project"}` })).slice(0, CAP);
   out.engagement = engagements.filter((e) => e.companyId === companyId)
     .map((e) => ({ id: e.id, label: e.name || e.id })).slice(0, CAP);
   out.quote = quotes.filter((q) => q.customerId === companyId)
@@ -276,12 +270,8 @@ async function decisionOf(m: MeetingRecord, d: NonNullable<MeetingRecord["todos"
     const parent = noteParentFor(m.links);
     return { kind: d.kind, label: "Note filed", href: noteHref(n.parentKind, n.parentId) ?? (parent ? noteHref(parent.parentKind, parent.parentId) : null) };
   }
-  const t = await getTask(d.createdId).catch(() => null);
-  if (!t) return { kind: d.kind, label: `Task ${REMOVED}`, href: null };
-  const label = d.kind === "waiting"
-    ? `Waiting on ${t.waitingOn?.name || "customer"}`
-    : `Task for ${t.assigneeName || "no one yet"}`;
-  return { kind: d.kind, label, href: taskHref(t) || "/calendar" };
+  // Tasks were removed: an earlier task decision keeps its label, with nowhere to open.
+  return { kind: d.kind, label: d.kind === "waiting" ? "Waiting on customer" : "Task", href: null };
 }
 
 /** null when the meeting is gone or the viewer can't see it — the reader shows its empty state, never the title. */

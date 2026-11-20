@@ -14,7 +14,6 @@ import { RATE_LIMITS, runAssist, toJsonSchema, type RunResult } from "@/lib/assi
 import { editRatio, estimateKeep, estimateOutcomeFor, replyOutcome } from "@/lib/assist/outcome";
 import { assistReport, featureKey, recentMonthKeys } from "@/lib/assist/report";
 import { ZERO_USAGE, type AssistProvider, type ProviderRequest } from "@/lib/assist/types";
-import { sanitizeTaskSuggestions, buildTasksUserText, suggestionEdited, taskSuggestOutcome } from "@/lib/assist/features/task-suggest";
 import { cleanPromptField, promptMessages, threadBlock, UNTRUSTED_NOTE } from "@/lib/assist/features/thread-text";
 import { assistDraftViewOf, buildDraftUserText, remapExampleLines, sanitizeExtract, selectCandidateParts } from "@/lib/assist/features/estimate-draft";
 import { sanitizeSuggestion } from "@/lib/assist/features/suggestion";
@@ -680,9 +679,6 @@ export async function assistKeyChecks(ok: Ok): Promise<void> {
   /* explicit env never sees the stored key */
   const runSrc = readFileSync("src/lib/assist/run.ts", "utf8");
   ok(/const env = deps\.env \?\? \(await getAssistEnv\(\)\)/.test(runSrc), "assist key: runAssist uses the stored key only when the caller passed no env");
-  // the Inbox actions' early gate moved to src/lib/assist/gate-server.ts (brief Task 2); the
-  // actions call the shared server functions, which gate there (Suggest estimate: its own route).
-  ok(["src/lib/assist/tasks-server.ts", "src/lib/assist/reply-server.ts"].every((f) => readFileSync(f, "utf8").includes('from "./gate-server"')), "assist key: the Inbox actions' server functions gate through gate-server");
   for (const f of ["src/lib/assist/gate-server.ts", "src/app/(app)/inbox/page.tsx", "src/app/(app)/settings/assist-data.ts"]) {
     ok(readFileSync(f, "utf8").includes("getAssistEnv("), `assist key: ${f} reads the effective env`);
   }

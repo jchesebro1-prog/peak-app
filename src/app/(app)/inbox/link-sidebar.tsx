@@ -32,7 +32,6 @@ import {
   releaseDomainAction,
 } from "./link-actions";
 import WorkLinkCard from "./work-link-card";
-import ThreadTasksCard from "./thread-tasks-card";
 import LinkPanel from "./link-panel";
 import LabelsCard from "./labels-card";
 import { ACCENT_BTN, BODY, BTN, CARD, CHECK_ROW, H, MONO, MUTED, PRIMARY } from "./sidebar-styles";
@@ -423,9 +422,6 @@ export default function LinkSidebar({
               </div>
             </div>
           )}
-
-          {/* #215 — open tasks created from this thread */}
-          <ThreadTasksCard tasks={vm.threadTasks} isEmail={vm.isEmail} />
 
           {error && <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>}
         </>

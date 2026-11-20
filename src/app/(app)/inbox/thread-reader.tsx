@@ -15,13 +15,9 @@ import {
   unarchiveAction,
 } from "./actions";
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
-import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
-import TaskDialog from "./task-dialog";
-import AssistTasksDialog from "./assist-tasks-dialog";
 import SuggestEstimate from "@/components/assist/suggest-estimate";
-import { draftReplyAction, recordAssistOutcomeAction, suggestTasksAction } from "./assist-actions";
-import { completeThreadTaskAction } from "./task-actions";
+import { draftReplyAction, recordAssistOutcomeAction } from "./assist-actions";
 import ReaderOrgStrip from "./organize/reader-org";
 import { ORGANIZE_ARCHIVED_EVENT, organizeArchiveNote, organizeArchiveRemoves, shortTaskTitle } from "./organize/format";
 import { archiveFromOrganizeAction } from "./organize-actions";
@@ -42,7 +38,6 @@ const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
 type Mode = "reply" | "replyAll" | "forward";
 
-type SuggestTasksResult = Awaited<ReturnType<typeof suggestTasksAction>>;
 const NO_ASSIST: AssistFlags = { tasks: false, reply: false, estimate: false };
 /** `stored`: an AI-brief pre-draft opened with Use it (its runId outlives one composer). */
 type AssistDraft = { runId: string; draft: string; stored?: boolean };
@@ -278,29 +273,6 @@ function ExpandedMessage({
               }}
             >
               Link…
-            </button>
-          )}
-          {isEmail && !readOnly && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onTask();
-              }}
-              title="Create a task from this message"
-              style={{
-                border: "1px solid #e4e7ec",
-                borderRadius: 6,
-                padding: "2px 7px",
-                color: "#68707b",
-                fontSize: 10.5,
-                fontWeight: 600,
-                background: "#fff",
-                cursor: "pointer",
-                fontFamily: "var(--font-ui)",
-              }}
-            >
-              Task…
             </button>
           )}
           {readOnly && m.link && (
@@ -589,7 +561,6 @@ export default function ThreadReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
   // D76 — schedule-site-visit modal
-  const [visitOpen, setVisitOpen] = useState(false);
   // #214 sidebar — the sidebar's link mode: which message, and whether a
   // header opened it (null = the summary). The opener gets focus back on Done.
   const [linkFor, setLinkFor] = useState<{ messageId: string; fromHeader: boolean } | null>(null);
@@ -605,7 +576,6 @@ export default function ThreadReader({
   /** #346 — an Organize Archive in flight (one press, one archive) */
   const [archiving, setArchiving] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
-  const [assistTasks, setAssistTasks] = useState<Extract<SuggestTasksResult, { ok: true }> | null>(null);
   // #334 Assist — Draft reply: the draft in the composer, pending until it is
   // sent (accepted / edited by edit ratio) or thrown away (discarded). The
   // ref is the source of truth so send / close / unmount settle it once.
@@ -800,9 +770,9 @@ export default function ThreadReader({
   // AI daily brief §4 — the stored pre-draft. The server sends it only for a
   // fresh, court-me thread of mine (readerPreDraft); the reply line needs a
   // non-empty body too. Shown only while Draft reply itself would show.
-  const pre = vm.preDraft ?? null;
+  // The daily brief (and its stored pre-drafts) was removed with Morning triage: there is never one to show.
+  const pre = null as { reply: { body: string; runId: string | null } | null; preparedLabel: string } | null;
   const storedReply = assist.reply && pre?.reply && pre.reply.body.trim() ? pre.reply : null;
-  const storedTasks = assist.tasks && pre?.tasks ? pre.tasks : null;
 
   // "Use it" — the Draft reply path with the stored body and runId: no model
   // call. Outcomes are recorded exactly as for Draft reply (edit ratio on
@@ -893,20 +863,7 @@ export default function ThreadReader({
         if (assistDraftRef.current.stored) sentStoredRef.current.add(assistDraftRef.current.runId);
         settleDraft(o.outcome, { editRatio: o.editRatio });
       }
-      // #335 §7 — the person ticked "Mark '…' done?": complete the
-      // promise-task through the ordinary task status action
       setPromiseNote(null);
-      if (res.ok && markPromiseDone && openPromise) {
-        // the reply went out either way; a failure leaves the task open
-        const failed = "Reply sent — but the task couldn’t be marked done. Close it from the task list.";
-        try {
-          const done = await completeThreadTaskAction(openPromise.taskId);
-          if (!done.ok) setPromiseNote(`Reply sent — the task wasn’t marked done: ${done.error}`);
-          else postChanged("task", openPromise.taskId);
-        } catch {
-          setPromiseNote(failed);
-        }
-      }
       if (res.ok) postChanged("thread", vm.id);
       setMarkPromiseDone(false);
       closeComposer();
@@ -971,14 +928,6 @@ export default function ThreadReader({
       // Edit links opens on any channel, so this has to be gated here
       // rather than relying on the panel never being asked for it. It
       // leaves link mode and opens the task dialog for that message.
-      onCreateTask={
-        vm.isEmail
-          ? (mid) => {
-              setLinkFor(null);
-              openTask(mid);
-            }
-          : undefined
-      }
     />
   );
 
@@ -1301,52 +1250,6 @@ export default function ThreadReader({
                 Reopen
               </ActionBtn>
             )}
-            {vm.visit && vm.resolvedCustomerId && (
-              <ActionBtn
-                colors={["#1f7a52", "#e8f3ee", "#cfe6db"]}
-                onClick={() => setVisitOpen(true)}
-              >
-                Site visit
-              </ActionBtn>
-            )}
-            {assist.tasks && vm.isEmail && (
-              <ActionBtn
-                colors={["#5b616e", "#fff", "#e4e7ec"]}
-                disabled={assistBusy}
-                title="Assist — drafts suggestions for you to review"
-                onClick={async () => {
-                  if (assistBusy || tasksInFlight.current) return;
-                  // AI daily brief — fresh stored suggestions open the same
-                  // dialog with their own runId: no model call.
-                  if (storedTasks) {
-                    setAssistError(null);
-                    setAssistTasks({
-                      ok: true,
-                      runId: storedTasks.runId,
-                      suggestions: storedTasks.suggestions,
-                      team: vm.taskTeam,
-                      links: vm.taskLinks.map((l) => ({ key: l.key, label: l.label })),
-                    });
-                    return;
-                  }
-                  tasksInFlight.current = true;
-                  setAssistBusy(true);
-                  setAssistError(null);
-                  try {
-                    const r = await suggestTasksAction(vm.id);
-                    if (r.ok) setAssistTasks(r);
-                    else setAssistError(r.error);
-                  } catch {
-                    setAssistError("Assist couldn’t respond — please try again.");
-                  } finally {
-                    tasksInFlight.current = false;
-                    setAssistBusy(false);
-                  }
-                }}
-              >
-                {assistBusy ? "Thinking…" : "Suggest tasks"}
-              </ActionBtn>
-            )}
             {assist.estimate && vm.isEmail && (
               <SuggestEstimate source={{ kind: "thread", id: vm.id }} readyHref={vm.suggestionHref ?? null} />
             )}
@@ -1385,40 +1288,6 @@ export default function ThreadReader({
             >
               {organizeArchiveRemoves(vm.organize) ? "Archive" : vm.archived ? "Unarchive" : "Archive"}
             </ActionBtn>
-            {visitOpen && vm.visit && vm.resolvedCustomerId && (
-              <SiteVisitModal
-                threadId={vm.id}
-                customerId={vm.resolvedCustomerId}
-                customerName={vm.resolvedCustomerName}
-                needsAdopt={vm.needsAdopt}
-                contactEmail={vm.contactEmail}
-                visit={vm.visit}
-                onClose={() => setVisitOpen(false)}
-              />
-            )}
-            {taskFor && (
-              <TaskDialog
-                vm={vm}
-                messageId={taskFor.messageId}
-                onClose={() => setTaskFor(null)}
-                containerRef={readerRootRef}
-              />
-            )}
-            {assistTasks && (
-              <AssistTasksDialog
-                threadId={vm.id}
-                runId={assistTasks.runId}
-                suggestions={assistTasks.suggestions}
-                team={assistTasks.team}
-                links={assistTasks.links}
-                meId={vm.meId}
-                onClose={() => setAssistTasks(null)}
-                onCreated={() => {
-                  setAssistTasks(null);
-                  router.refresh();
-                }}
-              />
-            )}
           </div>
           {assistError && (
             <p role="alert" style={{ margin: "-4px 0 10px", fontSize: 12, color: "#b4543a" }}>
@@ -1611,27 +1480,6 @@ export default function ThreadReader({
                 <p style={{ margin: 0, padding: "0 12px 8px", fontSize: 11.5, color: "#5b616e", background: "#fff" }}>
                   Drafted by Assist — review before sending.
                 </p>
-              )}
-              {openPromise && (
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                    padding: "0 12px 8px",
-                    fontSize: 12,
-                    color: "#3a3f4a",
-                    background: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={markPromiseDone}
-                    onChange={(e) => setMarkPromiseDone(e.target.checked)}
-                  />
-                  Mark ‘{shortTaskTitle(openPromise.title)}’ done?
-                </label>
               )}
               <div
                 style={{

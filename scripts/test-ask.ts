@@ -878,7 +878,6 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
   const { runAsk, buildAskParams, webSearchToolFor, ASK_CUSTOM_TOOLS, webSourcesOf, typedEmails, isToolInputJsonError, isWebToolRejection, isKeyRejected, ASK_FAILED_TEXT } = R;
   const { getRun, createRun, newRunId, recordAskConfirm, userFeatureSpend, ASK_CONFIRMED_MAX } = await import("@/lib/stores/assist-runs");
   const { chicagoMidnight } = await import("@/lib/triage/clock");
-  const { ASK_DAILY_TEXT, ASK_DAILY_USD_PER_USER, ASK_HARD_PER_HOUR, ASK_HARD_RATE_TEXT, ASK_KEY_REJECTED_TEXT } = await import("@/lib/assist/features/ask-limits");
   const { softDeleteDoc } = await import("@/db/doc-store");
   const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
   const { fixtureId } = await import("./test-fixtures");
@@ -1558,7 +1557,6 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   const pilot = read("src/app/(app)/settings/groups/assist-pilot.tsx");
   ok(pilot.includes("<AskReportTable ask={assist.ask} />") && pilot.includes("{assist.askModels.ask}") && pilot.includes("{assist.askModels.askHard}") && read("src/app/(app)/settings/assist-data.ts").includes("ask: askReport(runs),"), "settings: the pilot card shows the Ask AI model hint and table");
   const companyActions = read("src/app/(app)/companies/actions.ts");
-  const projectActions = read("src/app/(app)/projects/actions.ts");
   const projNote = projectActions.slice(projectActions.indexOf("export async function addProjectNoteAction"), projectActions.indexOf("export async function addTimeAction"));
   ok(/const user = await requireUser\(\);/.test(projNote) && /typeof projectId === "string"/.test(projNote) && /PROJECT_NOTE_MAX/.test(projNote) && /await addNote\(id, user\.name \|\| undefined, t\)/.test(projNote) && !/redirect|projectErrorPath/.test(projNote) && /return \{ ok: false, error: "That project no longer exists\." \}/.test(projNote), "ask ui: addProjectNoteAction reuses addNote and returns {ok, error} — never redirects");
   ok(/const lead = await logActivity\(id,[^\n]*\);\s*if \(!lead\) return \{ ok: false as const, error: "That lead no longer exists\." \};/.test(read("src/app/(app)/leads/actions.ts")), "ask ui: logActivityAction reports a missing lead as an error");
@@ -1569,8 +1567,6 @@ export async function askUiChecks(ok: Ok): Promise<void> {
 
   /* ---- the no-thread task write (scratch DB) ---- */
   const { createAskTask } = await import("@/lib/assist/ask-task-write");
-  const { getTask, removeTask } = await import("@/lib/stores/tasks");
-  const { activeUsers } = await import("@/lib/users");
   const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
   const { fixtureId } = await import("./test-fixtures");
   const { seeded } = await import("@/db");

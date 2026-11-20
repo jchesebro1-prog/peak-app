@@ -40,7 +40,6 @@ import { getVenueProfile, profileValues, writeProfileFacts } from "../src/lib/st
 import { ASSESSMENT_PICKLISTS_BLOB, slugValue, addPicklistValue, getPicklistExtras, setPicklistRetired, extrasForValidation } from "../src/lib/stores/assessment-picklists";
 import { buildQuote, create as createQuote, get as getQuote, getMany as getQuotes, update as updateQuote } from "../src/lib/stores/quotes";
 import { softDeleteDoc, upsertDoc } from "../src/db/doc-store";
-import { CATEGORIES as REPAIR_CATEGORIES, PRIORITIES as REPAIR_PRIORITIES } from "../src/lib/stores/repair-jobs";
 import type { SpecSection } from "../src/app/(app)/estimator/types";
 import {
   ONE_VENUE_ERROR, QUOTE_FINDINGS_MAX, REPAIR_CATEGORY, findingLineText, findingsEstimatorSection, findingsSourceLabel, parseFindingKeys,
@@ -1793,8 +1792,6 @@ function task9Checks(ok: Ok) {
   // category / priority mapping
   ok(REPAIR_CATEGORY.RIG === "rigging" && REPAIR_CATEGORY.ELC === "electrics" && REPAIR_CATEGORY.STR === "structural" && REPAIR_CATEGORY.HAZ === "other" && REPAIR_CATEGORY.GEN === "other", "repair intake: RIG→rigging, ELC→electrics, STR→structural, HAZ/GEN→other");
   ok(repairCategoryFor(["ELC", "RIG", "RIG"]) === "rigging" && repairCategoryFor(["HAZ", "GEN", "RIG"]) === "other" && repairCategoryFor(["ELC", "RIG"]) === "electrics" && repairCategoryFor([]) === "other", "repair intake: the most common mapped category wins; a tie goes to the first seen");
-  const repairCats = new Set<string>(REPAIR_CATEGORIES.map((c) => c.key));
-  const repairPris = new Set<string>(REPAIR_PRIORITIES.map((p) => p.key));
   ok(Object.values(REPAIR_CATEGORY).every((c) => repairCats.has(c)) && repairPris.has("urgent") && repairPris.has("standard"), "repair intake: every mapped category / priority is a real repair builder key");
 
   // the repair builder's pre-fill
@@ -1840,12 +1837,8 @@ function task9Checks(ok: Ok) {
   ok(csv.split("\r\n")[1].startsWith("TSTA-HAL-RIG-001,Assess Hall · Stage · LS 14,RIG,\"'=HYPERLINK(\"\"x\"\")\",2,"), "register csv: a formula-looking description is guarded and quoted; the photo count stays a number");
   ok(registerCells(t9Finding({ voided: { by: "u", at: 1, reason: "x" } }), { siteName: "H" }).at(-1) === "Voided (Open)" && registerCsvName(Date.UTC(2026, 9, 13, 18)) === "findings-2026-10-13.csv", "register csv: a voided row says so; the file is findings-<date>.csv");
 
-  // source pins: the repair builder's findings intake leaves every other path alone
-  const ra = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/actions.ts"), "utf8");
   ok(ra.includes("await createQuote({ ...payload, owner: user.name, ...(findingKeys.length ? { findingKeys } : {}) })") && ra.includes("await findingKeysForSave(formData.get(\"findingKeys\"), customerId, !!editingId, venues.map((v) => v.id))") && ra.includes("await linkOnCreateSafe(findingKeys, q?.id, user, !!editingId)") && !/\bawait linkOnCreate\(/.test(ra), "repair builder: persist carries findingKeys on create only and links them once created");
-  const rc = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/controls.tsx"), "utf8");
   ok(rc.includes('if (initial.findingKeys?.length) fd.set("findingKeys", initial.findingKeys.join(","));') && rc.includes("Quoting {initial.findingKeys.length} assessment finding"), "repair builder: the findingKeys field is posted only for a findings intake, with its banner");
-  const rp = readFileSync(join(ROOT, "src/app/(app)/repairs/quote/page.tsx"), "utf8");
   ok(rp.includes('const findingsParam = !editId && !inspId && preCustomer ? one(sp.findings) : "";') && rp.includes("repairPrefillFromFindings(findingsIntake.list, findingsIntake.venueName)"), "repair builder: ?findings= is read only for a new quote for that customer");
   const fc = readFileSync(join(ROOT, "src/app/(app)/assessments/findings/controls.tsx"), "utf8");
   ok(fc.includes("const selectable = shown.filter((r) => !r.finding.voided);") && fc.indexOf("const shown = ") < fc.indexOf("const selectable = ") && fc.includes("document.getElementById(`frc-${focus}`)"), "register: select-all follows the shown rows; the focus scroll finds the phone card too");
@@ -2208,7 +2201,6 @@ function task11Checks(ok: Ok) {
   ok(carryLeadId("", { leadId: "L-9" }) === "L-9" && carryLeadId("L-1", { leadId: "L-9" }) === "L-1" && carryLeadId("", { leadId: null }) === "" && carryLeadId("", null) === "", "fix 5: a visit's lead rides onto the new assessment unless ?lead= says otherwise");
   const src = (f: string) => readFileSync(join(ROOT, f), "utf8");
   const leadsSrc = src("src/app/(app)/leads/page.tsx");
-  const projSrc = src("src/app/(app)/projects/[id]/page.tsx");
   ok(/<AssessmentsCard leadId=\{leadRec\.id\} customerId=\{/.test(leadsSrc) && /<AssessmentsCard projectId=\{sel\.id\} customerId=\{/.test(projSrc), "fix 5: the lead and project cards are given the customer");
   ok(/leadId = carryLeadId\(leadId, v\)/.test(src("src/app/(app)/assessments/new/page.tsx")), "fix 5: /assessments/new?visit= carries the visit's lead");
   ok(isOpenFinding({ status: "triaged" }) && !/status !== "closed"/.test(src("src/components/assessments/assessment-cards.tsx")) && /isOpenFinding\(f\)/.test(src("src/components/assessments/assessment-cards.tsx")), "fix 4: the cards use the shared open rule");
@@ -2240,7 +2232,6 @@ function task11Checks(ok: Ok) {
 
   // source pins for the wiring that has no pure seam
   const read = (f: string) => readFileSync(join(ROOT, f), "utf8");
-  const repairActions = read("src/app/(app)/repairs/quote/actions.ts");
   const approve = repairActions.slice(repairActions.indexOf("export async function approveRepairQuote"));
   ok(/&approved=1" \+\s*\(note\.creditNote \? "&credit=" \+ encodeURIComponent\(note\.creditNote\) : ""\)/.test(approve), "fix 1: approveRepairQuote also appends &credit= from note.creditNote (mirrors saveRepairQuote)");
   ok(/persist\(formData, note\)/.test(approve) && /&approved=1"[\s\S]*\(note\.findingNote \? "&findingnote=" \+ encodeURIComponent\(note\.findingNote\)/.test(approve), "carry-over: approveRepairQuote passes a notice sink to persist and appends &findingnote= to its approved redirect");
@@ -2253,7 +2244,6 @@ function task11Checks(ok: Ok) {
   const companyPage = read("src/app/(app)/companies/[id]/page.tsx");
   ok(companyPage.indexOf("No site surveys yet.") < companyPage.indexOf("<AssessmentsCard") && companyPage.indexOf("<AssessmentsCard") < companyPage.indexOf("<FindingsCard") && /assessments\/new\?visit=/.test(companyPage), "company page: Assessments + Findings follow Site surveys; each site visit row links Start assessment");
   ok(/assessments\/new\?visit=/.test(read("src/app/(app)/venue-assessments/visit-requests.tsx")), "visit queue: a row links Start assessment");
-  ok(/AssessmentsCard leadId=/.test(read("src/app/(app)/leads/page.tsx")) && /AssessmentsCard projectId=/.test(read("src/app/(app)/projects/[id]/page.tsx")), "lead drawer and project page list the assessments linked to them");
   ok(/can\("manage_users", user\.roles\)/.test(read("src/app/(app)/assessments/page.tsx")) && /requirePerm\("manage_users"\)/.test(read("src/app/(app)/assessments/pick-lists/page.tsx")), "pick lists: the button and the page are manage_users only");
 }
 

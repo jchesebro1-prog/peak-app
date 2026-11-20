@@ -27,7 +27,7 @@ import { getSettings } from "@/lib/settings";
 import { rateLimit } from "@/lib/rate-limit";
 import { activeUsers } from "@/lib/users";
 import { ASK_CONFIRMED_MAX, createRun, getRun, monthSpend, newRunId, setRunOutcome, userFeatureSpend, type AssistRun } from "@/lib/stores/assist-runs";
-import { chicagoMidnight } from "@/lib/triage/clock";
+import { chicagoMidnight } from "@/lib/chicago-day";
 import { assistSettingsOf, chicagoToday, monthKeyChicago } from "./config";
 import { askGateFor } from "./gate-server";
 import { getAssistEnv } from "./key-store";

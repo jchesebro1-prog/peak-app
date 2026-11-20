@@ -25,10 +25,7 @@ import { get as getCustomer } from "@/lib/stores/customers";
 import { getCompany } from "@/lib/identity/companies";
 import { get as getQuote, type Quote } from "@/lib/stores/quotes";
 import { get as getLead, sla, type LeadRecord } from "@/lib/stores/leads";
-import { getProject, projectsForCustomer } from "@/lib/stores/projects";
 import { get as getSurvey, type SurveyRecord } from "@/lib/stores/surveys";
-import { allTasks, getTask, tasksForProject, type TaskRecord } from "@/lib/stores/tasks";
-import { allAssignments, getAssignment, type Assignment } from "@/lib/stores/assignments";
 import { get as getPart, type CatalogPart } from "@/lib/stores/catalog";
 import { getMeeting } from "@/lib/stores/meetings";
 import { resolveQuoteInput } from "@/lib/stores/estimate-numbers";
@@ -267,12 +264,11 @@ async function loadCompany(id: string): Promise<Loaded | null> {
   const c = await getCustomer(id);
   if (!c) return null;
   const now = Date.now();
-  const [sites, linkedQuotes, nameQuotes, projects, leadsA, leadsB, notes, grants] = await Promise.all([
+  const [sites, linkedQuotes, nameQuotes, leadsA, leadsB, notes, grants] = await Promise.all([
     sitesForCompany(c.id),
     listDocsByField<Quote>("quotes", "customerId", [c.id]),
     // the company page's name fallback for quotes never linked to a customer id
     c.name ? listDocsByField<Quote>("quotes", "customer", [c.name]) : Promise.resolve([] as Quote[]),
-    projectsForCustomer(c.id),
     listDocsByField<LeadRecord>("leads", "customerId", [c.id]),
     listDocsByField<LeadRecord>("leads", "convertedCustomerId", [c.id]),
     listDocsByField<NoteRecord>("notes", "customerId", [c.id]),
@@ -302,10 +298,7 @@ async function loadCompany(id: string): Promise<Loaded | null> {
     refs.push(quoteRef(q));
     return `- ${tok("quote", q.id)} ${f(displayQuoteNumber(q))} ${f(q.name)} — ${q.status} — ${money(q.value)} — updated ${day(q.updatedAt)}`;
   });
-  const projectLines = projects.slice(0, ASK_COMPANY_LATEST).map((p) => {
-    refs.push(mkRef("project", p.id, p.name || p.id));
-    return `- ${tok("project", p.id)} ${f(p.name)} — ${f(p.stageMeta?.label ?? p.stage, 60)} — updated ${day(p.updatedAt)}`;
-  });
+  const projectLines: string[] = []; // Projects were removed from the app
   const leadLines = leads.slice(0, ASK_COMPANY_LATEST).map((l) => {
     refs.push(mkRef("lead", l.id, leadTitle(l)));
     return `- ${tok("lead", l.id)} ${f(displayLeadNumber(l))} ${f(l.interest || l.org, 80)} — ${l.stage} — updated ${day(l.updatedAt)}`;
@@ -324,7 +317,7 @@ async function loadCompany(id: string): Promise<Loaded | null> {
     line("Website", f(c.website, 120)),
     line("Account owner", f(c.owner, 60)),
     line("Pricing tier", f(c.pricingTier, 40)),
-    `Counts: ${quotes.length} quotes (${open.length} open, ${money(open.reduce((a, q) => a + (q.value || 0), 0))} open value; ${won.length} won), ${projects.length} projects, ${leads.length} leads, ${sites.length} venues, ${activeGrants} active portal grants`,
+    `Counts: ${quotes.length} quotes (${open.length} open, ${money(open.reduce((a, q) => a + (q.value || 0), 0))} open value; ${won.length} won), ${leads.length} leads, ${sites.length} venues, ${activeGrants} active portal grants`,
     venueLines.length ? `Venues:\n${venueLines.join("\n")}` : "Venues: none",
     peopleLines.length ? `People:\n${peopleLines.join("\n")}` : "People: none",
     quoteLines.length ? `Latest quotes:\n${quoteLines.join("\n")}` : "",
@@ -502,39 +495,10 @@ async function loadLead(id: string, me: AskUser): Promise<Loaded | null> {
   return { self, body, refs: [self, ...refs], emails: [...emails] };
 }
 
-async function loadProject(id: string): Promise<Loaded | null> {
-  const p = await getProject(id);
-  if (!p) return null;
-  const refs: AskToolRef[] = [];
-  const self = mkRef("project", p.id, p.name || p.id);
-  const [cust, quote, tasks] = await Promise.all([companyLink(p.customerId), p.quoteId ? getQuote(p.quoteId) : Promise.resolve(null), tasksForProject(p.id)]);
-  if (cust) refs.push(cust.ref);
-  if (quote) refs.push(quoteRef(quote));
-  const proc = Array.isArray(p.procurement) ? p.procurement : [];
-  const byStatus = (s: string) => proc.filter((x) => x.status === s).length;
-  const crew = (Array.isArray(p.crew) ? p.crew : []).map((c) => `- ${f(c.person, 60)}${c.role ? `, ${f(c.role, 40)}` : ""} — ${day(c.start)} to ${day(c.end)}`);
-  const open = tasks.filter((x) => x.status !== "done").sort((a, b) => (a.dueAt || Infinity) - (b.dueAt || Infinity));
-  const body = join([
-    `Project ${tok("project", p.id)} ${f(p.name)}${p.kind === "order" ? " (order)" : ""}`,
-    `Stage: ${f(p.stageMeta?.label ?? p.stage, 60)}`,
-    `Customer: ${cust ? cust.label : f(p.customer) || "—"}`,
-    line("Owner", f(p.owner, 60)),
-    p.valueUnknown ? "Value: unknown" : `Value: ${money(p.value)}`,
-    quote ? `From quote: ${tok("quote", quote.id)} ${f(quoteTitle(quote))}` : "",
-    `Started: ${day(p.startedAt)} · Target: ${day(p.targetDate)} · Install: ${day(p.installStart)} to ${day(p.installEnd)}`,
-    p.signoff ? `Signed off ${day(p.signoff.signedAt)} by ${f(p.signoff.signedBy, 60)}` : "",
-    proc.length
-      ? `Procurement: ${proc.length} lines — ${byStatus("pending")} pending, ${byStatus("ordered")} ordered, ${byStatus("shipped")} shipped, ${byStatus("received")} received`
-      : "Procurement: none",
-    crew.length ? `Crew:\n${capList(crew).join("\n")}` : "Crew: none assigned",
-    open.length
-      ? `Open tasks:\n${open
-          .slice(0, 25)
-          .map((x) => `- ${f(x.title, 160)}${x.assigneeName ? ` — ${f(x.assigneeName, 60)}` : ""}${x.dueAt ? ` — due ${day(x.dueAt)}` : ""}`)
-          .join("\n")}`
-      : "Open tasks: none",
-  ]);
-  return { self, body, refs: [self, ...refs], emails: [] };
+/** Projects were removed from the app: nothing to read. */
+async function loadProject(_id: string): Promise<Loaded | null> {
+  void _id;
+  return null;
 }
 
 async function loadThread(id: string, me: AskUser): Promise<Loaded | null> {
@@ -785,52 +749,10 @@ async function runSearchCatalog(input: z.infer<typeof CatalogInput>): Promise<Lo
   return { self: null, body, refs, emails: [] };
 }
 
-/** Mine: assigned to my id, else (legacy) to my name. */
-const myTask = (x: TaskRecord, me: AskUser) => x.assigneeUserId === me.id || (!x.assigneeUserId && (x.assigneeName || "").trim().toLowerCase() === me.name.trim().toLowerCase());
-
-function taskLinks(x: TaskRecord): string {
-  const parts = [
-    x.customerId ? `company ${x.customerId}` : "",
-    x.projectId ? `project ${x.projectId}` : "",
-    x.quoteId ? `quote ${x.quoteId}` : "",
-    x.leadId ? `lead ${x.leadId}` : "",
-    x.threadId ? `thread ${x.threadId}` : "",
-    x.meetingId ? `meeting ${x.meetingId}` : "",
-    x.engagementId ? `engagement ${x.engagementId}` : "",
-  ].filter(Boolean);
-  return parts.length ? ` — links: ${f(parts.join(", "), 300)}` : "";
-}
-
-async function runMyTasks(me: AskUser): Promise<Loaded> {
-  const [tasks, assignments] = await Promise.all([allTasks(), allAssignments()]);
-  type Row = { id: string; title: string; due: number; text: string };
-  const rows: Row[] = [];
-  for (const x of tasks) {
-    // a "Waiting on customer" nudge is the customer's to-do, not mine (the queue's rule)
-    if (x.status === "done" || x.waitingOn || !myTask(x, me)) continue;
-    rows.push({
-      id: x.id,
-      title: x.title,
-      due: x.dueAt || 0,
-      text: `${f(x.title, 200)}${x.status !== "open" ? ` (${x.status})` : ""}${x.dueAt ? ` — due ${day(x.dueAt)}` : " — no due date"}${taskLinks(x)}`,
-    });
-  }
-  for (const a of assignments as Assignment[]) {
-    if (a.done || a.assignee !== me.name) continue;
-    rows.push({
-      id: a.id,
-      title: a.title,
-      due: a.dueDate || 0,
-      text: `${f(a.title, 200)} (assigned by ${f(a.createdBy, 60)})${a.dueDate ? ` — due ${day(a.dueDate)}` : " — no due date"}${a.link ? ` — links: ${a.link.kind} ${f(a.link.id, 80)}${a.link.label ? ` (${f(a.link.label)})` : ""}` : ""}`,
-    });
-  }
-  rows.sort((a, b) => (a.due || Infinity) - (b.due || Infinity) || a.title.localeCompare(b.title));
-  const shown = rows.slice(0, ASK_MY_TASKS_MAX);
-  const refs = shown.map((r) => mkRef("task", r.id, r.title));
-  const body = shown.length
-    ? join([`Your open tasks and assignments: ${rows.length}${rows.length > shown.length ? `, soonest ${shown.length} shown` : ""} (dates are America/Chicago)`, ...shown.map((r) => `- ${tok("task", r.id)} ${r.text}`)])
-    : "You have no open tasks or assignments.";
-  return { self: null, body, refs, emails: [] };
+/** Tasks were removed from the app. */
+async function runMyTasks(_me: AskUser): Promise<Loaded> {
+  void _me;
+  return { self: null, body: "Tasks were removed from the app — there are none to list.", refs: [], emails: [] };
 }
 
 /* ---------------- the entry points ---------------- */
@@ -944,10 +866,8 @@ export async function resolveAskRef(kind: RefKind, id: string, me: AskUser): Pro
       const l = await getLead(id);
       return l ? mkRef("lead", l.id, leadTitle(l)) : null;
     }
-    case "project": {
-      const p = await getProject(id);
-      return p ? mkRef("project", p.id, p.name || p.id) : null;
-    }
+    case "project":
+      return null;
     case "thread": {
       const viewer = await mailboxViewer(me);
       const th = await loadThreadReadable(id, viewer);
@@ -967,11 +887,7 @@ export async function resolveAskRef(kind: RefKind, id: string, me: AskUser): Pro
       const p = await getPart(id);
       return p ? mkRef("part", id, p.desc || p.sku) : null;
     }
-    case "task": {
-      const x = await getTask(id);
-      if (x) return myTask(x, me) ? mkRef("task", x.id, x.title) : null;
-      const a = await getAssignment(id);
-      return a && a.assignee === me.name ? mkRef("task", a.id, a.title) : null;
-    }
+    case "task":
+      return null;
   }
 }

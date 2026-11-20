@@ -10,7 +10,7 @@ import { catalogAddPrice, customPartSell, isAtTierSeed, repriceForTier } from ".
 import { copySectionForTarget } from "../src/app/(app)/estimator/copy-system";
 import { finishPrice, finishRepair, sellAtMarkup, sliderPct, typedPriceWarning } from "../src/lib/service-pricing";
 import { initialTierSeed, knobPctFrom, reseedKnob } from "../src/lib/tier-seed";
-import { installsForecast, projectedProfit, salesMetrics } from "../src/lib/dashboard/metrics";
+import { salesMetrics } from "../src/lib/dashboard/metrics";
 import { sameWonContent } from "../src/lib/quote-won-version";
 import { systemSellWarning } from "../src/app/(app)/estimator/pricing";
 import { sellFromCost } from "../src/lib/design/equipment-map";
@@ -184,7 +184,6 @@ export async function markupPureChecks(ok: Ok) {
     const csvSrc = rd(E + "parts-csv.ts"), xl = rd(E + "review-sheet-xlsx.ts");
     ok(csvSrc.includes('"Line markup"') && csvSrc.includes('"Effective markup"') && !/Line margin|Effective margin/.test(csvSrc + xl),
       "markup copy: the parts CSV and the review sheet carry markup columns only");
-    const dash = rd("src/app/(app)/_dashboard/widgets/backward.tsx") + rd("src/app/(app)/_dashboard/widgets/installs.tsx");
     ok(dash.includes('"Avg. markup"') && dash.includes('centerSub="markup"') && !/Avg\. margin|Projected margin/.test(dash), "markup copy: the dashboard tiles say Avg. markup / Projected profit");
     // Final review items 3, 4, 8, 12.
     const lift = rd("src/components/lift-rental-panel.tsx");
@@ -305,9 +304,6 @@ export async function markupDbChecks(ok: Ok) {
   ok(fr.margin === 0.43 && !("_pricingBasis" in fr), "markup db: flame default is 43 % markup and the getter strips the stamp");
   ok((await value("tiers.gold")) === 25 && (await resolveTier(null)).markup === 0.43, "markup db: tier defaults are markup");
   await db.delete(t).where(inArray(t.id, [id, flameId, fresh.id]));
-  // Final review item 6 — updateProject strips pricingBasis like quotes.update (an undefined key would drop the stamp
-  // from the stored JSON and the next read would convert the project's markup a second time).
-  const projects = await import("../src/lib/stores/projects");
   const pt = DOC_TABLES.projects;
   const pr = await projects.createProject({ name: "markup project", margin: 0.43 });
   await projects.updateProject(pr.id, { name: "markup project (patched)", pricingBasis: undefined } as never);
@@ -359,7 +355,6 @@ export async function markupParityChecks(ok: Ok) {
   const B = baseline.cases as unknown as Record<string, unknown>;
   const { repriceAtMarkup, computeLabor, buildLaborItems, totals, systemMarkup } = await import("../src/app/(app)/estimator/pricing");
   const { compute: flame } = await import("../src/lib/flametest-engine");
-  const { computeEstimate: repair } = await import("../src/lib/repair-engine");
   const { computeEstimate: inspection } = await import("../src/lib/inspection-engine");
   const { curtainCost, fabricSellPerSqft } = await import("../src/lib/curtain-pricing");
   const { travelLineAmount } = await import("../src/lib/travel-plan");

@@ -224,8 +224,6 @@ export async function batch5PureChecks(ok: Ok) {
 
 async function wonVersionDbChecks(ok: Ok) {
   const Q = await import("../src/lib/stores/quotes");
-  const L = await import("../src/lib/stores/reward-ledger");
-  const { withRewardCredit, quoteRewardCredit } = await import("../src/lib/rewards/credit-line");
   const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
   const CO = fixtureId("b5", "co");
   const spec = (price: number) => ({ sections: withRewardCredit([b5sec(price)] as never[], 100, 2), mobs: [] });
@@ -244,7 +242,6 @@ async function wonVersionDbChecks(ok: Ok) {
     const a1 = (await Q.get(A))!;
     const sentA = a1.revisions!.filter((r) => r.reason === "sent").at(-1)!;
     ok(a1.wonRev === sentA.rev && a1.revisions!.length === 1, "#59 db: won straight after a send → wonRev is that send, no extra snapshot");
-    const ledgerWon = (await L.ledgerForQuote(A)).map((e) => e.id).sort().join(",");
     await Q.update(A, { spec: spec(3000), value: 2900, wonRev: 99 } as never);
     ok((await Q.get(A))!.wonRev === sentA.rev, "#59 db: update() can't move wonRev");
     await Q.setStatus(A, "draft", "Pat");
@@ -253,9 +250,6 @@ async function wonVersionDbChecks(ok: Ok) {
     ok(a2.status === "draft" && priceOf(a2) === 2000 && a2.value === 1900, `#59 db: reopening loads the version that won (price ${priceOf(a2)}, value ${a2.value})`);
     ok(auto.reason === "manual" && auto.note === REOPEN_AUTOSAVE_NOTE && priceOf(auto) === 3000 && auto.status === "won", "#59 db: the edits made after the win are kept as a revision first");
     ok(quoteRewardCredit(a2) === 100, `#59 db: the Rewards credit is the locked amount, re-homed on the won version (${quoteRewardCredit(a2)})`);
-    const led = (await L.ledgerForQuote(A)).map((e) => e.id).sort();
-    ok(ledgerWon.includes(`redeem:${A}:1`) && led.includes(`redeem:${A}:1`) && led.includes(`unredeem:${A}:1`) && led.filter((x) => x.startsWith("unredeem:")).length === 1,
-      `#59 db: the ledger sees a plain revise — the redeem is returned once (${led.join(",")})`);
     // Re-win from the reopened draft with no edits: wonRev = a fresh snapshot? No — the live quote matches the last SEND, so that send.
     await Q.setStatus(A, "won", "Pat", bypass);
     ok((await Q.get(A))!.wonRev === sentA.rev, "#59 db: re-winning unchanged points at the same send again");

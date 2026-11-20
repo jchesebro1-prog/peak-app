@@ -1,4 +1,3 @@
-import type { ProjectRecord } from "@/lib/stores/projects";
 
 /**
  * Customer portal project history (#220). Pure. App-era only: a Daylite import
@@ -23,10 +22,10 @@ export function isAppEraProject(p: { id: string; source?: unknown }): boolean {
   return !String(p.id || "").startsWith("P-dl-");
 }
 
-export type PortalProjectInput = Pick<
-  ProjectRecord,
-  "id" | "name" | "kind" | "projectType" | "installStart" | "installEnd" | "targetDate" | "value" | "updatedAt"
-> & { stageMeta?: { tag?: string; label?: string } | null; valueUnknown?: boolean };
+export type PortalProjectInput = {
+  id: string; name: string; kind?: string; projectType?: string; installStart?: number | null; installEnd?: number | null;
+  targetDate?: number | null; value?: number | null; updatedAt: number;
+} & { stageMeta?: { tag?: string; label?: string } | null; valueUnknown?: boolean };
 
 export type PortalProjectView = {
   id: string;

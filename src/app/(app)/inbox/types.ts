@@ -6,9 +6,7 @@
 import type { LinkWorkType } from "@/lib/inbox-links";
 import type { ParsedSignature, SigPhone } from "@/lib/inbox-signature-parse";
 import type { ParticipantRole } from "@/lib/inbox-participants";
-import type { ThreadTaskLinkKind, ThreadTaskRow } from "@/lib/inbox-task";
 import type { VenueType } from "@/lib/venue-types";
-import type { ReaderPreDraftVM } from "@/lib/brief/types";
 import type { OrganizeArchiveTarget } from "./organize/format";
 import type { CardGmailChip } from "@/lib/gmail/user-label-rules";
 
@@ -289,15 +287,8 @@ export type ReaderVM = {
   /** #214 — every person linked to the thread, primary first (the
    *  sidebar's chips). */
   linkedPeople: Array<{ id: string; name: string; primary: boolean }>;
-  /* ---- #215 tasks from email ---- */
-  /** task-dialog link candidates, pre-ticked; "thread" always saves */
-  taskLinks: Array<{ key: string; kind: ThreadTaskLinkKind; label: string }>;
-  /** the active team, for the dialog's Assign to */
-  taskTeam: Array<{ id: string; name: string }>;
-  /** the signed-in user's id — the dialog's default assignee */
+  /** the signed-in user's id */
   meId: string;
-  /** open tasks created from / linked to this thread, for the sidebar */
-  threadTasks: ThreadTaskRow[];
   /** #335 inbox organization — court chip, noise tag, filing line and
    *  promise-task (null on a thread the pipeline never touched) */
   org?: ReaderOrgVM | null;
@@ -310,9 +301,6 @@ export type ReaderVM = {
   /** #346 — set when the thread was opened from the Organize view: the
    *  reader's Archive takes the row off To file / Noise and moves on. */
   organize?: OrganizeArchiveTarget | null;
-  /** AI daily brief §4 — the stored pre-draft, only for a fresh, court-me
-   *  thread of mine (`readerPreDraft`); null → the live Assist paths. */
-  preDraft?: ReaderPreDraftVM | null;
   /** Estimate suggestion (spec 2026-10-13 §3) — this thread's latest
    *  suggestion as an Estimator link ("Suggestion ready → Open"); null when
    *  none, or when Suggest estimate is off for this user. */

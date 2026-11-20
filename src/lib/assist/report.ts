@@ -4,7 +4,10 @@ import type { EstimateRunOutcome } from "./outcome";
 import type { FilingLogEntry } from "@/lib/stores/inbox-org";
 import type { FilingSource } from "@/lib/inbox-org/types";
 import type { VendorPdfDiff } from "@/lib/vendor-pdf/diff";
-import { NUDGE_OPENED_KEY, PREDRAFT_RUN_KEY } from "@/lib/brief/report-keys";
+
+/** `assist_runs` outcomeDetail keys left by the removed daily brief (old runs still carry them). */
+const PREDRAFT_RUN_KEY = "queued";
+const NUDGE_OPENED_KEY = "opened";
 
 /** `noSuggestion` — estimate draft runs that saved no suggestion (spec 2026-10-13 §4): counted apart, never as discarded. */
 export type ReportRow = { key: string; runs: number; okRuns: number; accepted: number; edited: number; discarded: number; pending: number; noSuggestion: number; costUsd: number };

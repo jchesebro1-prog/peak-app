@@ -25,7 +25,6 @@
  */
 import fs from "node:fs";
 import { resolveDbTarget, requireHostedConfirmation } from "./db-target";
-import { companyId as deriveCompanyId, baseSiteId } from "./daylite-ids";
 
 const args = process.argv.slice(2);
 const cmd = (args[0] || "").toLowerCase();

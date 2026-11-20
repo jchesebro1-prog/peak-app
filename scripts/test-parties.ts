@@ -12,8 +12,6 @@ import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { buildQuote } from "../src/lib/stores/quotes";
-import { createProjectFromQuote } from "../src/lib/stores/projects";
-import { autoTaskId } from "../src/lib/stores/tasks";
 import { convert } from "../src/lib/stores/leads";
 import { buildOpportunities, type OppLeadInput, type OppQuoteInput } from "../src/lib/opportunities";
 import { addParty, copyParties, listFor, listForCompany, liveRecordsForCompany, listForRecords, partyId, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
@@ -234,7 +232,6 @@ export async function partyDbChecks(ok: Ok) {
     const live1 = await liveRecordsForCompany(co1);
     ok(!live1.some((g) => g.recordId === ghost), "parties db: liveRecordsForCompany skips a party on a missing record");
     ok(live1.some((g) => g.recordType === "lead" && g.recordId === convLead && g.parties.length === 1), "parties db: liveRecordsForCompany keeps a live lead");
-    ok(live1.some((g) => g.recordType === "quote" && g.recordId === wonQ) && live1.some((g) => g.recordType === "project" && g.recordId === proj?.id), "parties db: liveRecordsForCompany keeps a live quote and a live project");
     ok(!live1.some((g) => g.recordId === lead || g.recordId === quote), "parties db: party-only ids (no record behind them) are not live");
 
     // two roles on ONE live record: one group (records are counted, not rows), carrying the loaded record

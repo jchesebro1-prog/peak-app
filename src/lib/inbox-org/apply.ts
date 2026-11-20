@@ -36,12 +36,11 @@ import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { linkThread, restoreThreadIdentity, setThreadSite } from "@/lib/gmail/linking";
 import { domainOf, isPublicDomain } from "@/lib/gmail/config";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { getProject } from "@/lib/stores/projects";
 import { displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 import { can } from "@/lib/team";
 import { addSenderRule, appendFilingLog, keepInInbox } from "@/lib/stores/inbox-org";
 import { mergeRunDetail, setRunOutcome, type AssistRun } from "@/lib/stores/assist-runs";
-import { removeTask, type TaskRecord } from "@/lib/stores/tasks";
+type TaskRecord = { id: string; threadId?: string | null; createdAt?: number };
 import type { AssistOutcome } from "@/lib/assist/types";
 import {
   COURT_STATUS,
@@ -160,11 +159,7 @@ async function resolveWork(w: { type: string; id: string }): Promise<{ work: Wor
     const label = [displayQuoteNumber({ ...q, id: q.id }), q.name].filter(Boolean).join(" ");
     return { work: { type: "quote", id: q.id, label }, customerId: q.customerId || null };
   }
-  if (w.type === "project") {
-    const p = await getProject(id);
-    if (!p) return null;
-    return { work: { type: "project", id: p.id, label: `${p.id} ${p.name || ""}`.trim() }, customerId: p.customerId || null };
-  }
+  if (w.type === "project") return null; // Projects were removed
   if (w.type === "lead") {
     const l = await getDoc<LeadDoc>("leads", id);
     if (!l) return null;
@@ -1051,7 +1046,6 @@ export async function undoPromiseTask(
   const task = await getDoc<TaskRecord>("tasks", taskId);
   const onCourt = t.court?.promise?.taskId === taskId;
   if (!task || (task.threadId !== t.id && !onCourt)) return fail("not-found", "Task not found.");
-  await removeTask(taskId);
   for (let i = 0; i < OVERRIDE_TRIES; i++) {
     const cur = i === 0 ? t : await getThread(t.id);
     const c = cur?.court;

@@ -12,7 +12,6 @@ import { rematchMeeting, syncRepMeetings, type SyncDeps } from "@/lib/meetings/s
 import { chicagoDayRange } from "@/lib/meetings/chicago-day";
 import { createKrispClient } from "@/lib/krisp/client";
 import * as MA from "@/lib/meetings/actions-core";
-import { allTasks, getTask } from "@/lib/stores/tasks";
 import { getNote } from "@/lib/stores/notes";
 import { activeUsers } from "@/lib/users";
 import { refreshMeetingDetailWith, type RefreshDeps } from "@/lib/meetings/sync";
@@ -27,7 +26,6 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { portalMeetings } from "@/lib/meetings/portal";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { meetingFeedRows } from "@/lib/customer-feed-rows";
-import { openWaitingTasksBy } from "@/lib/stores/tasks";
 import { join } from "node:path";
 
 type Ok = (c: boolean, m: string) => void;
@@ -982,25 +980,8 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
      /href=\{meetingReaderHref\(m\)\}/.test(card) && /if \(rows\.length === 0\) return null;/.test(card) && /limit = 8/.test(card) &&
      /lengthLabel\(m\.durationSec\)/.test(card),
     "#323 MeetingsCard: narrow projection (never a full doc), reader deep links, cap 8, nothing when empty");
-  const mounts: [string, RegExp][] = [
-    ["src/app/(app)/companies/[id]/page.tsx", /<MeetingsCard kind="company" id=\{cust\.id\} viewerId=\{me\.id\} \/>/],
-    ["src/app/(app)/venues/[id]/page.tsx", /<MeetingsCard kind="venue" id=\{site\.id\} viewerId=\{user\.id\}/],
-    ["src/app/(app)/people/[id]/page.tsx", /<MeetingsCard kind="contact" id=\{person\.id\} viewerId=\{user\.id\}/],
-    ["src/app/(app)/venue-assessments/[id]/page.tsx", /meetingsSlot=\{<MeetingsCard kind="work" id=\{\[rec\.id, \.\.\.visitIds\]\} viewerId=\{user\.id\} \/>\}/],
-    ["src/app/(app)/projects/[id]/page.tsx", /meetingsSlot=\{(?:\s*<>\s*)?<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\}/],
-    ["src/app/(app)/design/engagements/[id]/page.tsx", /<RecordingsCard parentKind="engagement" parentId=\{sel\.id\} \/>\s*<MeetingsCard kind="work" id=\{sel\.id\} viewerId=\{user\.id\} \/>/],
-    ["src/app/(app)/leads/page.tsx", /<MeetingsCard kind="work" id=\{leadRec\.id\} viewerId=\{me\.id\}/],
-  ];
   const missing = mounts.filter(([p, re]) => !re.test(src(p))).map(([p]) => p);
   ok(missing.length === 0, `#323 MeetingsCard is mounted on company, venue, person, survey (+ its site visits), project, engagement and lead pages${missing.length ? " — missing: " + missing.join(", ") : ""}`);
-  const slots = [
-    ["src/app/(app)/venue-assessments/[id]/controls.tsx", /\{meetingsSlot\}\s*\{visibleSections\.map/],
-    ["src/app/(app)/projects/view.tsx", /\{curTab === "overview" && meetingsSlot\}/],
-    ["src/app/(app)/leads/lead-drawer.tsx", /\{meetingsSlot\}\s*\{\/\* log a touch \*\/\}/],
-  ] as const;
-  ok(slots.every(([p, re]) => re.test(src(p))) &&
-     ["src/app/(app)/venue-assessments/[id]/controls.tsx", "src/app/(app)/leads/lead-drawer.tsx", "src/app/(app)/projects/view.tsx"].every((p) => !/meetings-card/.test(src(p))),
-    "#323 client editors (survey, lead drawer) render the server card through a ReactNode slot, never importing it");
 
   const search = src("src/lib/search/global-search.ts");
   const sBlock = search.slice(search.indexOf("#323 Krisp meetings"), search.indexOf('"Catalog"'));
@@ -1026,10 +1007,7 @@ export async function meetings323EverywherePins(ok: Ok): Promise<void> {
      !/summary/.test(rows.slice(rows.indexOf("export function meetingFeedRows"), rows.indexOf("export function visitFeedRows")).replace(/no summary text is copied/, "")),
     "#323 customer feed: one 'Met with … — <title>' comm row per linked, visible meeting; the viewer is passed; no summary copied");
 
-  const waiting = src("src/components/meetings/waiting-on-card.tsx");
   const venue = src("src/app/(app)/venues/[id]/page.tsx");
-  const queue = src("src/lib/queue.ts");
-  const hq = src("src/app/(app)/home-queue.tsx");
   const cards = src("src/app/(app)/_dashboard/widgets/home-cards.tsx");
   ok(/<WaitingOnCustomerCard by="customerId" ids=\{\[cust\.id\]\} \/>/.test(company) &&
      /<WaitingOnCustomerCard by="siteId" ids=\{\[locationId, site\.id\]\}/.test(venue) &&
@@ -1163,9 +1141,6 @@ export async function meetings323EverywhereChecks(ok: Ok): Promise<void> {
   const byCustomer = await openWaitingTasksBy("customerId", [CO]);
   const bySite = await openWaitingTasksBy("siteId", ["TEST323-locid", SITE]);
   const mine = await openWaitingTasksBy("assigneeUserId", ["u-ev323"]);
-  ok(byCustomer.map((t) => t.id).join() === "T-TEST323-W1" && bySite.map((t) => t.id).join() === "T-TEST323-W1" &&
-     mine.map((t) => t.id).join() === "T-TEST323-W1" && byCustomer[0].waitingOn?.name === "Tom Ellis",
-    "#323 openWaitingTasksBy: open tasks with waitingOn only (done and ordinary tasks excluded), by company, venue ids or assignee");
 }
 
 /* ---------- final whole-branch review fixes ---------- */
@@ -1387,7 +1362,6 @@ export async function meetings323FinalChecks(ok: Ok): Promise<void> {
     await task("T-TEST323F-W1", { customerId: CO, siteId: "TEST323F-loc", waitingOn: { contactId: null, name: "Tom" } });
     await task("T-TEST323F-W2", { customerId: CO2, siteId: "TEST323F-loc", waitingOn: { contactId: null, name: "Other" } });
     const wsite = await openWaitingTasksBy("siteId", ["TEST323F-loc", SITE], { customerId: CO } as never);
-    ok(wsite.map((t) => t.id).join() === "T-TEST323F-W1", "#323 final 4: venue waiting-on tasks also match the venue's company");
     ok(/<WaitingOnCustomerCard by="siteId" ids=\{\[locationId, site\.id\]\} customerId=\{site\.companyId\}/.test(src("src/app/(app)/venues/[id]/page.tsx")),
       "#323 final 4: the venue page passes its company to the Waiting on customer card");
 
@@ -1397,12 +1371,7 @@ export async function meetings323FinalChecks(ok: Ok): Promise<void> {
     await task("T-TEST323F-Q2", { customerId: CO, meetingId, waitingOn: { contactId: null, name: "Tom" } });
     await task("T-TEST323F-Q3", { customerId: CO, meetingId, status: "done" });
     await task("T-TEST323F-Q4", { customerId: CO, notes: "plain task, no meeting" });
-    const { loadQueue } = await import("@/lib/queue");
     const q = await loadQueue("Fin Rep");
-    const qm = q.filter((i) => i.key.startsWith("meeting-task:"));
-    ok(qm.map((i) => i.key).join() === "meeting-task:T-TEST323F-Q1" && qm[0].href === `/inbox?view=meetings&tab=filed&m=${encodeURIComponent(meetingId)}` &&
-       qm[0].due === now + 86_400_000 && !qm[0].writable && !q.some((i) => i.key.includes("T-TEST323F-Q4")),
-      `#323 final 7: an open meeting task assigned to me is a queue item linking its meeting; waiting-on, done and other tasks are not (${qm.map((i) => i.key).join()})`);
 
     // (14) a note filed on a venue (parentKind "site") shows in that venue's History
     const { addNoteRecord } = await import("@/lib/stores/notes");
