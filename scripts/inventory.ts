@@ -50,7 +50,6 @@ import { quotesSeed } from "../src/db/seeds/quotes";
 import { catalogSeed } from "../src/db/seeds/catalog";
 import { leadsSeed } from "../src/db/seeds/leads";
 import { surveysSeed } from "../src/db/seeds/surveys";
-import { commsSeed } from "../src/db/seeds/comms";
 import { flameJobsSeed } from "../src/db/seeds/flame-jobs";
 import { inspectionsSeed } from "../src/db/seeds/inspections";
 import { designsSeed } from "../src/db/seeds/designs";

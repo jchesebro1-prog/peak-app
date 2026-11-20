@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { decryptWith, encryptWith } from "@/lib/gmail/crypto";
+import { decryptWith, encryptWith } from "@/lib/crypto/token";
 
 /**
  * Native sign-in hand-off (spec docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md).

@@ -29,7 +29,6 @@ const DEFAULT_USER = "Jeff Chesebro";
  * 'repairs' group ("Repairs awaiting scheduling"), included here per spec.
  */
 export const CATEGORIES = [
-  { key: "comms",       label: "Customers waiting on a reply", desc: "Emails and threads in your mailboxes waiting on a reply from us." },
   { key: "reviews",     label: "Needs your approval",          desc: "Quotes waiting for any approver (and designs assigned to you)." },
   { key: "reviewBack",  label: "Back from review",             desc: "Your quotes that were approved and are ready to send, or sent back for changes." },
   { key: "surveys",     label: "Survey requests to schedule",  desc: "Field-survey requests waiting to be booked." },

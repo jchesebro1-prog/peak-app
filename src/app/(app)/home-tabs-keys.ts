@@ -12,7 +12,6 @@
 
 export const HOME_TABS = [
   { key: "dashboard", label: "Dashboard", href: "/" },
-  { key: "inbox", label: "Inbox", href: "/inbox" },
   { key: "reports", label: "Reports", href: "/reports" },
 ] as const;
 

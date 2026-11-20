@@ -41,7 +41,6 @@ import { RENDER_WORST_CASE_MS } from "@/lib/quote-pdf/render";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
-import { syncDrivePhotos, type DrivePhotoSyncResult } from "@/lib/part-docs/drive-photo-sync";
 import { squareExistingPhotos } from "@/lib/part-docs/square-batch";
 import {
   FETCH_ACTION_BUDGET_MS,
@@ -639,12 +638,3 @@ export async function squarePhotosAction(input?: { skip?: string[] }): Promise<D
   return { ok: true, ...r };
 }
 
-/** Admin "Sync now" (#283): one budgeted Peak Product Photos pass; the panel
- *  loops while `remaining > 0` and a call made progress. */
-export async function syncDrivePhotosAction(): Promise<DrivePhotoSyncResult> {
-  await requirePerm("manage_users");
-  const r = await syncDrivePhotos(FETCH_ACTION_BUDGET_MS);
-  revalidate();
-  revalidatePath("/catalog");
-  return r;
-}

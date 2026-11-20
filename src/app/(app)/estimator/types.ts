@@ -17,9 +17,6 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
 import type { SystemIntro } from "@/lib/narrative/intros";
-import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
-import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
-import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
 import type { ProjectDiscounts } from "@/lib/project-discounts/rules";
 import type { RepricedOnRevise } from "@/lib/estimate-reprice/rules";
 import type { LinesetType, PipeType, RiggingConfig } from "@/lib/rigging-config/types";
@@ -205,12 +202,7 @@ export type VendorQuoteLine = {
   qty: number;
   unit: string;
   amount: number;
-  /** #348 slice 5 — index into extracted.data.lines this line was filled from (absent = typed). */
-  extractedIndex?: number;
 };
-
-/** #348 slice 5 — the Read-the-PDF result a saved vendor quote keeps (server-verified at save). */
-export type VendorQuoteExtracted = { runId: string; model: string; at: number; data: VendorPdfExtraction };
 
 /**
  * A vendor's quote imported into an estimate. Persisted TOP-LEVEL on the
@@ -243,10 +235,6 @@ export type VendorQuote = {
   vendorCompanyId?: string | null;
   /** #348 slice 4 — first saved (server-stamped; absent on quotes saved before slice 4). */
   addedAt?: number;
-  /** #348 slice 4 — the email thread this quote came from (Add as vendor quote…). */
-  fromThreadId?: string | null;
-  /** #348 slice 5 — what Read the PDF read from this quote's file (absent = never read). */
-  extracted?: VendorQuoteExtracted | null;
 };
 
 /** Data-URL characters the estimate's vendor attachments already spend of
@@ -430,8 +418,6 @@ export type VendorLineDraft = {
   qty: string;
   unit: string;
   amount: string;
-  /** #348 slice 5 — the extracted line this row was filled from (absent = typed). */
-  fromRead?: number;
 };
 
 export type VendorDraft = {
@@ -464,12 +450,8 @@ export type VendorDraft = {
   total: string;
   includesFreight: boolean;
   display: "single" | "itemized";
-  /** #348 slice 4 — the picked vendor company (null = typed name only) and the email the quote came from. */
+  /** #348 slice 4 — the picked vendor company (null = typed name only). */
   vendorCompanyId: string | null;
-  fromThreadId: string | null;
-  /** #348 slice 5 — the read this form keeps (saved with the quote) and the banner state (never persisted). */
-  extracted: VendorQuoteExtracted | null;
-  pdfRead: VendorPdfReadUi | null;
 };
 
 export type FixtureDraft = {
@@ -706,19 +688,8 @@ export type AiSource = {
   label: string;
 };
 
-/** #334 (D877) — what the Build banner shows for an Assist-drafted estimate:
- *  the source email, the model's notes, and why each still-present line was picked. */
-export type AssistDraftView = {
-  quoteId: string;
-  threadId: string;
-  notes: string;
-  reasons: { desc: string; reason: string }[];
-};
-
 export type EstimatorProps = {
   initial: InitialQuote;
-  /** #348 slice 4 — ?vq= hand-off ref (validated shape), else null. */
-  vendorFromThread?: string | null;
   /** Settings → Pipelines (Task 6) — the Daylite stage bar reads the loaded
    *  quote's pipeline from here; loaded once server-side (loadPipelines()). */
   pipelines: Pipelines;
@@ -772,9 +743,6 @@ export type EstimatorProps = {
   /** #245 Task 13 — a Portal panel Approve refusal's message (?statusError=
    *  from the Quotes-hub status action), or null. */
   portalStatusError: string | null;
-  /** #334 (D877) — the Build banner for an estimate Assist drafted from an
-   *  email (null when not an Assist draft, or once dismissed). */
-  assistDraft: AssistDraftView | null;
   /** #368 — what the last Revise re-priced to today's catalog (null when nothing / never). Absent = null. */
   repricedOnRevise?: RepricedOnRevise | null;
   /** Spec records design §6 — the Spec select's options: every non-archived
@@ -801,23 +769,4 @@ export type EstimatorProps = {
   narrativeIntros: SystemIntro[];
   /** #301 — Settings → Estimate output: the default Not included list (Reset to default). */
   notIncludedDefault: string;
-  /** Estimate suggestion (spec 2026-10-13 §2) — the Suggested BOM panel's view:
-   *  from `?suggestion=` on a new estimate, or the suggestion a saved quote was
-   *  built from; null/absent = no panel. */
-  suggestion?: EstimateSuggestionView | null;
-  /** The live catalog part behind each suggestion sku, keyed by the
-   *  suggestion's own sku (a rename resolves to the new part); a sku missing
-   *  here lands as an unpriced custom line. */
-  suggestionParts?: SuggestionParts;
-  /** #348 slice 5 — Read the PDF is offered: `vendorPdfGateFor` passed on the server (a pilot user, the feature on,
-   *  the kill switch off, and a Claude key). Never derived from assistUiFlags, which reports true under the local
-   *  provider with no key. */
-  vendorPdfEnabled: boolean;
-};
-
-/** #348 slice 5 — the vendor form's Read the PDF state (transient; reset whenever the form or its file changes).
- *  `error.hard` = the failed attempt was a Try harder, so it isn't offered again. */
-export type VendorPdfFormState = {
-  busy: null | "read" | "hard";
-  error: { text: string; tooLarge: boolean; hard: boolean } | null;
 };

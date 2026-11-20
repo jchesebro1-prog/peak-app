@@ -11,6 +11,7 @@
  * approval (approverOnTransition).
  */
 import { can } from "@/lib/team";
+import { boxSaleSendProblem } from "@/lib/estimate-box-sale/rules";
 import {
   get,
   submitForReview,
@@ -181,6 +182,9 @@ export async function sendQuoteToCustomer(id: string, actor: ReviewActor, asOf?:
   if (!q) return NOT_FOUND;
   if (q.status !== "draft") return { ok: false, error: "This quote has already been sent." };
   if (typeof asOf === "number" && asOf > 0 && q.updatedAt !== asOf) return CHANGED_SINCE;
+  // Box goods sale (spec 2026-10-21): equipment + freight only — one that still carries labor is never sent.
+  const boxProblem = boxSaleSendProblem(q);
+  if (boxProblem) return { ok: false, error: boxProblem };
   const gate = await checkApprovalGate(q, "sent", actor.name);
   if (!gate.ok) return gate;
   try {

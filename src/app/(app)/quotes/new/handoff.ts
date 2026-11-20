@@ -15,25 +15,15 @@ export type Handoff = {
   contactName: string;
   name: string;
   replaces: string;
-  /** #123 — the Inbox thread this intake was opened from ("+ New quote"),
-   *  read straight off the URL (lib/inbox-links newQuoteHref); not
-   *  validated against the directory the way customer/venue/contact are. */
-  threadId: string;
-  /** Estimate suggestion (spec 2026-10-13 §2) — the lead the estimate is for;
+  /** The lead the estimate is for;
    *  format-checked only ("" when absent or malformed). */
   leadId: string;
-  /** The `ES-…` suggestion the Estimator opens beside the estimate; "" when
-   *  absent or malformed. */
-  suggestionId: string;
   /** Box goods sale (spec 2026-10-21) — `?box=1` from the + New quote card; a new estimate only. */
   boxSale: boolean;
 };
 
 /** A lead id as the URL may carry one (`L-1050`, imported `L-dl-…`): 1–80 of [A-Za-z0-9._:-]. */
 export const HANDOFF_LEAD_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
-/** A suggestion id (`ES-<base36>`, suggestion.ts's SUGGESTION_ID_RE). */
-export const HANDOFF_SUGGESTION_RE = /^ES-[a-z0-9]{6,40}$/;
-
 const first = (v: string | string[] | undefined): string => ((Array.isArray(v) ? v[0] : v) ?? "").trim();
 
 const matchOrBlank = (v: string, re: RegExp): string => (re.test(v) ? v : "");
@@ -48,9 +38,7 @@ export function readHandoff(sp: SP): Handoff {
     contactName: first(sp.contact),
     name: first(sp.name),
     replaces: first(sp.replaces),
-    threadId: first(sp.thread),
     leadId: matchOrBlank(first(sp.lead), HANDOFF_LEAD_RE),
-    suggestionId: matchOrBlank(first(sp.suggestion), HANDOFF_SUGGESTION_RE),
     boxSale: first(sp.box) === "1",
   };
 }

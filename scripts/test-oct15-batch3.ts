@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { like } from "drizzle-orm";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { LIST_PAGE_SIZE, paginate, parsePageParam, pageOfIndex, resolvePage, withPage, pageCountFor } from "../src/lib/list-paging";
 import { quotesHubView, HUB_TYPE_KEYS, type HubQuote } from "../src/lib/quotes-hub-view";
 import { companyRollups, filterCompanyDirectory, companySearchText } from "../src/lib/company-directory";

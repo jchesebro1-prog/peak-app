@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { getBlob, setBlob, updateBlob } from "@/db/doc-store";
-import { encryptToken, decryptToken } from "@/lib/gmail/crypto";
+import { encryptToken, decryptToken } from "@/lib/crypto/token";
 
 /**
  * Customer portal access (IDEAS #47 phase 1) — per-PERSON magic-link grants,

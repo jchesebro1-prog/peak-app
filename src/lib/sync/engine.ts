@@ -34,7 +34,6 @@ export const FIELD_COLLECTIONS = [
   "surveys",
   "inspections",
   "flame_jobs",
-  "recordings",
   "assessments",
   "findings",
   "booth_captures",

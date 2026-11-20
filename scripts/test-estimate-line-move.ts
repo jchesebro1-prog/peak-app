@@ -2,7 +2,7 @@
    `npx tsx scripts/test-estimate-line-move.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import {
   applyLineMove, describeLineMove, extractLinesAsSection, isMovableLine, lineRefKey, parseLineRefKey, planLineMove, removeLinesFromSources,

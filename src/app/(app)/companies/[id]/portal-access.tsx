@@ -167,8 +167,7 @@ export function PortalAccessCard({
         </a>
       </div>
       <div style={{ fontSize: 11.5, color: "#9aa0ab", lineHeight: 1.5, marginBottom: 12 }}>
-        Personal access links — each person gets their own, emailed to them from your mailbox
-        (or copy it into an email). They&#39;ll see published quotes, venue compliance, and can
+        Personal access links — each person gets their own; copy it into an email. They&#39;ll see published quotes, venue compliance, and can
         request quotes.
       </div>
 
@@ -212,7 +211,7 @@ export function PortalAccessCard({
             type="button"
             disabled={pending}
             onClick={() => resend(g.id)}
-            title="Email this person their sign-in link again, from your mailbox"
+            title="Get this person's sign-in link again"
             style={{
               fontFamily: "var(--font-ui)",
               fontSize: 11.5,

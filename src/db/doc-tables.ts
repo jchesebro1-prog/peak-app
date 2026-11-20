@@ -185,16 +185,11 @@ export type CollectionName = keyof typeof DOC_TABLES;
  * directory is now relational (companies/sites/contacts) and
  * server-authoritative — field staff don't create contacts offline. The
  * customers doc table remains registered read-only as rollback history.
- *
- * "recordings" is syncable (Krisp recordings spec §1.1): an offline device
- * creates the REC doc through the outbox; the audio bytes never travel
- * through doc sync (they go device → Blob via a scoped upload token).
  */
 export const SYNCABLE_COLLECTIONS: CollectionName[] = [
   "surveys",
   "inspections",
   "flame_jobs",
-  "recordings",
   "assessments",
   "findings",
   "booth_captures",

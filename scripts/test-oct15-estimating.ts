@@ -4,12 +4,12 @@
    Run the pure half alone with `npx tsx scripts/test-oct15-estimating.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { evaluateReviewLimit, largestAlternateTotal, reviewAmount, autoSnapshotUnchanged } from "../src/lib/review-limits";
 import { addedAddendumNos, addendumDraftNote, addendumMovesToDraft, addendumReviseConfirm } from "../src/lib/parties/bids";
 import { MAX_CLIENT_RESPONSES_TOTAL } from "../src/lib/estimate-output/responses";
 import { awardBid } from "../src/lib/stores/bids";
-import { bidderSendPlan, BID_SEND_COPY } from "../src/lib/parties/bid-send";
+import { BID_SEND_COPY } from "../src/lib/parties/bid-send";
 import { like } from "drizzle-orm";
 import { getDb } from "../src/db";
 import { companies, contacts as contactsTable } from "../src/db/schema";
@@ -18,7 +18,7 @@ import { saveCompany } from "../src/lib/identity/companies";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { buildQuote, get as getQuote, setStatus } from "../src/lib/stores/quotes";
 import { listFor } from "../src/lib/stores/parties";
-import { addBidder, setBidDetails, recordBidderSend } from "../src/lib/stores/bids";
+import { addBidder, setBidDetails } from "../src/lib/stores/bids";
 import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { documentRevStamp, maxSentRevNo, nextSendRevNo, sentRevNo } from "../src/lib/quote-pdf/state";
 import { quoteAsOfRevision, sentDocumentStamp } from "../src/lib/quote-share/view";
@@ -208,28 +208,19 @@ export async function oct15PureChecks(ok: Ok) {
   {
     ok(JSON.stringify(addedAddendumNos([{ no: 1 }], [{ no: 1 }, { no: 3 }, { no: 2 }])) === "[2,3]" && addedAddendumNos(null, []).length === 0 && addedAddendumNos([{ no: 1 }, { no: 2 }], [{ no: 1 }]).length === 0,
       "oct15 #3: only new addendum numbers count (a removal adds none) — #348's addedAddendumNos");
-    ok(addendumDraftNote([2]).includes("Send revision to all bidders") && addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", [2], true),
-      "oct15 #3 / M2: the chip's note names \"Send revision to all bidders\"; an awarded bid never moves to Draft");
+    ok(addendumDraftNote([2]).includes("Mark it sent again") && addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", [2], true),
+      "oct15 #3 / M2: the chip's note says to mark it sent again; an awarded bid never moves to Draft");
     const chip0 = rd("src/app/(app)/estimator/bid-chip.tsx");
     ok(addendumReviseConfirm([2]).startsWith("Addendum 2 came in after this estimate was sent.") && chip0.includes("wasSent && !panel.awardedPartyId && added.length > 0 && !window.confirm(addendumReviseConfirm(added))"),
       "M2: the Bid chip asks before an addendum reverts a sent bid (not on an awarded one)");
     const B = (revSent: number | null) => ({ result: "pending", submitVia: "email", revSent, failed: null }) as never;
     const revs = { status: "draft", revisions: [{ rev: 1, reason: "sent" }] };
-    const plan = bidderSendPlan(revs, [{ id: "a", bid: B(1), email: "a@e.test" }, { id: "b", bid: B(null), email: "b@e.test" }]);
-    ok(plan.label === "Send revision to all bidders" && plan.label === BID_SEND_COPY.sendRevision && plan.ids.join() === "a,b", "oct15 #3: a revising bid sends the revision to every bidder (new ones too)");
     const st = rd("src/lib/stores/bids.ts");
     ok(st.includes("if (!addendumMovesToDraft(q.status, added, !!q.bid?.awardedPartyId)) return { ok: true as const, bid: saved.bid };") && st.indexOf("withQuoteRowLock(quoteId") < st.indexOf('await setStatus(quoteId, "draft"'),
       "oct15 #3: the revise is the normal setStatus(\"draft\") under the bid's row lock");
     const chip = rd("src/app/(app)/estimator/bid-chip.tsx");
     ok(chip.includes("onSync?.(r.sync);") && chip.includes('source: "chip"') && rd("src/app/(app)/estimator/steps/bidders-card.tsx").includes('detail.source === "chip"'),
       "oct15 #3: the chip tells the Bidders card and the Estimator's status to follow");
-    // #4 — already so: the first bidder send of a draft marks the estimate Sent through the normal path.
-    const ss = rd("src/lib/estimate-email/send-server.ts");
-    const mark = ss.slice(ss.indexOf("async function markAndLink("), ss.indexOf("async function attachmentsFor("));
-    ok(mark.includes('if (p.q.status === "draft")') && mark.includes("deps.sendQuote(p.q.id, actor") && ss.includes("sendQuote: (id, actor, asOf) => sendQuoteToCustomer(id, actor, asOf)")
-      && ss.slice(ss.indexOf("export function liveBidderEmailDeps("), ss.indexOf("export function liveBidderEmailDeps(") + 400).includes("...liveEstimateEmailDeps(opts)")
-      && rd("src/lib/quote-review-ops.ts").includes('const gate = await checkApprovalGate(q, "sent", actor.name);'),
-      "oct15 #4 (already so): a bidder send on a Draft runs sendQuoteToCustomer — the approval gate, then setStatus(\"sent\")");
   }
   /* ---- #2 — each bidder gets its own client-link response budget ---- */
   {
@@ -648,7 +639,6 @@ async function oct15BidDbChecks(ok: Ok) {
   const d0 = await setBidDetails(qid, { addenda: [A1] }, "Pat");
   ok(d0.ok && !d0.backToDraft && (await getQuote(qid))?.status === "draft", "oct15 #3: an addendum on a draft just saves");
   await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
-  await recordBidderSend(qid, a.party.id, { threadId: "C-o15", rev: 1, at: NOW, by: "Pat", to: "gc@e.test" }, { kind: "sent" }, "u1");
   const d1 = await setBidDetails(qid, { dueAt: NOW + 86_400_000 }, "Pat");
   ok(d1.ok && !d1.backToDraft && (await getQuote(qid))?.status === "sent", "oct15 #3: a due-date change on a sent bid leaves it Sent");
   const d2 = await setBidDetails(qid, { addenda: [A1, A2] }, "Pat");
@@ -656,9 +646,7 @@ async function oct15BidDbChecks(ok: Ok) {
   ok(d2.ok && JSON.stringify(d2.backToDraft) === "[2]" && q2?.status === "draft" && q2.history?.at(-1)?.from === "sent" && q2.history?.at(-1)?.to === "draft",
     "oct15 #3: a new addendum on a sent bid puts it back to Draft through setStatus (history sent → draft)");
   ok((q2?.revisions || []).filter((r) => r.reason === "sent").length === 1, "oct15 #3: the revise cuts no revision — the next send does");
-  const panel = await loadBidPanel(qid, { canEdit: true, canSend: true, canLink: true });
-  ok(panel.ok && panel.panel.plan.label === "Send revision to all bidders" && panel.panel.bidders[0]?.sendLabel === "Send revision",
-    "oct15 #3: the Bidders card then offers \"Send revision to all bidders\": " + (panel.ok ? String(panel.panel.plan.label) : panel.error));
+  const panel = await loadBidPanel(qid, { canEdit: true, canLink: true });
   const d3 = await setBidDetails(qid, { addenda: [A1, A2] }, "Pat");
   ok(d3.ok && !d3.backToDraft, "oct15 #3: re-saving the same addenda changes nothing");
   // M2: on an awarded bid an addendum is recorded and the estimate stays Sent.
@@ -732,12 +720,10 @@ export function discardConfirmChecks(ok: Ok) {
     ok(body.length > 0 && body.length < 900 && body.includes("if (!confirmDiscardInput()) return;"), `discard pins: ${n} asks before its close-then-seed`);
   }
   ok(/const confirmDiscardInput = \(\): boolean => \{\s*const d = openInputDirty\(\);\s*return !d \|\| window\.confirm\(discardConfirmText\(d\.kind, \{ read: d\.read \}\)\);/.test(hook) &&
-     /reading = cur\.kind === "vendor" && \(vendorPdfBusyRef\.current \|\| !!vendorPdf\.busy\)/.test(hook) &&
-     /const copying = cur\.kind === "vendor" && vendorHandoff\?\.status === "loading";\s*if \(!inputIsDirty\(\{ baseline: draftBaselineRef\.current\[cur\.kind\], current: modalDrafts\[cur\.kind\], reading, copying \}\)\) return null;/.test(hook) && /read: cur\.kind === "vendor" && \(reading \|\| !!vendorDraft\.pdfRead\)/.test(hook),
-    "discard pins: the confirm compares the open pop-up's draft (a running read counts; a read names it)");
-  ok((hook.match(/markDraftBaseline\(/g) || []).length === 2 && hook.includes('markDraftBaseline("labor");') &&
-     /draftBaselineRef\.current\.vendor = rebaseDraft<VendorDraft>\(draftBaselineRef\.current\.vendor, fill\);/.test(hook) && hook.includes("setVendorDraft(fill);"),
-    "discard pins: baselines are set in one helper — each open, the labor travel reseed — and the hand-off fill re-bases it");
+     hook.includes("if (!inputIsDirty({ baseline: draftBaselineRef.current[cur.kind], current: modalDrafts[cur.kind], reading: false, copying: false })) return null;"),
+    "discard pins: the confirm compares the open pop-up's draft");
+  ok((hook.match(/markDraftBaseline\(/g) || []).length === 2 && hook.includes('markDraftBaseline("labor");'),
+    "discard pins: baselines are set in one helper — each open, the labor travel reseed");
   ok(/if \(draftBaselineRef\.current\[k\] === null\) draftBaselineRef\.current\[k\] = stableDraftJson\(modalDrafts\[k\]\);/.test(hook) && /\}, \[draftBaselineTick, modalDrafts\]\);/.test(hook),
     "discard pins: a pending baseline snapshots the committed draft");
 }

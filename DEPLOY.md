@@ -95,177 +95,29 @@ you can also just ask Claude Code to run.
    `jchesebro1@gmail.com`; add teammates' emails (their real sign-in
    addresses) in Settings → Team before inviting them.
 
-## 5) Gmail integration (optional — do this after sign-in works)
+## 5) Gmail integration — removed
 
-The app runs fine without this: the Inbox stays in *simulated* mode (sends
-are logged, "Get mail" drops demo messages). Turn on real Gmail only when
-you want the Inbox to send and receive actual email. Uses the **same Google
-Cloud project** from step 4.
+The Inbox, the Gmail connection, Google Calendar / Tasks / Drive access and the
+Assist (AI) layer were removed on 2026-11-20 (see `docs/removal-log.md`, Stage 2).
+Nothing here needs configuring any more. If this deployment had them on, clean up:
 
-1. **Enable the Gmail API:** console.cloud.google.com → **APIs & Services →
-   Library** → search **Gmail API** → **Enable**.
-2. **OAuth consent screen → Data access → Add or remove scopes**, add these, then Save:
-   - `.../auth/gmail.send`
-   - `.../auth/gmail.readonly`
-   - `.../auth/gmail.modify` (two-way archive AND the Peak/ label sync, D142 — load-bearing, requested on every connect)
-   - `.../auth/userinfo.email`
+- Vercel env: delete `GMAIL_ENABLED`, `GMAIL_REDIRECT_BASE`, `ANTHROPIC_API_KEY`,
+  every `ASSIST_*` variable and `INBOX_ORG_DISABLED`. **Keep `CRON_SECRET`** — the
+  daily `/api/drive/sync` cron (venue address stamp + ETC price sync) still uses it —
+  and keep `AUTH_SECRET` unchanged (it decrypts the stored MyETC key).
+- Google Cloud: remove the `/api/gmail/callback` redirect URI and the Gmail,
+  Calendar, Tasks and Drive scopes from the OAuth consent screen. Google
+  sign-in (section 4) is unchanged.
+- Revoke what is still stored encrypted in the database and no longer used: each
+  person's Google connection (Google Account → Security → Third-party access),
+  the Krisp API keys, and the Anthropic key.
 
-   If you also want the calendar opt-in (Settings → Mailboxes → Enable calendar), enable the
-   **Google Calendar API** in the Library and add `.../auth/calendar.events` here too. Gmail
-   works without it.
+## 6) Recordings (native build) — removed
 
-   Two more opt-in features, each its own scope, each independent of the ones above — add
-   whichever you're turning on:
-   - **Google Tasks sync** (Home Queue ↔ Google Tasks, Settings → Mailboxes → Enable Google
-     Tasks): enable the **Google Tasks API** in the Library, add `.../auth/tasks` here.
-   - **Connect additional calendars** (Calendar tab → Calendars → Connect another account —
-     a DIFFERENT Google account than your mailbox, read-only subscribe): the same **Google
-     Calendar API** as above, but add `.../auth/calendar.readonly` (not `calendar.events` —
-     this flow only ever reads).
-
-   Any scope the app requests that is NOT listed here makes Google reject the consent, so keep
-   this list in step with `GMAIL_SCOPES` (plus `CALENDAR_SCOPE`/`TASKS_SCOPE`/
-   `CALENDAR_READONLY_SCOPE`) in `src/lib/gmail/config.ts`.
-
-   (These are "sensitive/restricted" scopes. While your app is in **Testing**
-   they work immediately for accounts you add under **Audience → Test users**;
-   Google only requires verification once you **Publish** to the public. For a
-   handful of company mailboxes, staying in Testing with those mailboxes as
-   test users is fine.)
-3. **APIs & Services → Credentials → your OAuth client → Authorized redirect
-   URIs**, add (replace with your real domain):
-   - `https://YOUR-APP.vercel.app/api/gmail/callback`
-   - `http://localhost:3000/api/gmail/callback` (for local testing)
-
-   **If the Vercel project or domain is ever renamed:** add the new
-   `https://NEW-DOMAIN/api/gmail/callback` here AND check Vercel for a `GMAIL_REDIRECT_BASE`
-   env var — if it still names the old domain, delete it (the app derives the callback from
-   `AUTH_URL`). Settings → Mailboxes shows the URI the app will send and warns on a mismatch.
-   (This is what broke connect from July to September 2026 — PUNCHLIST #95.)
-4. **Vercel → Settings → Environment Variables**, add:
-
-   | Name | Value |
-   | --- | --- |
-   | `GMAIL_ENABLED` | `true` |
-   | `AUTH_URL` | `https://YOUR-APP.vercel.app` (required for Gmail — the callback URI derives from it) |
-
-   Redeploy. (`AUTH_SECRET`, already set, also encrypts the stored mailbox
-   tokens.)
-5. In the app: **Settings → Mailboxes** now shows **Gmail enabled**. Click
-   **Connect** on your own inbox and on each shared box (Sales / Installs /
-   Info), signing in with that mailbox's Google account and granting access.
-6. In the **Inbox**, click **Send / Receive** once — it imports the last 90
-   days of that mailbox's history, then keeps pulling new mail on each click.
-   Emails sent from the app now appear in the mailbox's Gmail **Sent** too.
-
-**Who can connect what:** you (admin) can connect any box from Settings.
-Each teammate can connect their own inbox from the same **Connect** link.
-Shared boxes are plain Gmail accounts you (or the team) hold the password to
-— connect each one once.
-
-To stop using Gmail, set `GMAIL_ENABLED` blank (or **Disconnect** a mailbox
-in Settings) — the app falls back to simulated mode; no data is lost.
-
-**Server-side sync (D74) — the inbox stays current with no tab open.** Three
-triggers, all safe together (each funnels into the same per-mailbox claim
-throttle):
-
-- Opening the Inbox syncs automatically (built in, nothing to configure).
-- Any long-running server (`next start`, the LAN box, `next dev`) starts a
-  built-in sync timer at boot — nothing to configure.
-- On Vercel (serverless — no long-running process) **nothing syncs in the background until you
-  add `CRON_SECRET`** — until then the Inbox only syncs while a tab is open. Add ONE env var:
-
-  | Name | Value |
-  | --- | --- |
-  | `CRON_SECRET` | any long random string (`openssl rand -hex 32`) |
-
-  The repo's `vercel.json` schedules `/api/gmail/sync` every 5 minutes and
-  Vercel sends the secret automatically. **Note:** minute-level cron needs a
-  Vercel Pro plan; on the free Hobby plan crons run at most daily — either
-  rely on the open-tab sync, or point a free external pinger (e.g.
-  cron-job.org) at `https://YOUR-APP.vercel.app/api/gmail/sync` with header
-  `Authorization: Bearer <CRON_SECRET>` every few minutes.
-
-**Two-way archive (D74):** archiving in Peak archives in Gmail and vice versa.
-Mailboxes connected before this feature need a one-time **Reconnect** in
-Settings → Mailboxes (the row says "reconnect to enable two-way archive") to
-grant the extra permission.
-
-**Google Calendar (D77):** the dashboard calendar and direct site-visit
-events use the Calendar API. Per mailbox it's opt-in: **Enable calendar** on
-the mailbox row in Settings → Mailboxes re-runs the Google consent with
-Calendar access added. IMPORTANT — the Google Cloud console must list every
-scope the app requests: in **APIs & Services → OAuth consent screen →
-Scopes**, make sure `gmail.send`, `gmail.readonly`, `gmail.modify`, and
-`calendar.events` are all added (and in **APIs & Services → Library**, enable
-the **Google Calendar API** for the project), or consent will fail. If Google
-shows `Error 400: invalid_request`, click "error details" first — it is
-usually a malformed redirect_uri, not a scope problem.
-
-## 6) Recordings (native build)
-
-In-app audio capture (`/recordings/new`, spec
-`docs/superpowers/specs/2026-09-21-krisp-recordings-design.md` §2) records
-to a file on the phone with `@capgo/capacitor-audio-recorder` and, on
-Android, keeps the process alive with
-`@capawesome-team/capacitor-android-foreground-service`. The plugins are
-already in `package.json`; the native projects need these declarations
-(the plugin is a no-op without them, and iOS will crash on first mic use
-without the usage string). After editing, run `npx cap sync`.
-
-**Server:** the upload path needs `BLOB_READ_WRITE_TOKEN` in Vercel
-(`/api/recordings/upload` answers `503 {reason:"blob-disabled"}` without it,
-and recordings stay on the device). The route is exempt from the auth
-middleware because Vercel's `upload-completed` callback carries no session —
-it authenticates each request itself.
-
-**iOS — `ios/App/App/Info.plist`:**
-
-```xml
-<key>NSMicrophoneUsageDescription</key>
-<string>Peak records site visits so they can be transcribed and summarized.</string>
-<key>UIBackgroundModes</key>
-<array>
-  <string>audio</string>
-</array>
-```
-
-(or tick *Signing & Capabilities → Background Modes → Audio, AirPlay, and
-Picture in Picture* in Xcode — same result).
-
-**Android — `android/app/src/main/AndroidManifest.xml`:**
-
-```xml
-<!-- before/after the <application> tag -->
-<uses-permission android:name="android.permission.RECORD_AUDIO" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-<uses-permission android:name="android.permission.WAKE_LOCK" />
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-<!-- inside the <application> tag -->
-<receiver android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver" />
-<service
-  android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService"
-  android:foregroundServiceType="microphone" />
-```
-
-The recorder starts that service (type *Microphone*, notification
-"Recording — Peak is recording this visit.") before the take and stops it
-after; the notification icon it references is `ic_stat_icon_config_sample`
-in `res/drawable` — add any small monochrome PNG under that name (or change
-`smallIcon` in `src/lib/recorder/native-recorder.ts`).
-
-Then:
-
-```bash
-npx cap sync
-```
-
-In a plain browser the app falls back to `MediaRecorder` (desktop testing
-only — a locked iPhone mutes the web mic, which is the whole reason for the
-native plugin).
+In-app recording and the Krisp meeting matcher were removed with the Inbox. The
+recorder, foreground-service and local-notification plugins are gone from
+`package.json`; run `npx cap sync` and rebuild both native apps before the next
+release (the microphone / notification permission strings can then be dropped).
 
 ## 7) Saved quote PDFs (#222)
 
@@ -290,7 +142,7 @@ Every quote save renders the customer document to a PDF after the response
   `after()` inside that budget, after a 4 s wait that lets a burst of saves
   settle so only the latest one launches Chrome).
 
-## 8) App icon and email attachments (Batch 6, #356)
+## 8) App icon (Batch 6, #356)
 
 - **App icon (#67).** The web app's icons — the favicon, the iPhone
   home-screen icon and the installed-app (PWA) icons — are drawn from the
@@ -303,12 +155,6 @@ Every quote save renders the customer document to a PDF after the response
   `ios/App/App/Assets.xcassets/AppIcon.appiconset` and
   `android/app/src/main/res/mipmap-*`, run `npx cap sync`, then rebuild and
   reinstall both apps.
-- **Email attachments (#64).** The Inbox composer's Attach button uploads to
-  Vercel Blob under `mail-attachments/`, so it needs `BLOB_READ_WRITE_TOKEN`
-  (without it the upload answers "file storage isn't configured" and the
-  rest of the composer works). Attachments go out through the sender's
-  connected Gmail; a message over 4 MB uses Gmail's upload endpoint (no setup
-  needed).
 
 ## Afterwards
 

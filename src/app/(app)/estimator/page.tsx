@@ -33,7 +33,6 @@ import { listIntros } from "@/lib/stores/narrative-intros";
 import { seriesSkus } from "@/lib/track-series";
 import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
-import { parseThreadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
@@ -50,13 +49,7 @@ import { sanitizeProjectDiscounts } from "@/lib/project-discounts/rules";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
-import { assistDraftViewOf } from "@/lib/assist/features/estimate-draft";
 import { repricedOnReviseOf } from "@/lib/estimate-reprice/rules";
-import { vendorPdfGateFor } from "@/lib/assist/gate-server";
-import { assistSettingsOf } from "@/lib/assist/config";
-import { getSuggestion, suggestionForQuote } from "@/lib/stores/estimate-suggestions";
-import { suggestionViewOf, unlinkedRetryAllowed, type EstimateSuggestionView, type SuggestionParts } from "@/lib/assist/features/suggestion-panel";
-import type { EstimateSuggestion } from "@/lib/assist/features/suggestion";
 import type {
   AiSource,
   CustomerLite,
@@ -265,7 +258,7 @@ async function initialFrom(
     clientResponses: q.clientResponses ?? null,
     bonusRecord: q.bonusRecord ?? null,
     estimatorBonusSplit: q.estimatorBonusSplit ?? null,
-    // Estimate suggestion: the stored lead, display-only — a save never changes it.
+    // The stored lead, display-only — a save never changes it.
     leadId: q.leadId || null,
     // Box goods sale (spec 2026-10-21): the stored flag (a non-system quote reads false).
     boxSale: boxSaleOf(q),
@@ -288,49 +281,6 @@ async function initialFrom(
           }
         : null,
   };
-}
-
-/**
- * Estimate suggestion (spec 2026-10-13 §2): the suggestion this estimate shows
- * in its Suggested BOM panel — `?suggestion=` on a new estimate, else the one a
- * saved quote was built from — and the live part behind each of its skus,
- * keyed by the suggestion's OWN sku (getManyBySku follows renames). Fail-soft:
- * a blob or catalog read error just means no panel.
- */
-async function loadSuggestion(
-  suggestionId: string,
-  quote: { id: string; createdAt?: number | null; customerId?: string | null } | null
-): Promise<{ record: EstimateSuggestion | null; view: EstimateSuggestionView | null; parts: SuggestionParts }> {
-  try {
-    let record: EstimateSuggestion | null = null;
-    let linked = false;
-    if (quote) {
-      record = await suggestionForQuote(quote.id);
-      linked = !!record;
-      // The first save's link didn't land but the URL still names the
-      // suggestion (stepSearch keeps ?suggestion= after the first save): show
-      // it unlinked, so the next save retries the link — never a write here.
-      // unlinkedRetryAllowed keeps a crafted URL off older / other-customer quotes.
-      if (!record && suggestionId) {
-        const s = await getSuggestion(suggestionId);
-        if (s && unlinkedRetryAllowed(s, quote)) record = s;
-      }
-    } else if (suggestionId) {
-      record = await getSuggestion(suggestionId);
-    }
-    if (!record) return { record: null, view: null, parts: {} };
-    const skus = [...new Set(record.systems.flatMap((sys) => sys.lines.filter((l) => !l.custom && l.sku).map((l) => l.sku)))];
-    const found = skus.length ? await getManyBySku(skus) : new Map();
-    const parts: SuggestionParts = {};
-    for (const sku of skus) {
-      const p = found.get(sku);
-      if (p) parts[sku] = { sku: p.sku, desc: p.desc || p.sku, unit: p.unit || "ea", cost: Number(p.cost) || 0, list: Number(p.list) || 0 };
-    }
-    return { record, view: suggestionViewOf(record, linked), parts };
-  } catch (e) {
-    console.warn("[estimator] suggestion unavailable — no Suggested BOM panel", e);
-    return { record: null, view: null, parts: {} };
-  }
 }
 
 /** Estimator Phase 6 — the admin-set categories with each item's live catalog part (live sku, desc, unit, cost, list). */
@@ -404,20 +354,13 @@ export default async function EstimatorPage({
   // inspection, consulting, rental) opens its own builder, not the
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
-  // #348 slice 5: Read the PDF — the server gate (kill switch + pilot + feature first, then a Claude key), off the
-  // same settings load and inside the Promise.all; a failure hides it.
   const settingsLoad = getSettings();
-  // Estimate suggestion: the hand-off's `?suggestion=` (new estimate), else the
-  // saved quote's linked one (else, unlinked, the one its URL still names).
-  // Read inside the Promise.all below so an Estimator open doesn't wait on it serially.
-  const [suggestion, fabricRows, laborRows, customerDocs, settings, vendorPdfGate, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, pipeTypes, linesetTypes, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, pipeTypes, linesetTypes, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
-      loadSuggestion(readHandoff(sp).suggestionId, q),
       fabricParts(),
       byCategory("Labor"),
       allCustomers(),
       settingsLoad,
-      settingsLoad.then((st) => vendorPdfGateFor(user.id, { settings: assistSettingsOf(st) })).catch(() => "error"),
       getFixtureRates(),
       activeUsers(),
       catalogList(),
@@ -433,7 +376,6 @@ export default async function EstimatorPage({
       getEstimateOutputDefaults(),
       loadSystemCategoryOptions(),
     ]);
-  const vendorPdfEnabled = vendorPdfGate === null;
 
   // Only catalog fabrics with a $/sq ft rate feed the curtain configurator
   // (#227: fabricAreaRateOf — the catalog rate, a seed, or cost per sq ft —
@@ -500,14 +442,9 @@ export default async function EstimatorPage({
   // (a retired SKU follows its rename; a part that left the catalog is `part: null`). Read-only.
   const initial = await initialFrom(q, customers, user.name, systemCategories);
 
-  // Estimate suggestion: the suggestion's header fills only what the URL left
-  // blank (customer, venue, contact, lead, name) — a new estimate only.
-  const sugg = !q && handoff?.suggestionId ? suggestion.record : null;
-  const seedCustomer = preCustomer || sugg?.customerId || undefined;
-  // Venue, contact and lead come from the suggestion only when it is about the customer being seeded.
-  const suggSameCustomer = !!sugg && (sugg.customerId || undefined) === seedCustomer;
-  const seedVenue = handoff?.venueId || (suggSameCustomer ? sugg?.venueId || "" : "");
-  const seedContact = handoff?.contactName || (suggSameCustomer ? sugg?.contactName || "" : "");
+  const seedCustomer = preCustomer || undefined;
+  const seedVenue = handoff?.venueId || "";
+  const seedContact = handoff?.contactName || "";
   // Seed the customer/venue/contact picked in the guided intake (quotes/new).
   // A venue/contact not on the customer falls back to its primary (#160).
   if (seedCustomer) {
@@ -519,14 +456,14 @@ export default async function EstimatorPage({
       initial.contactName = pickContactName(cust, seedContact);
     }
   }
-  if (!q) initial.leadId = handoff?.leadId || (suggSameCustomer ? sugg?.leadId : null) || null;
+  if (!q) initial.leadId = handoff?.leadId || null;
   // Box goods sale (spec 2026-10-21): the + New quote card (?box=1) opens a new estimate with the switch on.
   if (!q && handoff?.boxSale) initial.boxSale = true;
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
   if (handoff) {
     // #160: the intake's optional name, else "<Customer> — System" (or
     // "— <category>") instead of the old static "New estimate".
-    initial.projectName = handoff.name || sugg?.quoteName || (initial.customerId ? systemQuoteName(initial.custName, initial.category) : initial.projectName);
+    initial.projectName = handoff.name || (initial.customerId ? systemQuoteName(initial.custName, initial.category) : initial.projectName);
     initial.replaces = handoff.replaces;
   }
 
@@ -580,9 +517,6 @@ export default async function EstimatorPage({
     <ActionError message={one(sp.err)} />
     <EstimatorClient
       initial={initial}
-      // #348 slice 4: the Inbox "Add as vendor quote…" hand-off — a saved estimate + a well-formed attachment ref only;
-      // the client strips it from the URL and the action re-checks the thread's visibility.
-      vendorFromThread={q && parseThreadAttachmentRef(one(sp.vq)) ? one(sp.vq)! : null}
       pipelines={pipelines}
       companyName={settings.companyName || "Peak Systems Group"}
       logoDark={settings.logoDark || null}
@@ -607,8 +541,6 @@ export default async function EstimatorPage({
       assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
       freightRule={freightRule}
       portalStatusError={portalStatusError}
-      // #334 (D877): the Assist-draft banner — null unless an undismissed Assist draft.
-      assistDraft={assistDraftViewOf(q)}
       // #368: what the last Revise re-priced (the Build banner shows it while the estimate is a draft).
       repricedOnRevise={repricedOnReviseOf(q?.repricedOnRevise)}
       // Spec records design §6: the Spec select's options, as plain strings.
@@ -630,11 +562,6 @@ export default async function EstimatorPage({
       narrativeIntros={narrativeIntros}
       // #301: Reset to default in the preview's Cover & package block.
       notIncludedDefault={estimateOutputDefaults.notIncluded}
-      // Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM panel + its live parts.
-      suggestion={suggestion.view}
-      suggestionParts={suggestion.parts}
-      // #348 slice 5: the vendor form's Read the PDF (pilot users with a Claude key only).
-      vendorPdfEnabled={vendorPdfEnabled}
     />
     </>
   );

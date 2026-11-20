@@ -4,7 +4,7 @@
  * Pure, no imports — safe in the client bundle.
  */
 
-export const POP_KINDS = ["inbox", "thread", "estimate", "customer"] as const;
+export const POP_KINDS = ["estimate", "customer"] as const;
 export type PopKind = (typeof POP_KINDS)[number];
 
 export const POP_PREFIX = "peak-pop:";

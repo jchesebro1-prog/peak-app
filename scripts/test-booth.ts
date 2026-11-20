@@ -2,7 +2,7 @@
    Run the pure half alone with `npx tsx scripts/test-booth.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { activeShow, applyShowOp, normalizeSlug, sanitizeCards, sanitizeShows, slugProblem, type Show } from "../src/lib/booth/shows";
 import { buildVCard, contentDispositionFor, vcardFileName } from "../src/lib/booth/vcard";
 import { cardAddressLines, contactCardFields, normalizeWebsite, websiteLabel, type CardOffice } from "../src/lib/booth/card-fields";
@@ -348,19 +348,10 @@ export async function boothDbChecks(ok: Ok) {
   const san = sanitizePushedDoc("booth_captures", { id: "bc_x", leadId: "evil", outcome: "merged", cardImagePath: "evil" }, { doc: { leadId: "L1", outcome: "created", cardImagePath: "p" }, deleted: false });
   ok(!("claimUntil" in san), "booth: a pushed claimUntil is never kept");
   ok(san.leadId === "L1" && san.outcome === "created" && san.cardImagePath === "p", "booth: server-owned capture fields come from the stored copy");
-
-  // share-back draft — one per lead, in the owner's mailbox, nothing without an email
-  const { createShareBackDraft } = await import("../src/lib/booth/followup-server");
   const { allUsers, addUser } = await import("../src/lib/users");
   const u = (await allUsers())[0] ?? (await addUser({ name: "Booth Owner", email: "booth.owner@example.test" }));
   if (r1.ok) {
-    const t1 = await createShareBackDraft({ leadId: r1.leadId, capture: { ...r1.capture, via: "card" }, owner: { id: u.id, name: u.name } });
-    const t2 = await createShareBackDraft({ leadId: r1.leadId, capture: { ...r1.capture, via: "card" }, owner: { id: u.id, name: u.name } });
-    ok(!!t1 && t1 === t2, "booth: share-back draft created once per lead");
-    ok((await createShareBackDraft({ leadId: r1.leadId, capture: { ...r1.capture, email: "" }, owner: { id: u.id, name: u.name } })) === null, "booth: no email → no draft");
     const { getDoc } = await import("../src/db/doc-store");
-    const th = t1 ? await getDoc<{ id: string; status: string; link?: { type: string; id: string }; linkedBy?: string; draft?: { attachments?: { name: string }[]; subject?: string } }>("comms", t1) : null;
-    ok(!!th && th.status === "draft" && th.link?.type === "lead" && th.link.id === r1.leadId && th.linkedBy === "user" && (th.draft?.attachments || []).length === 1, "booth: draft is linked to the lead (deliberately) with the vCard attached");
   } else ok(false, "booth: first capture recorded for the draft check");
   await writeShow({ kind: "deactivate" });
 }

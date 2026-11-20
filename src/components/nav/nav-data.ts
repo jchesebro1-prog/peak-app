@@ -8,10 +8,9 @@ import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 import type { PopKind } from "@/lib/popout/names";
 
 /** Pop-out windows (spec §3): nav rows with a hover ⧉ that opens the
- *  section's landing page in its own window — Inbox (`inbox:box`), Estimator
+ *  section's landing page in its own window — Estimator
  *  (`estimate:new`) and Customers (the Companies directory, `customer:list`). */
 export const NAV_POPOUT: Record<string, { kind: PopKind; id: string; url: string }> = {
-  inbox: { kind: "inbox", id: "box", url: "/inbox" },
   estimator: { kind: "estimate", id: "new", url: "/estimator" },
   companies: { kind: "customer", id: "list", url: "/companies" },
 };
@@ -150,7 +149,6 @@ export function activeKeyFor(pathname: string): string {
   if (pathname === "/quotes/portal" || pathname.startsWith("/quotes/portal/")) return "portal-quotes";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
-    "/inbox": "inbox",
     "/leads": "leads",
     "/opportunities": "opportunities",
     "/quotes": "quotes",

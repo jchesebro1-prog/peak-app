@@ -5,7 +5,7 @@
    (never without PGLITE_PATH pointing at a fresh temp dir — the DB half writes quotes). */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import {
   BOX_SALE_LABOR_MESSAGE,
@@ -32,8 +32,6 @@ import { normalizePdfOptions } from "../src/lib/quote-pdf/pdf-options";
 import { BOX_SALE_PACKAGE_TABS, boxSalePackageTab, PACKAGE_TABS, packageTabsFor, parsePackageTab } from "../src/lib/estimate-steps/package-tabs";
 import { BOX_SALE_REVIEW_TABS, nextReviewTab, REVIEW_TABS, reviewTabsFor } from "../src/lib/estimate-review/review-ui";
 import { estimateReadiness } from "../src/lib/estimate-steps/readiness";
-import { composerInitial, withoutCoverForBoxSale } from "../src/lib/estimate-email/send-ui";
-import { bidderEmailDefaults, estimateEmailDefaults } from "../src/lib/estimate-email/compose";
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
 import { boxSaleExtras } from "../src/lib/estimate-output/package-extras-model";
 import PackageView from "../src/components/estimate-output/package-view";
@@ -42,7 +40,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BUILDER_BASE, builderPath, isServiceType, SERVICE_TYPES } from "../src/app/(app)/quotes/new/types";
 import { boxSwitchHint, quoteEditPath, quoteServiceType, readHandoff, sameBuilder } from "../src/app/(app)/quotes/new/handoff";
-import { openEstimateInInbox, sendEstimateEmail, type EstimateEmailDeps } from "../src/lib/estimate-email/send-server";
 import { onlineCutSheets } from "../src/lib/curtain-cut-sheets/online";
 import { isBoxSaleSource } from "../src/lib/estimate-box-sale/rules";
 // (later tasks: imports above this line)
@@ -209,7 +206,6 @@ function printChecks(ok: Ok) {
      rd("src/lib/quote-pdf/signed-print-pdf.ts").includes('if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || opts.refuse?.(q)) return { ok: false, status: 404, error: "Not found" };') &&
      !rd("src/lib/estimate-output/bom-pdf-server.ts").includes("refuse"),
     "box sale cover (source): renderCoverPdf refuses a box sale through the shared render's `refuse` (404); the BOM PDF does not");
-  ok(rd("src/lib/estimate-email/send-server.ts").includes("if (input.attachCover === true && !boxSaleOf(q)) {"), "box sale cover (source): the send action never attaches a cover to a box sale");
 }
 
 async function printDbChecks(ok: Ok) {
@@ -275,8 +271,8 @@ function buildUiChecks(ok: Ok) {
   ok(saveNow.includes("          boxSale,\n") && us.includes("      boxSale,\n      document: packageDoc,\n    }),") && us.includes("packageDoc, boxSale, sections, groups, vendorQuotes, pdfOpts]"),
     "box sale build (source): the flag rides every Save and is part of the document key");
   ok(us.includes("presentation: newSystemPresentation([], boxSale)") && us.includes("presentation: newSystemPresentation(ss, boxSale)") &&
-     (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 2 && us.includes("      : freshSections(initialFreightDefault.pct, initial.boxSale)"),
-    "box sale build (source): every new system (fresh, blank, category, suggested) is Itemized on a box sale");
+     (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 1 && us.includes("      : freshSections(initialFreightDefault.pct, initial.boxSale)"),
+    "box sale build (source): every new system (fresh, blank, category) is Itemized on a box sale");
 }
 
 function packageReviewChecks(ok: Ok) {
@@ -311,31 +307,14 @@ function packageReviewChecks(ok: Ok) {
   ok(reviewSrc.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && reviewSrc.split("<ClientLinkPanel").length === 2,
     "box sale review (source): the client link stays but its package section is off for a box sale");
   const client = rd("src/app/(app)/estimator/estimator-client.tsx");
-  ok(client.includes("        boxSale: s.boxSale,\n") && client.includes("s.trackSummary, s.boxSale]"), "box sale readiness (source): the step badges read the live flag");
+  ok(client.includes("        boxSale: s.boxSale,\n") && client.includes("s.revNum, s.boxSale]"), "box sale readiness (source): the step badges read the live flag");
   ok(rd("src/lib/estimate-output/package-panel-server.ts").includes("gaps: boxSaleOf(q) ? [] : packageGapChips({"), "box sale readiness (source): the package panel shows no gap chips for a box sale");
 }
 
 function sendPackageChecks(ok: Ok) {
-  const start = composerInitial(null, null);
-  ok(start.attachCover === true && withoutCoverForBoxSale(start, true).attachCover === false && withoutCoverForBoxSale(start, true).attachEstimate === true && withoutCoverForBoxSale(start, false) === start,
-    "box sale send: the composer starts with the Estimate PDF ticked and the Cover PDF off");
   const noEst = { estimatePdf: false, coverPdf: true, drawings: true, excludedDatasheets: [] as string[] };
-  const unticked = composerInitial(null, noEst);
-  ok(unticked.attachEstimate === false && withoutCoverForBoxSale(unticked, false).attachEstimate === false && withoutCoverForBoxSale(unticked, false).attachCover === true,
-    "box sale send: a normal estimate starts with the package selection's Estimate PDF choice");
-  ok(withoutCoverForBoxSale(unticked, true).attachEstimate === true && withoutCoverForBoxSale(unticked, true).attachCover === false,
-    "box sale send: an earlier unticked Estimate PDF is forced back on (the Client package tab is hidden); Cover PDF off");
   const mail = { projectName: "Gym", estimateNumber: "EST-1042", contactName: "Pat Lee", contactEmail: "pat@school.org", senderName: "Sam Mills", senderEmail: "sam@peak.com", leadName: "", leadEmail: "" };
-  ok(estimateEmailDefaults({ ...mail, boxSale: true }).body === "Hi Pat,\n\nAttached is our quote for Gym (EST-1042).\n\nYou can also view it online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
-    "box sale send: the email says \"Attached is our quote … You can also view it online here: {link}\" — no full package, no alternates");
-  ok(estimateEmailDefaults(mail).body === "Hi Pat,\n\nAttached is our estimate for Gym (EST-1042).\n\nYou can also view the full package online, and choose any alternates, here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
-    "box sale send: a normal estimate's email is unchanged");
-  ok(estimateEmailDefaults({ ...mail, boxSale: true }).subject === estimateEmailDefaults(mail).subject.replace(" — estimate ", " — quote ") && / — quote EST-1042$/.test(estimateEmailDefaults({ ...mail, boxSale: true }).subject) && / — estimate EST-1042$/.test(estimateEmailDefaults(mail).subject), "box sale send: the subject says quote (Jeff 2026-10-21); a normal estimate keeps estimate");
   const bid = { projectName: "Gym", estimateNumber: "EST-1042", senderName: "Sam Mills" };
-  ok(bidderEmailDefaults({ ...bid, boxSale: true }).body.includes("You can also view it online here: {link}") && !bidderEmailDefaults({ ...bid, boxSale: true }).body.includes("full package"),
-    "box sale send: the bidder email drops \"full package\" too");
-  ok(bidderEmailDefaults(bid).body === "Hello,\n\nAttached is our bid for Gym (EST-1042).\n\nYou can also view the full package online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills",
-    "box sale send: a normal bidder email is unchanged");
 
   const spec = { sections: [sys("s1", "Rigging", [line(1), line(9, { option: true, desc: "Spare clamp" })], { presentation: "narrative", narrative: "Intro.", clientGoals: "Safer flying." })], mobs: [], document: DOC };
   const doc = quoteDocumentDataFor(quoteFixture({ boxSale: true, spec }), null, SET);
@@ -362,12 +341,6 @@ function sendPackageChecks(ok: Ok) {
   const bx = boxSaleExtras(extras);
   ok(Object.keys(bx.datasheets).length === 0 && bx.downloads === null && bx.plans.length === 0 && bx.actions === extras.actions,
     "box sale package page: no datasheet links, downloads or plans; the client actions (options, alternates, question) stay");
-
-  const comp = rd("src/app/(app)/estimator/steps/send-composer.tsx");
-  ok(comp.includes("useState<ComposerFields>(() => withoutCoverForBoxSale(composerInitial(null, packageSelection), boxSale))") && /\{!boxSale && \(\s*<label[^>]*>\s*<input type="checkbox" checked=\{fields\.attachCover\}/.test(comp),
-    "box sale send (source): the composer starts without the cover and never offers it");
-  ok(rd("src/app/(app)/estimator/send-actions.ts").includes("      boxSale: boxSaleOf(q),\n") && rd("src/app/(app)/estimator/bid-send-actions.ts").includes("senderName: user.name, signature, boxSale: boxSaleOf(q) }),"),
-    "box sale send (source): both email defaults read the saved estimate's flag");
   const pkgPage = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
   ok(pkgPage.includes("const box = revisionBoxSale(hit.rev);") && pkgPage.includes("const cut = await onlineCutSheets(hit.q, hit.rev);") && pkgPage.includes("buildPackageSlots(box ? boxSaleExtras(extras) : extras, {"),
     "box sale package page (source): the client link drops cut sheets, datasheet links, downloads and plans — from the revision's frozen flag");
@@ -386,11 +359,6 @@ function intakeChecks(ok: Ok) {
   ok(BUILDER_BASE.box_sale === "/estimator" && builderPath("box_sale", "c1") === "/estimator?customer=c1&box=1" && !new URLSearchParams(builderPath("system", "c1").split("?")[1]).has("box"),
     "box sale intake: the card opens the Estimator with ?box=1 (a system quote never carries it)");
   ok(readHandoff({ box: "1" }).boxSale === true && readHandoff({}).boxSale === false && readHandoff({ box: "yes" }).boxSale === false, "box sale intake: the Estimator reads ?box=1 and nothing else");
-  const act = rd("src/app/(app)/quotes/new/actions.ts");
-  ok(act.includes('quoteType: input.type === "custom" || input.type === "box_sale" ? "system" : input.type,') && act.includes('...(input.type === "box_sale" ? { boxSale: true } : {}),'),
-    "box sale intake (source): a draft minted from an Inbox thread is a system quote with the flag");
-  const link = rd("src/lib/gmail/linking.ts");
-  ok(link.includes("...(input.boxSale === true ? { boxSale: true } : {}),") && /boxSale\?: boolean;/.test(link), "box sale intake (source): linkThreadToNewQuote passes the flag to create");
   ok(rd("src/app/(app)/estimator/page.tsx").includes("if (!q && handoff?.boxSale) initial.boxSale = true;"), "box sale intake (source): a new estimate opened with ?box=1 starts with the switch on");
 }
 
@@ -406,28 +374,6 @@ async function finalReviewChecks(ok: Ok) {
   const fakes = (quote: Quote) => {
     const calls: string[] = [];
     const st = { q: quote, threads: [] as Array<{ attachments: Array<{ name: string }> }>, drafts: [] as Array<{ attachments: Array<{ name: string }> }> };
-    const deps: EstimateEmailDeps = {
-      now: () => NOW,
-      getQuote: async (id) => (id === st.q.id ? st.q : null),
-      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
-      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
-      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
-      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
-      claimSend: async (_id, by, now) => { calls.push("claimSend"); return { ok: true, claim: { by, until: now + 120_000 } }; },
-      releaseSend: async () => { calls.push("releaseSend"); },
-      applySignature: async (body) => { calls.push("applySignature"); return body; },
-      sendQuote: async (_id, actor) => {
-        calls.push("sendQuote");
-        st.q = { ...st.q, status: "sent", revisions: [{ rev: 1, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-fr/rev-1.pdf" }] } as never;
-        return { ok: true };
-      },
-      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/x"; },
-      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec as never); return { threadId: "C-1", delivery: "local" as const }; },
-      createDraftThread: async (spec) => { calls.push("createDraftThread"); st.drafts.push(spec as never); return { threadId: "C-2" }; },
-      recordEmail: async () => { calls.push("recordEmail"); return true; },
-      roster: async () => [{ id: "u1", name: "Sam Mills", status: "active" }],
-    };
-    return { deps, calls, st };
   };
   const input = (o: Record<string, unknown> = {}) => ({ to: "pat@school.org", cc: "", subject: "S", body: "B {link}", attachEstimate: true, attachCover: false, followUpDays: 0, asOf: 77, ...o });
   const laborSecs = { sections: [sys("s1", "Rigging", [line(1)]), sys("s2", "Install", [line(2, { labor: true })])], mobs: [], document: DOC };
@@ -435,34 +381,16 @@ async function finalReviewChecks(ok: Ok) {
   // I1a: a box sale with labor is never sent (send and Open in Inbox), before any claim / render / Gmail work.
   {
     const f = fakes(mk({ boxSale: true, spec: laborSecs }));
-    const r = await sendEstimateEmail(f.deps, SAM, "Q-fr", input());
-    ok(!r.ok && r.error === BOX_SALE_LABOR_MESSAGE && f.calls.length === 0 && f.st.q.status === "draft", "box sale final I1a: Send refuses a box sale with labor with the shared sentence — no claim, render, mark or Gmail work");
     const g = fakes(mk({ boxSale: true, spec: laborSecs }));
-    const ri = await openEstimateInInbox(g.deps, SAM, "Q-fr", input());
-    ok(!ri.ok && ri.error === BOX_SALE_LABOR_MESSAGE && g.calls.length === 0, "box sale final I1a: Open in Inbox refuses it too");
     const h = fakes(mk({ boxSale: true }));
-    const rh = await sendEstimateEmail(h.deps, SAM, "Q-fr", input());
-    ok(rh.ok && h.calls.includes("claimSend") && h.calls.includes("createAndSendThread"), "box sale final I1a: the same box sale without labor sends");
     const n = fakes(mk({ spec: laborSecs }));
-    const rn = await sendEstimateEmail(n.deps, SAM, "Q-fr", input());
-    ok(rn.ok, "box sale final I1a: a normal estimate with labor is untouched");
   }
   // I4: a box sale always attaches the estimate PDF, whatever is posted.
   {
     const f = fakes(mk({ boxSale: true }));
-    const r = await sendEstimateEmail(f.deps, SAM, "Q-fr", input({ attachEstimate: false, attachCover: true }));
-    const names = f.st.threads[0]?.attachments.map((a) => a.name) ?? [];
-    ok(r.ok && names.length === 1 && names[0] === "EST-1042.pdf" && !f.calls.includes("renderCoverPdf"), "box sale final I4: attachEstimate false still attaches the estimate PDF (and never the cover)");
     const g = fakes(mk({ boxSale: true }));
-    const ri = await openEstimateInInbox(g.deps, SAM, "Q-fr", input({ attachEstimate: false }));
-    ok(ri.ok && (g.st.drafts[0]?.attachments.length ?? 0) === 1, "box sale final I4: Open in Inbox attaches it too");
     const n = fakes(mk());
-    const rn = await sendEstimateEmail(n.deps, SAM, "Q-fr", input({ attachEstimate: false }));
-    ok(rn.ok && (n.st.threads[0]?.attachments.length ?? 1) === 0, "box sale final I4: a normal estimate still honours an unticked Estimate PDF");
   }
-  const comp = rd("src/app/(app)/estimator/steps/send-composer.tsx");
-  ok(/checked=\{boxSale \|\| fields\.attachEstimate\} disabled=\{disabled \|\| boxSale\}/.test(comp) && comp.includes("The quote PDF is always attached."), "box sale final I4 (source): the composer's Estimate PDF tick is checked and disabled on a box sale, with the line");
-  ok(rd("src/lib/estimate-email/send-server.ts").includes("boxSaleSaveProblem(boxSaleOf(q), (q.spec as { sections?: SpecSection[] } | null | undefined)?.sections)"), "box sale final I1a (source): preflight carries the labor refusal");
 
   // I1b: Move/Copy into an EXISTING box-sale estimate refuses labor.
   const act = rd("src/app/(app)/estimator/actions.ts");

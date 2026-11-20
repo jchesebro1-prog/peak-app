@@ -14,7 +14,7 @@
  * `ETC_SYNC_DISABLED=true` turns off Pull and the daily rider.
  */
 import { getBlob, updateBlob } from "@/db/doc-store";
-import { decryptWith, encryptWith } from "@/lib/gmail/crypto";
+import { decryptWith, encryptWith } from "@/lib/crypto/token";
 import { ETC_COPY } from "@/lib/dealer-api/etc/copy";
 import type { EtcPreview } from "@/lib/dealer-api/etc/plan";
 

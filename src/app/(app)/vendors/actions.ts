@@ -12,7 +12,7 @@ import { requirePerm, requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { setSettings } from "@/lib/settings";
 import { allCompanies, getCompany } from "@/lib/identity/companies";
-import { rankLinkTargets, type LinkTargetHit } from "@/lib/inbox-link-targets";
+import { rankLinkTargets, type LinkTargetHit } from "@/lib/search/link-targets";
 import { isVendorPickerType } from "@/lib/vendor-quotes/rules";
 import { isVendorType } from "@/lib/identity/config";
 import { getContact } from "@/lib/identity/contacts";

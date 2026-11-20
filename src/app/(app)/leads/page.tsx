@@ -34,15 +34,12 @@ import { shortMoneyDash, shortMoneyZero } from "./money";
 import BoardView from "@/components/board/board-view";
 import WorklistRow from "./worklist-row";
 import LeadDrawer from "./lead-drawer";
-import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { AssessmentsCard } from "@/components/assessments/assessment-cards";
 import { PartiesCard } from "@/components/parties/parties-card";
 import { LeadEstimates } from "@/components/parties/lead-estimates";
 import { OwnerDot } from "./avatar";
 import { setStageAction } from "./actions";
 import { getSettings } from "@/lib/settings";
-import { estimateSuggestEnabled, suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
-import { assistSettingsOf } from "@/lib/assist/config";
 import { activeVisitForLead, mergedVisitReasons } from "@/lib/stores/site-visits";
 import { stageMeta as surveyStageMeta, surveysForLead } from "@/lib/stores/surveys";
 import { VISIT_STAGE_META, type VisitStage } from "@/lib/lead-thread";
@@ -362,18 +359,6 @@ export default async function LeadsPage({
       : "detail"
     : null;
   const sourceOptions = SOURCES.map((s) => ({ value: s as string, label: SOURCE_META[s].label }));
-  // Estimate suggestion (spec 2026-10-13 §3) — the drawer's Suggest estimate
-  // (pilot + `estimate`), and the lead's latest suggestion when it has one.
-  // The settings are already loaded: a user outside the pilot (or with the
-  // feature off) skips both reads; otherwise the gate's key check and the
-  // ready lookup run side by side, and the link is dropped if the gate says no.
-  const assistSettings = assistSettingsOf(settings);
-  const suggestPossible = drawerMode === "detail" && !!leadRec && assistSettings.users.includes(me.id) && !!assistSettings.features.estimate;
-  const [suggestEnabled, suggestReadyRaw] =
-    suggestPossible && leadRec
-      ? await Promise.all([estimateSuggestEnabled(me.id, { settings: assistSettings }), suggestionReadyHref("lead", leadRec.id)])
-      : [false, null];
-  const suggestReady = suggestEnabled ? suggestReadyRaw : null;
 
   // #12 — the New Lead form's "pick an existing customer" prefill. Only
   // fetched when the new-lead form is actually open, same as the thread
@@ -904,12 +889,9 @@ export default async function LeadsPage({
           visitReasons={mergedVisitReasons(settings.visitReasons)}
           customers={leadCustomers}
           canDelete={canDelete}
-          canSuggest={suggestEnabled}
-          suggestionHref={suggestReady}
           meetingsSlot={
             drawerMode === "detail" && leadRec ? (
               <>
-                <MeetingsCard kind="work" id={leadRec.id} viewerId={me.id} style={{ marginTop: 18 }} />
                 <AssessmentsCard leadId={leadRec.id} customerId={leadRec.customerId ?? leadRec.convertedCustomerId ?? undefined} compact />
                 <PartiesCard recordType="lead" recordId={leadRec.id} />
                 <LeadEstimates leadId={leadRec.id} />

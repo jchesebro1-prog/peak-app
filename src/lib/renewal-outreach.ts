@@ -1,11 +1,4 @@
 import {
-  findDraftByLink,
-  saveDraft,
-  setDraftAttachments,
-  setLink,
-  type CommAttachment,
-} from "@/lib/stores/comms";
-import {
   byRenewalOf,
   create as createQuote,
   get as getQuote,
@@ -64,7 +57,6 @@ import {
 import { getLiftRate } from "@/lib/service-quote-inputs";
 import { quoteRewardCredit } from "@/lib/credit-line";
 import { serviceLetterPrice } from "@/lib/credit-line";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { sameWholeMarkup } from "@/lib/markup";
 
 /**
@@ -86,7 +78,7 @@ import { sameWholeMarkup } from "@/lib/markup";
  * draft with a freshly re-priced PDF (hand-edits preserved, D75).
  */
 
-export type RenewalOutreachResult = { threadId: string; quoteId: string };
+export type RenewalOutreachResult = { quoteId: string };
 
 /* ---------------- shared display helpers ---------------- */
 
@@ -986,184 +978,22 @@ async function inspectionLetterDoc(
 
 /* ================= the one-click flows ================= */
 
-function pdfAttachment(name: string, bytes: Buffer): CommAttachment {
-  return {
-    name,
-    mime: "application/pdf",
-    size: bytes.length,
-    dataUrl: "data:application/pdf;base64," + bytes.toString("base64"),
-  };
-}
-
-type Copy = { subject: string; body: string };
-
-/** Land (or refresh) the renewal draft and return its thread id. #341 — only
- *  the acting person's own live draft is reused (never a teammate's, never
- *  one in Deleted); otherwise a new draft lands in their mailbox. Exported for
- *  the harness. */
-export async function upsertRenewalDraft(opts: {
-  linkType: "flame_job" | "inspection";
-  linkId: string;
-  linkLabel: string;
-  customerId: string | null;
-  customer: string;
-  contactName: string;
-  to: string;
-  copy: Copy;
-  attachment: CommAttachment;
-  /** #349 — the acting person by identity (the draft's owner) */
-  me: { id: string; name: string };
-}): Promise<string> {
-  const existing = opts.me?.id ? await findDraftByLink(opts.linkType, opts.linkId, { owner: await mailboxViewer(opts.me) }) : null;
-  if (existing) {
-    // one renewal, one draft: refresh the quote PDF but never touch the
-    // subject/body — template copy is written only on first creation, so
-    // hand-edits to an existing draft are never clobbered (D75)
-    await setDraftAttachments(existing.id, [opts.attachment]);
-    if (!existing.link?.renewal)
-      await setLink(existing.id, {
-        type: opts.linkType,
-        id: opts.linkId,
-        label: existing.link?.label || opts.linkLabel,
-        renewal: true,
-      });
-    return existing.id;
-  }
-  const thread = await saveDraft({
-    // Lands in the sender's own mailbox — the shared Sales box was retired,
-    // and a draft filed there would now be invisible to everyone.
-    mailbox: "personal",
-    owner: opts.me, // #349 — owned by identity; saveDraft refuses a blank owner
-    customerId: opts.customerId,
-    customer: opts.customer,
-    contactName: opts.contactName,
-    to: opts.to,
-    subject: opts.copy.subject,
-    body: opts.copy.body,
-    link: {
-      type: opts.linkType,
-      id: opts.linkId,
-      label: opts.linkLabel,
-      renewal: true,
-    },
-    attachments: [opts.attachment],
-  });
-  return thread.id;
-}
-
 /**
- * ✉ one-click flame-test renewal outreach (IDEAS #36). Returns the draft
- * thread + quote ids, or null when the job isn't a completed renewal anchor.
+ * One-click flame-test renewal: mint (or re-price) this year's quote over last year's scope.
+ * The app no longer writes an email draft — the caller opens the quote. Null when the job
+ * isn't a completed renewal anchor.
  */
-export async function flameRenewalOutreach(
-  jobId: string,
-  actor: { id: string; name: string }
-): Promise<RenewalOutreachResult | null> {
-  const me = actor.name;
+export async function flameRenewalOutreach(jobId: string, actor: { id: string; name: string }): Promise<RenewalOutreachResult | null> {
   const job = await getFlameJob(jobId);
   if (!job || job.stage !== "completed") return null;
-
-  const [pricing, settings] = await Promise.all([
-    ensureFlameRenewalQuote(job, me),
-    getSettings(),
-  ]);
-  const quote = pricing.quote;
-  const pdf = renderLetterPdf(await flameLetterDoc(quote, settings));
-  const attachment = pdfAttachment(
-    "Field-flame-inspection-renewal-" + displayQuoteNumber(quote) + ".pdf",
-    pdf
-  );
-
-  const contact = job.contact || null;
-  const customer = job.customer || "your venue";
-  const lastLabel = monthYear(job.completedAt);
-  const ov = settings.templates;
-  const template: Copy = {
-    subject: renderField(ov, "flame_renewal_email", "subject", {
-      customer: job.customer || "",
-    }),
-    body: renderField(ov, "flame_renewal_email", "body", {
-      contactFirstName: firstName(contact?.name || "") || "there",
-      customer,
-      venueSuffix: job.venue ? ` (${job.venue})` : "",
-      lastPerformedClause: lastLabel
-        ? `was last performed in ${lastLabel}`
-        : "is coming due",
-      priceParagraph: priceParagraph(pricing, "inspection"),
-      senderFirstName: firstName(me),
-      company: settings.companyName || "Peak Systems Group",
-    }),
-  };
-
-  const threadId = await upsertRenewalDraft({
-    linkType: "flame_job",
-    linkId: job.id,
-    linkLabel: (job.venue || customer) + " — renewal",
-    customerId: job.customerId || null,
-    customer: job.customer || "",
-    contactName: contact?.name || "",
-    to: contact?.email || "",
-    copy: template,
-    attachment,
-    me: actor,
-  });
-  return { threadId, quoteId: quote.id };
+  const pricing = await ensureFlameRenewalQuote(job, actor.name);
+  return { quoteId: pricing.quote.id };
 }
 
-/**
- * ✉ one-click inspection renewal outreach (IDEAS #36) — the L1/L2 mirror of
- * the flame flow (cadence per D54).
- */
-export async function inspectionRenewalOutreach(
-  recordId: string,
-  actor: { id: string; name: string }
-): Promise<RenewalOutreachResult | null> {
-  const me = actor.name;
+/** One-click inspection renewal — the L1/L2 mirror of the flame flow (cadence per D54). */
+export async function inspectionRenewalOutreach(recordId: string, actor: { id: string; name: string }): Promise<RenewalOutreachResult | null> {
   const rec = await getInspection(recordId);
   if (!rec || rec.stage !== "completed") return null;
-
-  const [pricing, settings] = await Promise.all([
-    ensureInspectionRenewalQuote(rec, me),
-    getSettings(),
-  ]);
-  const quote = pricing.quote;
-  const pdf = renderLetterPdf(await inspectionLetterDoc(quote, settings));
-  const attachment = pdfAttachment(
-    "Rigging-inspection-renewal-" + displayQuoteNumber(quote) + ".pdf",
-    pdf
-  );
-
-  const lm = levelMeta(rec.level);
-  const cadenceShort = lm.key === 2 ? "five-year Level 2" : "annual Level 1";
-  const customer = rec.customer || "your venue";
-  const ov = settings.templates;
-  const template: Copy = {
-    subject: renderField(ov, "inspection_renewal_email", "subject", {
-      levelLabel: lm.label,
-      customer: rec.customer || "",
-    }),
-    body: renderField(ov, "inspection_renewal_email", "body", {
-      contactFirstName: firstName(rec.contact || "") || "there",
-      customer,
-      venueSuffix: rec.venue ? ` (${rec.venue})` : "",
-      cadenceShort,
-      priceParagraph: priceParagraph(pricing, "inspection"),
-      senderFirstName: firstName(me),
-      company: settings.companyName || "Peak Systems Group",
-    }),
-  };
-
-  const threadId = await upsertRenewalDraft({
-    linkType: "inspection",
-    linkId: rec.id,
-    linkLabel: (rec.venue || customer) + " — renewal",
-    customerId: rec.customerId || null,
-    customer: rec.customer || "",
-    contactName: rec.contact || "",
-    to: rec.contactEmail || "",
-    copy: template,
-    attachment,
-    me: actor,
-  });
-  return { threadId, quoteId: quote.id };
+  const pricing = await ensureInspectionRenewalQuote(rec, actor.name);
+  return { quoteId: pricing.quote.id };
 }

@@ -1,9 +1,6 @@
 export const DASHBOARD_WIDGETS = [
   "stats",
   "pipeline",
-  "calendar",
-  "queue",
-  "inbox",
   "leads",
   "designs",
   "surveys",
@@ -37,9 +34,6 @@ export type DashboardOverride = {
 const DEFAULT_WIDTHS: Record<DashboardWidgetKey, DashboardWidgetWidth> = {
   stats: "full",
   pipeline: "full",
-  calendar: "sidebar",
-  queue: "sidebar",
-  inbox: "half",
   leads: "half",
   designs: "half",
   surveys: "half",

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { coverDocumentPropsFor, coverScopeHeading } from "../src/lib/estimate-output/cover";
 import CoverDocument from "../src/components/estimate-output/cover-document";
 import { qdP2bNoAltCases } from "./qd293-cases";
@@ -23,7 +23,6 @@ import { compareImages } from "../src/lib/part-docs/types";
 import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "../src/lib/estimate-output/fields";
 import { estimateReadiness } from "../src/lib/estimate-steps/readiness";
 import { systemFromCategory } from "../src/lib/system-categories";
-import { systemFromSuggestion } from "../src/lib/assist/features/suggestion";
 import { photoSkusOf } from "../src/app/(app)/estimator/narrative";
 import { can } from "../src/lib/team";
 
@@ -159,12 +158,10 @@ function presentationChecks(ok: Ok) {
   ok(systemFromCategory(catOpt, [{ sku: "A", qty: 2 }], { ...ctx, presentation: "narrative" }).presentation === "narrative" &&
      systemFromCategory(catOpt, [{ sku: "A", qty: 2 }], { ...ctx, presentation: "itemized" }).presentation === "itemized" &&
      !("presentation" in systemFromCategory(catOpt, [], ctx)), "#355 review M6: a category system takes the presentation it is given (none → no key)");
-  ok(systemFromSuggestion({ key: "k", name: "Rigging", categoryId: "c", lines: [] }, new Map(), { ...ctx, presentation: "itemized" }).presentation === "itemized",
-    "#355 review M6: a suggested system takes the presentation it is given");
   const us = src("src/app/(app)/estimator/use-estimator-state.ts");
   ok(/const freshSections = [\s\S]{0,400}presentation: newSystemPresentation\(\[\], boxSale\)/.test(us) && !us.includes("presentation: NEW_SYSTEM_PRESENTATION") &&
-     us.includes("presentation: newSystemPresentation(ss, boxSale)") && (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 2,
-    "#355 review M6 (+ box goods sale): only a NEW estimate starts Narrative; + Add system (blank, category, suggestion) follows the estimate — Itemized throughout on a box sale");
+     us.includes("presentation: newSystemPresentation(ss, boxSale)") && (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 1,
+    "#355 review M6 (+ box goods sale): only a NEW estimate starts Narrative; + Add system (blank, category) follows the estimate — Itemized throughout on a box sale");
   const narr = { id: "n", name: "N", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] };
   const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
   const send1 = estimateReadiness({ ...base, sections: [narr, { ...narr, id: "n2", narrative: "Intro." }, narr] as never[] }).send;

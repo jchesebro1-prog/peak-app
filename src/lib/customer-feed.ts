@@ -1,25 +1,17 @@
-import { byCustomer as commsByCustomer, canSeeThread, isSharedThread } from "@/lib/stores/comms";
 import { getAll as getAllFlame } from "@/lib/stores/flame-jobs";
 import { completedAtOf, getAll as getAllInspections } from "@/lib/stores/inspections";
 import { notesForCustomer } from "@/lib/stores/notes";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAll as getAllSurveys } from "@/lib/stores/surveys";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
-import { meetingRowsLinkedTo, type MeetingLinkedRow } from "@/lib/stores/meetings";
-import { meetingsReadOr } from "@/lib/meetings/safe-read";
-import { contactsForCompany, displayName } from "@/lib/identity/contacts";
-import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
 import {
-  commFeedRows,
   jobFeedRows,
-  meetingFeedRows,
   noteFeedRows,
   quoteFeedRows,
   surveyFeedRows,
   visitFeedRows,
   type FeedRow,
 } from "@/lib/customer-feed-rows";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * #21 customer Activity feed loader — SERVER-ONLY (fans out over the doc
@@ -36,32 +28,15 @@ import { mailboxViewer } from "@/lib/mailbox-viewer";
 /** Feed cap — "Show more" is deferred (product flag, D121). */
 export const FEED_CAP = 60;
 
-/**
- * `viewerId` (#323) adds one row per Krisp meeting linked to the company that the viewer can see
- * (canSeeMeeting, inside meetingRowsLinkedTo); without it — the vendor page, the company summary — no meeting
- * rows are read at all.
- */
-export async function loadCustomerFeed(
-  cust: { id: string; name: string },
-  viewerId?: string,
-  /** #341 — the viewer: their own threads on this company show too (#349 —
-   *  by identity, so it carries the id and name) */
-  viewer?: { id: string; name: string }
-): Promise<FeedRow[]> {
-  const mailbox = viewer?.id ? await mailboxViewer(viewer) : null;
-  const [notes, quotes, threads, visits, flames, inspections, surveys, meetings] =
-    await Promise.all([
-      notesForCustomer(cust.id),
-      getAllQuotes(),
-      commsByCustomer(cust.id),
-      visitsForCustomer(cust.id),
-      getAllFlame(),
-      getAllInspections(),
-      getAllSurveys(),
-      viewerId
-        ? meetingsReadOr(meetingRowsLinkedTo("company", cust.id, viewerId), [] as MeetingLinkedRow[], "company feed")
-        : Promise.resolve([] as MeetingLinkedRow[]),
-    ]);
+export async function loadCustomerFeed(cust: { id: string; name: string }): Promise<FeedRow[]> {
+  const [notes, quotes, visits, flames, inspections, surveys] = await Promise.all([
+    notesForCustomer(cust.id),
+    getAllQuotes(),
+    visitsForCustomer(cust.id),
+    getAllFlame(),
+    getAllInspections(),
+    getAllSurveys(),
+  ]);
 
   const rows: FeedRow[] = [];
 
@@ -72,13 +47,6 @@ export async function loadCustomerFeed(
   for (const q of quotes.filter((qt) => (qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name)))
     rows.push(...quoteFeedRows(q));
 
-  // #341 — with a viewer (the company page): what they may see (canSeeThread —
-  // their own, or deliberately linked / filed). With none (the vendor page,
-  // the company summary): shared threads only (isSharedThread). A thread on
-  // this customer only through the automatic sender match is private to its
-  // mailbox. The rows open the Inbox reader, read-only for anyone but the owner.
-  const seen = mailbox ? (t: (typeof threads)[number]) => canSeeThread(t, mailbox) : isSharedThread;
-  for (const t of threads.filter(seen)) rows.push(...commFeedRows(t));
   for (const v of visits) rows.push(...visitFeedRows(v));
 
   for (const f of flames.filter((r) => r.customerId === cust.id))
@@ -106,25 +74,6 @@ export async function loadCustomerFeed(
     );
 
   for (const s of surveys.filter((x) => x.customerId === cust.id)) rows.push(...surveyFeedRows(s));
-
-  if (meetings.length) {
-    // attendee display names: the linked contact's current name, else the name Krisp / the calendar gave
-    const contactName = new Map((await contactsForCompany(cust.id)).map((c) => [c.id, displayName(c)]));
-    for (const m of meetings)
-      rows.push(
-        ...meetingFeedRows({
-          id: m.id,
-          title: m.title,
-          startedAt: m.startedAt,
-          durationLabel: lengthLabel(m.durationSec),
-          href: meetingReaderHref(m),
-          attendees: m.attendees.map((a) => ({
-            display: (a.contactId && contactName.get(a.contactId)) || a.name,
-            internal: !!a.userId,
-          })),
-        })
-      );
-  }
 
   rows.sort((a, b) => b.ts - a.ts);
   return rows.slice(0, FEED_CAP);

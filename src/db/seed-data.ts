@@ -8,7 +8,6 @@ import { quotesSeed } from "./seeds/quotes";
 import { catalogSeed } from "./seeds/catalog";
 import { leadsSeed } from "./seeds/leads";
 import { surveysSeed } from "./seeds/surveys";
-import { commsSeed } from "./seeds/comms";
 import { flameJobsSeed } from "./seeds/flame-jobs";
 import { inspectionsSeed } from "./seeds/inspections";
 import { designsSeed } from "./seeds/designs";
@@ -49,13 +48,6 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   seedDemo: false,
   feedbackEmail: "",
   dashboardDefaults: defaultDashboardLayout(),
-  // Recordings → Drive archive + pilot gate (Krisp recordings spec §1.3).
-  recordingsArchiveMailbox: null,
-  recordingsArchiveFolderId: null,
-  recordingsArchiveFolders: {},
-  recordingsBetaUsers: [],
-  // #283 — Peak Product Photos sync account (Settings → Mailboxes).
-  catalogPhotosMailbox: null,
   offices: [
     {
       id: "hq",
@@ -112,7 +104,6 @@ const DEMO_SEEDS: Array<[CollectionName, () => Doc[]]> = [
   ["quotes", quotesSeed as unknown as () => Doc[]],
   ["leads", leadsSeed as unknown as () => Doc[]],
   ["surveys", surveysSeed as unknown as () => Doc[]],
-  ["comms", commsSeed as unknown as () => Doc[]],
   ["flame_jobs", flameJobsSeed as unknown as () => Doc[]],
   ["inspections", inspectionsSeed as unknown as () => Doc[]],
   ["designs", designsSeed as unknown as () => Doc[]],
@@ -164,7 +155,12 @@ export const CONFIG_COLLECTIONS: readonly CollectionName[] = [
   "subassemblies",
   "spec_records",
   "spec_record_revisions",
-  "assist_runs", // #334: trial history + monthly spend survive the go-live wipe
+  // Collections of removed features (Assist, Inbox, Krisp): the tables stay in place, unused — the go-live wipe
+  // must not empty them.
+  "assist_runs",
+  "comms",
+  "meetings",
+  "recordings",
   "venue_profiles", // #340: the rolling per-venue profile is authored knowledge, not demo data
 ];
 

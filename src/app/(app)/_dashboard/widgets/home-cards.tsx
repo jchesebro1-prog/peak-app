@@ -14,12 +14,10 @@ import {
   followUpInfo, sla as leadSla, sourceMeta, stageMeta as leadStageMeta, dueLabel, dateLabel,
   timeAgo as leadTimeAgo, type LeadRecord,
 } from "@/lib/stores/leads";
-import { boxMeta, waitingSince, waitLabel as commWaitLabel } from "@/lib/stores/comms";
 import { priceBooks } from "@/lib/catalog-books";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor, shortMoney } from "@/lib/dashboard/home-metrics";
 import { tile } from "./tile";
-import HomeInbox from "../../home-inbox";
 import HomeMyLeads, { type LeadGroup, type LeadRow } from "../../home-my-leads";
 import HomeMyDesigns, { type DesignCard } from "../../home-my-designs";
 import { estimateLinksForDesigns } from "@/lib/design/estimate-links-server";
@@ -50,26 +48,6 @@ export const HOME_RENDERERS = {
     return tile("Avg quote", shortMoney(s.avg), `${s.myQuotes.length} total`);
   },
 
-  /* ---- inbox (page.tsx 476-501) ---- */
-  inbox: async (ctx) => {
-    const [needsThreads, inboxUnread, boxCountsArr] = await Promise.all([
-      ctx.data.needsThreads(), ctx.data.inboxUnread(), ctx.data.boxCounts(),
-    ]);
-    const inboxItems = needsThreads.slice(0, 4).map((t) => {
-      const bm = boxMeta(t.mailbox || "info", t.mailboxUser || undefined, { userColor: ctx.user.color });
-      return {
-        id: t.id, href: `/inbox?thread=${encodeURIComponent(t.id)}`,
-        customer: t.customer || t.contactName || "Customer", subject: t.subject || "(no subject)",
-        wait: commWaitLabel(waitingSince(t)), unread: !!t.unread, channel: t.channel,
-        boxTag: bm?.label || "", boxColor: bm?.color || "#8c919c",
-      };
-    });
-    const inboxBoxes = ctx.data.boxes.map((b, i) => ({
-      id: b.id, label: b.kind === "personal" ? "My inbox" : b.label, color: b.color,
-      href: `/inbox?box=${b.id}`, waiting: boxCountsArr[i]?.waiting || 0,
-    }));
-    return <HomeInbox inboxNeedsCount={needsThreads.length} inboxUnread={inboxUnread} inboxItems={inboxItems} inboxBoxes={inboxBoxes} />;
-  },
 
   /* ---- my leads (page.tsx 363-425) — leadChip/leadSub resolved into rows ---- */
   "my-leads": async (ctx) => {

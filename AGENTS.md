@@ -100,6 +100,15 @@ See `.env.example`.
 > Rewards and the Daylite import. A won quote is now only a status change, and nothing creates
 > tasks. The phase notes below still describe those features as built — read
 > `docs/removal-log.md` first; it says what is gone and what replaced the shared helpers.
+>
+> **Stage 2 (2026-11-20)** removed the Inbox and the thread store, the Gmail integration (connect,
+> send, import, labels, cron), mailbox identity / visibility, Inbox organization, Krisp meetings and
+> recordings, the whole Assist / AI layer (Ask AI, estimate suggestion, Read the PDF, AI filing),
+> Google Calendar / Tasks / Drive access and the Drive catalog-photo sync. Estimates are no longer
+> emailed from the app: download the PDF, copy the client link, then mark the estimate sent (Send to
+> customer → or the status select); bidders are stamped with Mark submitted. Vendor quotes are
+> upload-only. The token encryption helper now lives in `src/lib/crypto/token.ts`. Phases 7, 8,
+> 42 (Phase 3 send), 46, 53–58, 60, 63 and the Drive half of 26 below describe removed code.
 
 1. ✅ Scaffold, DB, Google SSO + invite list, team/roles port, nav shell,
    Settings (branding/team/roles), deploy-ready config (DEPLOY.md)

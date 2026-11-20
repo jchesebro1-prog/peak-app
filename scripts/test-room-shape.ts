@@ -1,7 +1,7 @@
 // scripts/test-room-shape.ts
 /* Grid room shape (#370) — harness checks. `roomShapePureChecks` is pure; `roomShapeDbChecks` needs the test DB.
    Run alone with `npx tsx scripts/test-room-shape.ts` (pure checks only). */
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { parseFeet, fmtFeet } from "../src/lib/design/room-shape/units";
 import { decideLengthCommit, isTypingTarget } from "../src/lib/design/room-shape/field-edit";
 import {

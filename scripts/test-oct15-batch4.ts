@@ -4,7 +4,7 @@
    Run the pure half alone with `npx tsx scripts/test-oct15-batch4.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { effectivePriceDate, priceBooks } from "../src/lib/catalog-books";
 import { pricesAsOf } from "../src/lib/fixture-assemblies";
 import { catalogEffectiveAtFor } from "../src/lib/vendor-status";

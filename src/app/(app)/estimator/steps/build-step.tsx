@@ -24,15 +24,9 @@ import TrackModal from "../track-modal";
 import PipeModal from "../pipe-modal";
 import LinesetModal from "../lineset-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
-import { ReadPdfButton, VendorPdfPanel } from "../vendor-pdf-panel";
-import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
-import { isPdfAttachment } from "@/lib/vendor-quotes/rules";
 import { PortalPanel } from "../portal-panel";
-import { AssistDraftBanner } from "../assist-draft-banner";
 import { RepriceBanner } from "../reprice-banner";
-import { SuggestedBomPanel } from "../suggested-bom-panel";
 import { bonusNotFigured, bonusRulesApply, isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
-import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
@@ -42,7 +36,6 @@ import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
 const NO_COMMENTS: NumberedComment[] = [];
-const NO_PARTS: SuggestionParts = {};
 
 export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresentation }: {
   s: EstimatorState;
@@ -159,7 +152,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     openVendorEdit,
     placeLibrarySystem,
     portalStatusError,
-    assistDraft,
     repricedOnRevise,
     projectDiscounts,
     rate,
@@ -227,10 +219,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     vendorEditingRec,
     vendorFor,
     vendorFormMarkup,
-    vendorHandoff,
-    vendorPdf,
-    vendorPdfEnabled,
-    readVendorPdf,
     retargetVendor,
     setVendorCompany,
     vendorPreviews,
@@ -253,7 +241,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   const resolveComment = useResolveComment(s);
   useCommentsFocusRefresh(s);
   /* #348 slice 5: Read the PDF — only for a user the server gate passed, and only on a PDF attachment. */
-  const readPdf = vendorPdfEnabled && !!vendorDraft.attachment && isPdfAttachment(vendorDraft.attachment);
 
   /* #357: ticked lines and a row's ⇄ feed the Move bar. Build unmounts on a step
      change (estimator-client renders one step at a time), which clears both; a line
@@ -497,7 +484,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
             position: "relative",
           }}
         >
-          <AssistDraftBanner view={assistDraft} />
           {/* #368: a Revise re-priced lines to today's catalog — shown while the estimate is that revise's draft. */}
           <RepriceBanner view={repricedOnRevise} quoteId={loadedId} show={status === "draft"} />
           {/* Box goods sale (spec 2026-10-21): turning it on with labor is allowed — Save stays refused until it's gone. */}
@@ -771,20 +757,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           )}
         </div>
 
-        {/* Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM column, beside the system cards. */}
-        {s.suggestion && (
-          <SuggestedBomPanel
-            view={s.suggestion}
-            parts={s.suggestionParts ?? NO_PARTS}
-            added={s.suggestionAdded}
-            sections={sections}
-            open={s.suggestOpen}
-            onToggle={s.toggleSuggestOpen}
-            targetFor={s.suggestionTargetFor}
-            onAddSystem={s.addSuggestedSystem}
-            onAddLine={s.addSuggestedLine}
-          />
-        )}
       </div>
 
       {/* configurator modals */}
@@ -931,20 +903,10 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onAdd={() => commitVendorQuote(vendorFor)}
           onClose={closeInput}
           confirmClose={confirmDiscardInput}
-          /* #348 slice 4: the vendor company picker (typed name as the fallback) and the email hand-off. */
+          /* #348 slice 4: the vendor company picker (typed name as the fallback). */
           onPickVendor={(c) => setVendorCompany(c)}
           onTypedVendor={(name) => setVendorField("vendor", name)}
           onUnlinkVendor={() => setVendorCompany(null)}
-          handoff={vendorHandoff}
-          systems={sections.map((sec) => ({ id: sec.id, name: sec.name }))}
-          systemId={vendorFor}
-          onPickSystem={retargetVendor}
-          /* #348 slice 5: Read the PDF (pilot users with a Claude key; PDFs only) — the file-row button, the
-             results panel, the per-line hints, and Add waiting while it reads. */
-          fileActions={readPdf ? <ReadPdfButton busy={vendorPdf.busy} onRead={() => void readVendorPdf(false)} /> : undefined}
-          readPanel={readPdf ? <VendorPdfPanel draft={vendorDraft} state={vendorPdf} onTryHarder={() => void readVendorPdf(true)} /> : undefined}
-          lineHints={readPdf ? vendorPdfLineHints(vendorDraft) : undefined}
-          reading={readPdf && !!vendorPdf.busy}
         />
       )}
       {aiSource && aiOpen && (

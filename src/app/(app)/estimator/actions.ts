@@ -81,9 +81,8 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { addVendorPartiesForSave, prepareVendorQuotesForSave } from "@/lib/stores/vendor-quotes";
-import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendor-pdf/save-server";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
-import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
+import { leadIdForCreate } from "@/lib/lead-for-create";
 import { boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 import { deriveEstimatorSections } from "@/lib/estimate-reprice/derive";
@@ -209,12 +208,9 @@ export type SavePayload = {
      built before a newer tick but processed after it can't revert the tick. */
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
-  /** Estimate suggestion (spec 2026-10-13 §2) — the lead a NEW quote is for
+  /** The lead a NEW quote is for
    *  (create only; checked against the leads; an update never touches it). */
   leadId?: string;
-  /** The `ES-…` suggestion the estimate was opened from: every successful
-   *  save links the saved quote to it (idempotent; unknown ids ignored). */
-  suggestionId?: string;
   /** Box goods sale (spec 2026-10-21) — absent (an older caller) keeps the stored flag; dropped on any
    *  non-system quote (boxSaleForSave). A box sale with any labor line refuses the whole save. */
   boxSale?: boolean;
@@ -259,9 +255,6 @@ export type SaveResult = {
   /** #282 phase 2 — the Rewards credit actually stored (after the server's
    *  clamp), so the builder can match its credit line to it. */
   rewardCredit?: number;
-  /** Estimate suggestion — true when this save linked the quote to the
-   *  posted `suggestionId` (the builder stops sending it). */
-  suggestionLinked?: boolean;
   /** #355 review M2 — this save's status move reopened a won estimate at the
    *  version that won; the open document holds the edits, so reload. */
   reopenedAtWon?: boolean;
@@ -450,6 +443,22 @@ function refusedSave(prior: Quote | null, error: string): SaveResult {
     stage: prior?.stage ?? null,
     error,
   };
+}
+
+/** Read the PDF is gone: a posted vendor quote never stores a read (`extracted`) or a line's `extractedIndex`. */
+function withoutPdfReads<T extends VendorQuote>(vqs: readonly T[]): T[] {
+  return vqs.map((v) => {
+    const { extracted: _e, ...rest } = v as T & { extracted?: unknown };
+    void _e;
+    const lines = Array.isArray(rest.lines)
+      ? rest.lines.map((l) => {
+          const { extractedIndex: _i, ...line } = l as typeof l & { extractedIndex?: unknown };
+          void _i;
+          return line;
+        })
+      : rest.lines;
+    return { ...rest, lines } as unknown as T;
+  });
 }
 
 /**
@@ -653,10 +662,7 @@ export async function saveQuoteAction(
   // #348 slice 4: server-stamp addedAt and keep only a live vendor company; the vendor party is added after the write.
   const priorVq = vendorQuoteRows(prior?.vendorQuotes);
   storedVendorQuotes = await prepareVendorQuotesForSave(priorVq, storedVendorQuotes, Date.now());
-  // #348 slice 5: a Read-the-PDF result is kept only when its run row vouches for it (model + time from the row);
-  // a run first kept by this save is scored once, after the write.
-  const vpdf = await verifyVendorPdfExtractions(priorVq, storedVendorQuotes);
-  storedVendorQuotes = vpdf.vendorQuotes;
+  storedVendorQuotes = withoutPdfReads(storedVendorQuotes);
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
     const written = await updateCheckingLiveKey(loadedId, payload.baseKey, { ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy: savedBy } as QuotePatch, { live });
@@ -665,7 +671,6 @@ export async function saveQuoteAction(
     if (written.conflict) return { ...refusedSave(prior, "This estimate changed somewhere else — nothing was written."), conflict: written.conflict };
     q = written.quote;
     liveKeyOut = written.liveKey;
-    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, loadedId);
     // #348 slice 4 — a vendor quote's company joins the estimate as a vendor party, once (D-next-2). Never fails the save.
     if (q) {
       try { await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: loadedId }, priorVq, storedVendorQuotes, user.id)); }
@@ -725,7 +730,7 @@ export async function saveQuoteAction(
     // it must come back as a typed message, not a raw 500. The sibling
     // setStatus call below already does this; create() was the one gap.
     let created: Quote;
-    // Estimate suggestion: the lead rides the create only (an existing lead, else none).
+    // The lead rides the create only (an existing lead, else none).
     const leadId = await leadIdForCreate(payload.leadId);
     try {
       created = await create({ ...patch, owner: user.name, ...(leadId ? { leadId } : {}) });
@@ -774,7 +779,6 @@ export async function saveQuoteAction(
       pdfOptions: normalizePdfOptions(payload.pdfOptions),
       lastSavedBy: savedBy,
     } as QuotePatch);
-    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, created.id);
     // #222: same ordering as the update branch.
     if (q && renderPdf) pdfState = await scheduleQuotePdf(created.id);
     if (!live && payload.status !== "draft") {
@@ -801,10 +805,6 @@ export async function saveQuoteAction(
     // D205: the replaced draft goes only once its replacement exists.
     await retireReplacedDraftSafely(payload.replaces, created.id, "estimator");
   }
-  // Estimate suggestion: link the saved quote to the suggestion it came from
-  // (first save indexes it; later saves are no-ops). Never fails the save.
-  // An update links only when the page's unlinkedRetryAllowed rule holds (server-side guard).
-  const suggestionLinked = q?.id && payload.suggestionId ? await linkSavedQuoteToSuggestion(payload.suggestionId, q, !loadedId) : false;
   if (!live) refresh();
   return {
     ok: !!q && !statusError,
@@ -826,7 +826,6 @@ export async function saveQuoteAction(
     rewardCredit: credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
-    ...(suggestionLinked ? { suggestionLinked: true } : {}),
     ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
     ...(repriced ? { repriced: true } : {}),
   };
@@ -1050,9 +1049,7 @@ async function placeSystemInEstimate(
     const t = totals(mergedSections, 0);
     // The browser supplies these rows: stamp addedAt and drop any company that isn't a live vendor company BEFORE storing / adding parties.
     const priorTargetVq = vendorQuoteRows(existing.vendorQuotes);
-    // #348 slice 5: a moved / copied vendor quote's read is re-verified like a save (these rows come from the
-    // browser) but never scored here — a read is scored once, at the first save that keeps it.
-    const preparedVq = (await verifyVendorPdfExtractions(priorTargetVq, await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now()))).vendorQuotes;
+    const preparedVq = withoutPdfReads(await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now()));
     const carried = preparedVq.length
       ? await storeVendorQuotes(target.quoteId, preparedVq)
       : [];
@@ -1158,8 +1155,7 @@ async function placeSystemInEstimate(
     }
   }
   // The browser supplies these rows: stamp addedAt and drop any non-vendor company before storing / adding parties.
-  // #348 slice 5: reads re-verified like a save, never scored here (see the existing-target branch).
-  const preparedNewVq = (await verifyVendorPdfExtractions([], await prepareVendorQuotesForSave([], placedVq, Date.now()))).vendorQuotes;
+  const preparedNewVq = withoutPdfReads(await prepareVendorQuotesForSave([], placedVq, Date.now()));
   // create() promotes only the declared Quote columns — contactName rides
   // along on the doc like it does for saveQuoteAction's fresh-create path.
   const withContact = await update(created.id, {

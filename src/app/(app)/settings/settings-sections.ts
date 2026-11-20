@@ -19,7 +19,6 @@ export const SETTINGS_SECTIONS = [
   { key: "sales", label: "Sales", desc: "Review limits, pipelines and customer fields.", perm: "manage_users" },
   { key: "field", label: "Field & Venues", desc: "Venue types, site intake, site-visit reasons and internal tags.", perm: "manage_users" },
   { key: "consulting", label: "Consulting", desc: "Phases, disciplines and the assumptions library.", perm: "manage_users" },
-  { key: "integrations", label: "Integrations", desc: "Gmail mailboxes, Drive photos and recordings.", perm: "manage_users" },
   { key: "team", label: "Team & Access", desc: "Team members, roles and permissions.", perm: "manage_users" },
   { key: "data", label: "Data & Tools", desc: "Import, templates, document categories and go-live tools.", perm: "manage_users" },
 ] as const satisfies ReadonlyArray<{ key: string; label: string; desc: string; perm: SettingsPerm }>;
@@ -32,6 +31,8 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["key"];
 export const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
   general: "company",
   admin: "team",
+  // The Integrations group (mailboxes, recordings) was removed with the Inbox.
+  integrations: "company",
 };
 
 /** A Settings link tile — a screen that keeps its own route. */
@@ -57,7 +58,6 @@ export const GROUP_LINKS: Readonly<Record<SettingsSection, readonly SettingsScre
   sales: [SETTINGS_SCREENS.catalog, SETTINGS_SCREENS.estimatingRules, SETTINGS_SCREENS.templates],
   field: [],
   consulting: [],
-  integrations: [],
   team: [],
   data: [SETTINGS_SCREENS.importExport, SETTINGS_SCREENS.gridSettings],
 };
@@ -83,8 +83,6 @@ export const SETTINGS_CARDS = [
   { key: "consultingPhases", label: "Consulting — phase menu (+ phase weights)", group: "consulting" },
   { key: "consultingDisciplines", label: "Consulting — disciplines", group: "consulting" },
   { key: "consultingAssumptions", label: "Consulting — assumptions library", group: "consulting" },
-  { key: "mailboxes", label: "Mailboxes (+ catalog photos account)", group: "integrations" },
-  { key: "recordings", label: "Recordings", group: "integrations" },
   { key: "team", label: "Team & Roles", group: "team" },
   { key: "documentCategories", label: "Document categories", group: "data" },
   { key: "beta", label: "Beta & go-live tools", group: "data" },
@@ -97,24 +95,6 @@ export function cardsIn(group: SettingsSection): SettingsCard[] {
   return SETTINGS_CARDS.filter((c) => c.group === group).map((c) => c.key);
 }
 
-/**
- * Integration cards (Mailboxes, Recordings). Each card's `id` is its anchor,
- * so deep links like `/settings#recordings` land on it — the hash opens the
- * Integrations group (resolveSettingsSection) and scrolls the card into view.
- */
-export const INTEGRATION_CARDS = [
-  { key: "mailboxes", label: "Mailboxes", desc: "Gmail connections — send, receive, calendar, tasks." },
-  { key: "recordings", label: "Recordings", desc: "Where site-visit audio is archived once transcribed." },
-] as const;
-
-export type IntegrationCard = (typeof INTEGRATION_CARDS)[number]["key"];
-
-/** The integration card a URL hash names (`#mailboxes`, `mailboxes`), or null. */
-export function integrationAnchor(hash: string | null | undefined): IntegrationCard | null {
-  const h = (hash || "").replace(/^#/, "");
-  return INTEGRATION_CARDS.some((c) => c.key === h) ? (h as IntegrationCard) : null;
-}
-
 /** The groups a viewer may open, in menu order. `has` answers one permission
  *  (the page passes `(p) => can(p, me.roles)`); empty = the admin-lock card. */
 export function visibleSettingsSections(
@@ -124,8 +104,7 @@ export function visibleSettingsSections(
 }
 
 /**
- * Resolve `?section=` (plus the URL hash, client-side) into the group to show.
- * - An integration-card hash (`#mailboxes`, `#recordings`) opens Integrations.
+ * Resolve `?section=` into the group to show.
  * - Retired keys map through SECTION_ALIASES (`general` → company,
  *   `admin` → team).
  * - Unknown / missing → company; an array takes its first value.
@@ -134,20 +113,18 @@ export function visibleSettingsSections(
  */
 export function resolveSettingsSection(
   param: string | string[] | undefined | null,
-  opts: { hash?: string | null; visible?: readonly SettingsSection[] } = {},
+  opts: { visible?: readonly SettingsSection[] } = {},
 ): SettingsSection {
   const v = Array.isArray(param) ? param[0] : param;
   let key: SettingsSection = "company";
-  if (integrationAnchor(opts.hash)) key = "integrations";
-  else if (v && SECTION_ALIASES[v]) key = SECTION_ALIASES[v];
+  if (v && SECTION_ALIASES[v]) key = SECTION_ALIASES[v];
   else if (SETTINGS_SECTIONS.some((s) => s.key === v)) key = v as SettingsSection;
   const visible = opts.visible;
   if (visible && visible.length && !visible.includes(key)) return visible[0];
   return key;
 }
 
-/** The canonical URL for a group (company is bare `/settings`, as before),
- *  with an optional integration-card anchor. */
-export function settingsHref(group: SettingsSection, anchor?: IntegrationCard): string {
-  return (group === "company" ? "/settings" : `/settings?section=${group}`) + (anchor ? `#${anchor}` : "");
+/** The canonical URL for a group (company is bare `/settings`, as before). */
+export function settingsHref(group: SettingsSection): string {
+  return group === "company" ? "/settings" : `/settings?section=${group}`;
 }

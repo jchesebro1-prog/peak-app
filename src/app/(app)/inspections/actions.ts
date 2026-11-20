@@ -108,8 +108,5 @@ export async function startInspectionRenewalOutreach(
   }
   revalidatePath("/", "layout");
   if (res)
-    redirect(
-      "/inbox?box=sales&folder=drafts&draft=" +
-        encodeURIComponent(res.threadId)
-    );
+    redirect("/quotes?id=" + encodeURIComponent(res.quoteId));
 }

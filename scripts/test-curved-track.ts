@@ -2,7 +2,7 @@
    `npx tsx scripts/test-curved-track.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import { sanitizeTrackSeries, TRACK_ROLE_NAMES, type TrackSeries } from "../src/lib/track-series";
 import { trackQuantities, type TrackConfig } from "../src/lib/track-engine";

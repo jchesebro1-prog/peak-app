@@ -172,8 +172,5 @@ export async function startFlameRenewalOutreach(
   const res = await flameRenewalOutreach(id, { id: user.id, name: user.name });
   revalidatePath("/", "layout");
   if (res)
-    redirect(
-      "/inbox?box=sales&folder=drafts&draft=" +
-        encodeURIComponent(res.threadId)
-    );
+    redirect("/quotes?id=" + encodeURIComponent(res.quoteId));
 }

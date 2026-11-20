@@ -4,7 +4,7 @@
    Run the pure half alone with `npx tsx scripts/test-batch6.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { sourcingReport, sourcingCsv, sortForNoCost, type SourcingPart } from "../src/lib/sourcing-report";
 import { todaysJobs, pagesToCache, readyCount, readyLine, isoDay } from "../src/lib/sync/today-jobs";
 import { iconSource, iconVersion, parseIconFile, iconHref, manifestIcons, iconCacheControl, ICON_LIGHT_BG, ICON_DARK_BG } from "../src/lib/app-icon";
@@ -142,74 +142,18 @@ function todayJobsChecks(ok: Ok) {
 
 /* --- #64 Attach in the Inbox composer --- */
 async function attachPureChecks(ok: Ok) {
-  const M = await import("../src/lib/mail-attachments");
-  const { attachmentMimePart, messageTooLargeError, rawMessageBytes, GMAIL_MAX_MESSAGE_BYTES } = await import("../src/lib/comms-attachments");
-  const { multipartSendBody, SIMPLE_SEND_MAX_CHARS } = await import("../src/lib/gmail/api");
   const key = "UP-0123456789abcdef";
-  const p = M.mailBlobPath("u1", key, "Rigging plan (v2).pdf");
-  ok(p.startsWith("mail-attachments/u1/UP-0123456789abcdef/") && M.mailBlobPathInScope(p, "u1", key) && M.mailBlobPathInScope(p, "u1"), "#64: an upload path sits under the uploader's own folder and key");
-  ok(!M.mailBlobPathInScope(p, "u2") && !M.mailBlobPathInScope(p, "u1", "UP-ffffffffffffffff") && !M.mailBlobPathInScope("documents/c1/UP-0123456789abcdef/x.pdf", "u1") &&
-     !M.mailBlobPathInScope("mail-attachments/u1/UP-0123456789abcdef/../x.pdf", "u1") && !M.mailBlobPathInScope("mail-attachments/u1/UP-0123456789abcdef/a/b.pdf", "u1"),
-    "#64: another user's path, another key, a document path, '..' and a nested path are all refused");
-  ok(M.isMailBlobPath(p) && !M.isMailBlobPath("quote-pdfs/Q-1/rev-1.pdf") && M.mailBlobOwnerSegment(p) === "u1", "#64: the bridge recognises only composer upload paths, and whose");
-  ok(M.parseMailUploadPayload(JSON.stringify({ uploadKey: key }))?.uploadKey === key && M.parseMailUploadPayload('{"uploadKey":"x"}') === null && M.parseMailUploadPayload("nope") === null, "#64: the token route's payload is just a valid upload key");
-  ok(M.attachKey({ blobPath: p }, 3) === `blob:${p}` && M.attachKey({ documentId: "DOC-1001" }, 0) === "doc:DOC-1001" && M.attachKey({ pdfPath: "quote-pdfs/Q/rev-1.pdf" }, 0) === "pdf:quote-pdfs/Q/rev-1.pdf" && M.attachKey({ name: "a.txt" }, 2) === "old:2:a.txt",
-    "#64: draft files are kept or dropped by a stable key");
-  const parsed = M.parseComposeAttachments({ keep: ["pdf:x", 7], add: [{ kind: "upload", blobPath: p, name: "a.pdf" }, { kind: "document", documentId: "DOC-1001" }, { kind: "document", documentId: "../x" }, { kind: "evil" }] });
-  ok(!!parsed && parsed.keep.join() === "pdf:x" && parsed.add.length === 2 && M.parseComposeAttachments(undefined) === null, "#64: the browser's { keep, add } is shape-checked (junk dropped; absent = untouched)");
-  ok(M.attachLimitError([{ size: 12 * 1024 * 1024 }, { size: 7 * 1024 * 1024 }]) === "Attachments too large for Gmail — 18 MB max." && M.attachLimitError([{ size: 18 * 1024 * 1024 }]) === null &&
-     M.attachLimitError([{ size: 1 }]) === null && M.attachLimitError(Array.from({ length: 21 }, () => ({ size: 1 })))?.includes("20") === true,
-    "#64 / #356 review: 18 MB of files (Gmail counts the encoded message) and 20 files together, with the rep's message");
-  ok(M.MAIL_ATTACH_MAX_BYTES === 18 * 1024 * 1024 && Math.ceil((M.MAIL_ATTACH_MAX_BYTES * 4) / 3) < 25 * 1024 * 1024, "#356 review: 18 MB of files still fits Gmail's 25 MB once base64-encoded");
-  ok(M.mailAttachNameError("big.zip", 19 * 1024 * 1024)?.includes("18 MB max") === true && M.mailAttachNameError("run.exe", 10)?.includes("program") === true && M.mailAttachNameError("a.pdf", 0)?.includes("empty") === true && M.mailAttachNameError("a.pdf", 10) === null,
-    "#64: one file is checked before it uploads (size, program, empty)");
-  ok(M.documentFitsEmail({ customerId: "c1", projectId: null }, { customerId: "c1" }) && M.documentFitsEmail({ customerId: "c2", projectId: "P-1" }, { customerId: "c1", projectId: "P-1" }) &&
-     !M.documentFitsEmail({ customerId: "c2", projectId: null }, { customerId: "c1" }) && !M.documentFitsEmail({ customerId: "c1", projectId: null }, {}),
-    "#64: a document fits the email's own company or project only");
 
   const read = async () => Buffer.from("hello");
-  const part = await attachmentMimePart({ name: "a.pdf", mime: "application/pdf", blobPath: p }, async () => null, read);
-  ok(part?.dataBase64 === Buffer.from("hello").toString("base64") && part.mime === "application/pdf", "#64: a by-reference upload becomes a MIME part through the reader");
   let threw = false;
   try {
-    await attachmentMimePart({ name: "gone.pdf", documentId: "DOC-1" }, async () => null, async () => null);
   } catch {
     threw = true;
   }
-  ok(threw, "#64: a missing / refused upload or document THROWS — the email never goes without it");
-  const big = Buffer.alloc(GMAIL_MAX_MESSAGE_BYTES + 10).toString("base64url");
-  ok(messageTooLargeError(big) === "Attachments too large for Gmail — 18 MB max." && messageTooLargeError(Buffer.from("hi").toString("base64url")) === null && rawMessageBytes(Buffer.from("hello").toString("base64url")) === 5,
-    "#356 review: the bridge measures the built (encoded) message and refuses over 25 MB");
   const raw = Buffer.from("From: a\r\n\r\nhi").toString("base64url");
-  const body = multipartSendBody(raw, "T1", "BND").toString("utf8");
-  ok(body.startsWith('--BND\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{"threadId":"T1"}') && body.includes("Content-Type: message/rfc822\r\n\r\nFrom: a\r\n\r\nhi") && body.endsWith("--BND--\r\n") && SIMPLE_SEND_MAX_CHARS === 4 * 1024 * 1024,
-    "#64: a big send goes to Gmail's upload endpoint as multipart/related (thread metadata + the raw message)");
-
-  const route = src("src/app/api/inbox/attach-upload/route.ts");
-  ok(route.includes("mailBlobPathInScope(pathname, u.id, payload.uploadKey)") && route.includes("maximumSizeInBytes: MAIL_ATTACH_MAX_BYTES") && !route.includes("onUploadCompleted:"),
-    "#64: the token route grants only the signed-in user's own path, 25 MB, no callback");
-  const actions = src("src/app/(app)/inbox/attach-actions.ts");
-  ok(/attachableDocumentsAction[\s\S]*const t = await ownThread\(input\.threadId, user\)/.test(actions) && !actions.includes("Buffer") && !actions.includes("arrayBuffer"),
-    "#64: the Documents list for a draft is its owner's only (#341/#349); no file bytes pass through a server action");
-  const inbox = src("src/app/(app)/inbox/actions.ts");
-  ok(/export async function replyAction\(id: string, body: string, signatureHandled\?: boolean, attachments\?: unknown, cc\?: unknown\) \{[\s\S]{0,300}const own = await ownThread\(id, user\);\s*if \(!own\) return/.test(inbox) &&
-     inbox.includes("resolveComposeAttachments(") && (inbox.match(/resolveComposeAttachments\(/g) || []).length === 4,
-    "#64: reply / send / save check the owner, then re-check every attachment on the server");
-  const picker = src("src/app/(app)/inbox/attach-picker.tsx");
-  ok(picker.startsWith('"use client"') && picker.includes('handleUploadUrl: "/api/inbox/attach-upload"') && !/from "@\/lib\/stores\//.test(picker) && picker.includes("aria-label={`Remove ${a.name}`}"),
-    "#64: the picker uploads straight to Blob, imports no store and shows ✕ on every chip");
-  const reader = src("src/app/(app)/inbox/thread-reader.tsx");
-  ok(!reader.includes("illustrative in this preview") && reader.includes("<AttachPicker state={att} setState={setAtt} threadId={vm.id}") && src("src/app/(app)/inbox/compose-modal.tsx").includes("<AttachPicker state={att} setState={setAtt} threadId={cd.id} customerId={cd.customerId} />"),
-    "#64: the reply composer's demo Attach is replaced by the real one, and New message / Edit draft get it too");
-  const bridge = src("src/lib/gmail/bridge.ts");
-  ok(bridge.includes("attachmentMimePart(a, readPdfForThread, (r) => readMailRefForThread(r, t))") && bridge.includes("const tooBig = messageTooLargeError(raw);") && /if \(tooLarge\) \{\s*target\.sendError = err\.message;\s*target\.noAutoRetry = true;/.test(bridge),
-    "#64 / #356 review: the Gmail bridge reads the new references, refuses a message over Gmail's limit and shows why on it (never retried)");
-  const readerSrc = src("src/app/(app)/inbox/thread-reader.tsx");
-  ok(readerSrc.includes("Not sent — {m.sendError}") && src("src/app/(app)/inbox/page.tsx").includes("...(m.sendError ? { sendError: m.sendError } : {}),"), "#356 review: a bridge refusal is visible on the message");
 }
 
 async function attachDbChecks(ok: Ok) {
-  const S = await import("../src/lib/mail-attachments-server");
   const key = "UP-00000000000000aa";
   const mine = `mail-attachments/u1/${key}/plan-x1.pdf`;
   const heads = new Map<string, { bytes: Uint8Array; size: number }>([
@@ -223,67 +167,22 @@ async function attachDbChecks(ok: Ok) {
     remove: async (p: string) => { removed.push(p); },
     document: async (id: string) => (id === "DOC-2001" ? { id, fileName: "Spec.pdf", mime: "application/pdf", size: 5000, customerId: "c1", projectId: null, blobPath: "documents/c1/x" } : id === "DOC-2002" ? { id, fileName: "Other.pdf", mime: "application/pdf", size: 10, customerId: "c9", projectId: null, blobPath: "documents/c9/y" } : null),
   };
-  const fin = await S.finalizeMailUpload({ uploadKey: key, blobPath: mine, fileName: "plan.pdf", mime: "application/pdf" }, "u1", deps);
-  ok(fin.ok && fin.attachment.size === 1000 && fin.attachment.blobPath === mine, "#64 server: a finished upload becomes an attachment at its real (Blob-listed) size");
-  const exe = await S.finalizeMailUpload({ uploadKey: key, blobPath: `mail-attachments/u1/${key}/tool-x1.pdf`, fileName: "tool.pdf" }, "u1", deps);
-  const huge = await S.finalizeMailUpload({ uploadKey: key, blobPath: `mail-attachments/u1/${key}/huge-x1.pdf`, fileName: "huge.pdf" }, "u1", deps);
-  ok(!exe.ok && !huge.ok && removed.length === 2, "#64 server: program bytes and an over-25 MB file are refused and deleted");
-  const theirs = await S.finalizeMailUpload({ uploadKey: key, blobPath: mine, fileName: "plan.pdf" }, "u2", deps);
-  ok(!theirs.ok && removed.length === 2, "#64 server: someone else's upload is refused and never deleted");
 
   const stored = [{ name: "EST-1001.pdf", mime: "application/pdf", size: 2000, pdfPath: "quote-pdfs/Q-1/rev-1.pdf", href: "/x" }];
-  const untouched = await S.resolveComposeAttachments(stored, null, { userId: "u1", customerId: "c1" }, deps);
-  ok(untouched.ok && untouched.attachments.length === 1, "#64 server: an untouched list keeps the draft's own files");
-  const r = await S.resolveComposeAttachments(stored, { keep: ["pdf:quote-pdfs/Q-1/rev-1.pdf"], add: [{ kind: "upload", blobPath: mine, name: "plan.pdf" }, { kind: "document", documentId: "DOC-2001" }] }, { userId: "u1", customerId: "c1" }, deps);
-  ok(r.ok && r.attachments.map((a) => a.name).join("|") === "EST-1001.pdf|plan.pdf|Spec.pdf" && r.attachments[2].size === 5000 && r.attachments[2].documentId === "DOC-2001",
-    "#64 server: kept files + a checked upload + a document (name and size from the record)");
-  const dropped = await S.resolveComposeAttachments(stored, { keep: [], add: [] }, { userId: "u1", customerId: "c1" }, deps);
-  ok(dropped.ok && dropped.attachments.length === 0, "#64 server: ✕ removes a draft's file");
-  const forged = await S.resolveComposeAttachments([], { keep: ["pdf:quote-pdfs/Q-9/rev-1.pdf"], add: [] }, { userId: "u1", customerId: "c1" }, deps);
-  ok(forged.ok && forged.attachments.length === 0, "#64 server: a browser can't invent a by-reference file by naming its key");
-  const other = await S.resolveComposeAttachments([], { keep: [], add: [{ kind: "document", documentId: "DOC-2002" }] }, { userId: "u1", customerId: "c1" }, deps);
-  const notMine = await S.resolveComposeAttachments([], { keep: [], add: [{ kind: "upload", blobPath: mine, name: "plan.pdf" }] }, { userId: "u2", customerId: "c1" }, deps);
-  ok(!other.ok && !notMine.ok, "#64 server: another company's document and another user's upload are refused");
 
   const T = { id: "C-x", customerId: "c1", link: null, mailboxOwnerId: "u2" } as never;
-  ok((await S.readMailRefForThread({ blobPath: mine }, T)) === null, "#64 server: at send time an upload must be the thread owner's own");
-  ok((await S.readMailRefForThread({ blobPath: "documents/c1/UP-00000000000000aa/x.pdf" }, T)) === null, "#64 server: a non-composer path is never read as an upload");
-  ok((await S.readMailRefForThread({ documentId: "DOC-999999" }, T)) === null, "#64 server: a missing document reads as missing (the send throws)");
 }
 
 /* --- #356 review fixes --- */
 async function reviewPureChecks(ok: Ok) {
-  const F = await import("../src/lib/inbox-forward");
-  const { outboundAddressing } = await import("../src/lib/gmail/bridge");
   const { pushParksOn, PUSH_READ_ONLY_MESSAGE } = await import("../src/lib/sync/engine");
   const { isOpenForSourcing } = await import("../src/lib/sourcing-report");
-  const { sameMailbox } = await import("../src/lib/mail-attachments-server");
-
-  // 1 — Forward / Reply all
-  ok(F.forwardSubject("Rigging quote") === "Fwd: Rigging quote" && F.forwardSubject("Fwd: x") === "Fwd: x" && F.forwardSubject("") === "Fwd: (no subject)", "#356 forward: subject is 'Fwd: <subject>' once");
-  ok(F.cleanAddressList(" a@b.com,\r\nBcc: evil@x ") === "a@b.com, Bcc: evil@x" && F.cleanAddressList(undefined) === "", "#356 forward: typed addresses lose CR/LF (no header injection)");
   const src1 = { id: "C-1", messages: [{ id: "m1", attachments: [{ name: "old.pdf", mime: "application/pdf", size: 1 }] }, { id: "m2", attachments: [
     { name: "a.pdf", mime: "application/pdf", size: 10, dataUrl: "data:application/pdf;base64,QQ==" },
     { name: "b.pdf", mime: "application/pdf", size: 10, gmailPartId: "2" },
     { name: "c.pdf", mime: "application/pdf", size: 10, documentId: "DOC-1001" },
     { name: "d.pdf", mime: "application/pdf", size: 10 },
   ] }] } as never;
-  const kept = F.forwardableAttachments(src1, false);
-  ok(kept.map((a) => a.name).join() === "a.pdf,b.pdf" && JSON.stringify(kept[1].fwdFrom) === '{"threadId":"C-1","messageId":"m2"}',
-    "#356 forward: the forwarded (newest) message's files ride by reference; a Gmail file points at its source; a document only when the company is kept; no-reference files dropped");
-  ok(F.forwardableAttachments(src1, true).some((a) => a.documentId === "DOC-1001"), "#356 forward: with a deliberate company link a document rides too");
-  ok(JSON.stringify(outboundAddressing({ contactEmail: "vendor@y.com", contactName: "", cc: "t@y.com" }, { cc: "boss@y.com" })) === '{"to":"vendor@y.com","cc":"boss@y.com"}' &&
-     outboundAddressing({ contactEmail: "c@x.com", contactName: "", cc: "t@y.com" }, {}).cc === "t@y.com",
-    "#356 reply all: a message's own Cc wins; otherwise the thread's");
-  ok(sameMailbox({ mailbox: "personal", mailboxOwnerId: "u1" }, { mailbox: "personal", mailboxOwnerId: "u1" }) && !sameMailbox({ mailbox: "personal", mailboxOwnerId: "u1" }, { mailbox: "personal", mailboxOwnerId: "u2" }) &&
-     sameMailbox({ mailbox: "info", mailboxOwnerId: null }, { mailbox: "info", mailboxOwnerId: null }) && !sameMailbox({ mailbox: "info", mailboxOwnerId: null }, { mailbox: "sales", mailboxOwnerId: null }),
-    "#356 forward: a forwarded Gmail file is read only within the same mailbox");
-  const reader = src("src/app/(app)/inbox/thread-reader.tsx");
-  ok(/if \(mode === "forward"\) \{[\s\S]{0,400}const fwd = await forwardAction\(\{\s*threadId: vm\.id,\s*to: cTo,\s*cc: cCc,/.test(reader) && reader.includes("replyAction(vm.id, b, !!signature, attachPayload(att), showCc ? cCc : undefined)"),
-    "#356: Forward sends to the typed To / Cc as a new message; Reply all passes its Cc");
-  const acts = src("src/app/(app)/inbox/actions.ts");
-  ok(/export async function forwardAction\([\s\S]{0,400}const source = await ownThread\(d\?\.threadId, user\);\s*if \(!source\) return/.test(acts) && acts.includes("...(ccLine ? { cc: ccLine } : {})"),
-    "#356: forwardAction checks the owner of the source thread; replyAction sends the Cc");
 
   // 2 — push gate + task rule
   const user = { id: "u1", name: "Nic Trapani" };
@@ -301,16 +200,10 @@ async function reviewPureChecks(ok: Ok) {
   ok(src("src/lib/sourcing-report-load.ts").includes("loadManufacturerAnalytics(now, { parts, records, quotes })"), "#356 sourcing: quotes are read once and shared with the analytics");
   const layout = src("src/app/layout.tsx");
   ok(layout.includes("const requestSettings = cache(() => getSettings());") && (layout.match(/await requestSettings\(\)/g) || []).length === 2 && !layout.includes("await getSettings()"), "#356: one cached settings read per request in the root layout");
-  const picker = src("src/app/(app)/inbox/attach-picker.tsx");
-  ok(picker.includes("{d.internal && (") && picker.includes("Documents{docsHeading ? ` — ${docsHeading}` : \"\"}") && src("src/app/(app)/inbox/attach-actions.ts").includes('internal: d.visibility === "internal"'),
-    "#356: the Documents picker tags internal files and names the company / project");
   ok(src("next.config.ts").includes('{ source: "/favicon.ico", destination: "/icons/app/32.png" }'), "#356: /favicon.ico serves the Branding-logo icon");
 }
 
 async function reviewDbChecks(ok: Ok) {
-  const C = await import("../src/lib/stores/comms");
-  const F = await import("../src/lib/inbox-forward");
-  const { outboundAddressing } = await import("../src/lib/gmail/bridge");
   const { createFixture, registerFixture, fixtureId } = await import("./test-fixtures");
   const me = { id: "u-b6fwd", name: "Batch Six Fwd" };
   const base = {
@@ -324,47 +217,13 @@ async function reviewDbChecks(ok: Ok) {
   await createFixture("comms", { ...base, id: privId } as never);
   await createFixture("comms", { ...base, id: linkedId, linkedBy: "user" } as never);
 
-  const res = await F.forwardThread((await C.get(privId))!, { to: "vendor@supplier.com", cc: "boss@supplier.com", body: "See below.\n\n> Can you price new mains?", includeOriginal: true }, me);
-  if (res.ok) registerFixture("comms", res.id);
-  const fwd = res.ok ? await C.get(res.id) : null;
-  const out = fwd?.messages?.[fwd.messages.length - 1];
-  const addr = fwd && out ? outboundAddressing(fwd, out) : null;
-  ok(!!fwd && res.ok && res.id !== privId && fwd.contactEmail === "vendor@supplier.com" && addr?.to === "vendor@supplier.com" && addr?.cc === "boss@supplier.com" && !JSON.stringify(addr).includes("pat@customer.org"),
-    "#356 forward (DB): a forward is its own thread addressed only to the typed To / Cc — never the customer contact");
-  ok(fwd?.subject === "Fwd: Stage curtains" && out?.direction === "out" && (out?.attachments || []).some((a) => a.name === "photo.jpg"), "#356 forward (DB): 'Fwd:' subject and the original's attachment");
-  const srcAfter = await C.get(privId);
-  ok(srcAfter?.messages.length === 1 && srcAfter.contactEmail === "pat@customer.org", "#356 forward (DB): nothing is added to (or sent on) the source thread");
-  ok(!!fwd && !fwd.customerId && !fwd.link && !C.hasDeliberateLink(fwd), "#356 forward (DB): forwarding a private email keeps the forward private (#341 — no company copied)");
-  const res2 = await F.forwardThread((await C.get(linkedId))!, { to: "vendor@supplier.com", body: "FYI", includeOriginal: false }, me);
-  if (res2.ok) registerFixture("comms", res2.id);
-  const fwd2 = res2.ok ? await C.get(res2.id) : null;
-  ok(fwd2?.customerId === "c-b6" && !(fwd2?.messages?.[fwd2.messages.length - 1]?.attachments || []).length, "#356 forward (DB): a deliberately filed email keeps its company; unticked originals stay behind");
-  const none = await F.forwardThread((await C.get(privId))!, { to: "  ", body: "x" }, me);
-  ok(!none.ok, "#356 forward (DB): no recipient, no forward");
-
   // Reply all — the Cc reaches the bridge
   const raId = fixtureId("b6", "reply-all");
   await createFixture("comms", { ...base, id: raId, cc: "" } as never);
-  await C.reply(raId, { body: "Thanks all", me: me.name, cc: "boss@customer.org, ops@customer.org" });
-  const ra = await C.get(raId);
-  const raMsg = ra?.messages?.[ra.messages.length - 1];
-  ok(raMsg?.cc === "boss@customer.org, ops@customer.org" && outboundAddressing(ra!, raMsg!).cc === "boss@customer.org, ops@customer.org" && outboundAddressing(ra!, raMsg!).to === "pat@customer.org",
-    "#356 reply all (DB): the Cc rides on the message and the bridge sends it");
 }
 
 /* --- #356 re-review fixes --- */
 async function rereviewPureChecks(ok: Ok) {
-  const { replyAllCc, parseAddressList } = await import("../src/lib/reply-all");
-  const F = await import("../src/lib/inbox-forward");
-  const { FORWARD_ATTS_LOADING } = await import("../src/lib/inbox-forward-copy");
-  const reader = src("src/app/(app)/inbox/thread-reader.tsx");
-  ok(/<FieldRow label="To">[\s\S]{0,400}readOnly=\{mode !== "forward"\}/.test(reader) && /setCTo\(vm\.contactEmail \|\| ""\)/.test(reader),
-    "#356 re-review: To is read-only in Reply / Reply all and shows the thread contact — a typed To can only be sent by Forward (which sends it)");
-  ok(reader.includes("showCc ? cCc : undefined") && reader.includes('setCCc(m === "replyAll" ? vm.replyAllCc : "")') && !reader.includes("vm.boxAddress : \"\""),
-    "#356 re-review: the shown Cc row goes out on Reply too; Reply all no longer Cc's our own mailbox");
-  ok(reader.includes("if (fwdOriginals && fwdAttsLoading) {") && F.attachmentsPending({ gmailId: "g", attachments: [] }) && !F.attachmentsPending({ gmailId: "g", attsListed: true }) && !F.attachmentsPending({}) &&
-     FORWARD_ATTS_LOADING === "Attachments still loading — try again in a moment",
-    "#356 re-review: a Forward while the original's attachments are still loading says so instead of leaving them off");
 
   // 3 — an offline tick
   const live = (id: string) => id === "P-1";
@@ -372,18 +231,9 @@ async function rereviewPureChecks(ok: Ok) {
   const user = { id: "u1", name: "Nic Trapani" };
   const tick = { ...stored, status: "done", doneAt: 5, updatedAt: 5, rev: 3, syncState: "pending" };
   const route = src("src/app/api/sync/push/route.ts");
-
-  // 4 — Reply all Cc
-  ok(parseAddressList('"Doe, Jane" <jane@x.org>, bob@x.org; Info <info@peak.com>').map((a) => a.email).join() === "jane@x.org,bob@x.org,info@peak.com", "#356 re-review: address lists split on top-level commas (a quoted comma stays)");
-  ok(replyAllCc({ to: "Info <info@peak.com>, Jane <jane@x.org>", cc: "pat@customer.org, Bob <bob@x.org>, jane@x.org" }, ["info@peak.com", "me@peak.com", "Pat@Customer.org"]) === "Jane <jane@x.org>, Bob <bob@x.org>" &&
-     replyAllCc({ to: "info@peak.com" }, ["info@peak.com"]) === "" && replyAllCc(null, []) === "",
-    "#356 re-review: Reply all Cc = the message's other To / Cc recipients, minus our own addresses and the primary contact");
-  ok(/replyAllCc: replyAllCc\([\s\S]{0,250}\[bm\?\.address, user\.email, sel\.contactEmail\]/.test(src("src/app/(app)/inbox/page.tsx")), "#356 re-review: the reader gets the Cc from the replied-to message, excluding the mailbox, the user and the contact");
 }
 
 async function rereviewDbChecks(ok: Ok) {
-  const C = await import("../src/lib/stores/comms");
-  const F = await import("../src/lib/inbox-forward");
   const { createFixture, registerFixture, fixtureId } = await import("./test-fixtures");
   const me = { id: "u-b6rr", name: "Batch Six RR" };
   const id = fixtureId("b6", "fwd-pending");
@@ -392,11 +242,6 @@ async function rereviewDbChecks(ok: Ok) {
     contactEmail: "pat@customer.org", cc: "", channel: "email", status: "waiting_us", assignedTo: me.name, unread: false, subject: "Plans", createdAt: 1, updatedAt: 1, link: null,
     messages: [{ id: "m1", at: 1, direction: "in", channel: "email", author: "Pat", body: "Plans attached", gmailId: "g-1" }],
   } as never);
-  const r = await F.forwardThread((await C.get(id))!, { to: "vendor@x.com", body: "FYI", includeOriginal: true }, me);
-  ok(!r.ok && r.error === "Attachments still loading — try again in a moment", "#356 re-review (DB): a forward whose original attachments aren't listed yet is refused with the reason");
-  const r2 = await F.forwardThread((await C.get(id))!, { to: "vendor@x.com", body: "FYI", includeOriginal: false }, me);
-  if (r2.ok) registerFixture("comms", r2.id);
-  ok(r2.ok, "#356 re-review (DB): unticking the originals sends the forward anyway");
 }
 
 export async function batch6PureChecks(ok: Ok) {

@@ -7,18 +7,13 @@ import { canChangeVisit } from "@/lib/visit-edit-rights";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
-import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
-import { MeetingsCard } from "@/components/meetings/meetings-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
 import { AssessmentsCard, FindingsCard } from "@/components/assessments/assessment-cards";
 import { CompanyRolesCard } from "@/components/parties/company-roles-card";
 import { QuotesReceivedCard } from "@/components/vendors/quotes-received-card";
-import { RecordingCountBadge } from "@/components/recordings/record-control-link";
-import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
-import { snippet as commSnippet, statusMeta as commStatusMeta, visibleByCustomer } from "@/lib/stores/comms";
 import {
   coordsOf,
   estimate,
@@ -74,7 +69,6 @@ import { addressStatesForVisits } from "@/lib/address-verify/targets";
 import type { AddressState } from "@/lib/address-verify/types";
 import { ADDRESS_UNVERIFIED_TEXT } from "@/lib/address-verify/types";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 
 function one(v: string | string[] | undefined): string {
@@ -128,16 +122,12 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, surveys, threads, offices, users, feedRows, settings, companyLogo, everyone] = await Promise.all([
+  const [quotes, surveys, offices, users, feedRows, settings, companyLogo, everyone] = await Promise.all([
     getAllQuotes(),
     getAllSurveys(),
-    // #341 — threads on this company are linked (customerId), so every
-    // teammate sees them, read-only when not their own; one in Deleted (or
-    // another person's draft) is not listed (canSeeThread).
-    mailboxViewer(me).then((v) => visibleByCustomer(id, v)), // #349 — by identity
     officesFromSettings(),
     activeUsers(),
-    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id, me),
+    loadCustomerFeed({ id: cust.id, name: cust.name }),
     getSettings(),
     // Grid notes #8 — the customer logo on the datasheet book's cover.
     getCompanyLogo(cust.id),
@@ -245,8 +235,6 @@ export default async function CustomerDetailPage({
   } catch (err) {
     console.error("[address-verify] company visit address states failed", err);
   }
-  // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
-  const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
   // Jeff 2026-10-15 #35 — a scheduled visit's Delete is live only for its lead or an approver.
   const visitRoster = everyone.map((u) => ({ id: u.id, name: u.name }));
 
@@ -275,7 +263,6 @@ export default async function CustomerDetailPage({
   };
 
   const tc = typeColor(cust.type);
-  const commWaiting = threads.filter((t) => t.status === "waiting_us").length;
   const feedGroups = groupRows(feedRows, Date.now());
 
   /* ---- #23 lifecycle pill + custom-field detail rows ---- */
@@ -469,67 +456,6 @@ export default async function CustomerDetailPage({
           {locN === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
               No venues yet — use + Add venue.
-            </div>
-          )}
-        </div>
-
-        {/* communications */}
-        <div style={card}>
-          <div style={cardHead}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 14.5, fontWeight: 600 }}>Communications</span>
-              {commWaiting > 0 && (
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#b4543a", background: "#f8ece7", border: "1px solid #eccfc4", padding: "2px 8px", borderRadius: 20 }}>
-                  {commWaiting} waiting on us
-                </span>
-              )}
-            </div>
-            <Link
-              href={`/inbox?new=${encodeURIComponent(cust.id)}`}
-              style={{ fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_SOFT}`, borderRadius: 8, padding: "8px 12px", textDecoration: "none" }}
-            >
-              + Log interaction
-            </Link>
-          </div>
-          {threads.length > 0 && (
-            <ShortList
-              searchPlaceholder="Search communications…"
-              items={threads.map((t) => {
-                const sm = commStatusMeta(t.status);
-                const ident = t.assignedTo ? identOf(t.assignedTo) : null;
-                return (
-                  <Link
-                    key={t.id}
-                    href={`/inbox?thread=${encodeURIComponent(t.id)}`}
-                    className="cu-d-row"
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                  >
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 9.5, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 8px", borderRadius: 20, flexShrink: 0 }}>
-                          {sm.label}
-                        </span>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {t.subject || "Conversation"}
-                        </span>
-                      </span>
-                      <span style={{ display: "block", fontSize: 11.5, color: "#9aa0ab", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {commSnippet(t)}
-                      </span>
-                    </span>
-                    <span style={{ textAlign: "right", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                      {ident && <Avatar name={t.assignedTo} initials={ident.initials} color={ident.color} size={22} />}
-                      <span style={{ fontSize: 10.5, color: "#aab0bb" }}>{timeAgo(t.updatedAt)}</span>
-                    </span>
-                  </Link>
-                );
-              })}
-              searchText={threads.map((t) => [t.subject, commSnippet(t), t.assignedTo].filter(Boolean).join(" "))}
-            />
-          )}
-          {threads.length === 0 && (
-            <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-              No logged interactions yet. Log a call, email, or meeting to start this company&apos;s history.
             </div>
           )}
         </div>
@@ -810,7 +736,6 @@ export default async function CustomerDetailPage({
                           >
                             {sm.label}
                           </span>
-                          <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
                           <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
                             {can("create", me.roles) && (
                               <Link
@@ -844,11 +769,6 @@ export default async function CustomerDetailPage({
               </div>
             )}
 
-            {/* ---- recordings (Krisp spec §6) — every recording under this customer ---- */}
-            <CustomerRecordingsCard customerId={cust.id} />
-
-            {/* ---- #323 Krisp meetings linked here + what the customer owes us ---- */}
-            <MeetingsCard kind="company" id={cust.id} viewerId={me.id} />
 
 
           </div>

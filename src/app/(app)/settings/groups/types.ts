@@ -10,10 +10,6 @@ import type { Pipelines } from "@/lib/pipelines";
 import type { DocumentCategory } from "@/lib/document-categories";
 import type { ReviewLimits } from "@/lib/review-limits";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
-import type { AssistSettings } from "@/lib/assist/types";
-import type { AssistKeyInfo } from "@/lib/assist/config";
-import type { AskReport, AssistReport, BriefReport, FilingReport, VendorPdfReport } from "@/lib/assist/report";
-import type { SenderRuleRowVM } from "@/lib/inbox-org/rule-list";
 
 export type UserVM = {
   id: string;
@@ -45,46 +41,6 @@ export type OfficeVM = {
   quoteDefault?: boolean;
 };
 
-export type MailboxVM = {
-  key: string;
-  label: string;
-  kind: "personal" | "shared";
-  desc: string;
-  connected: boolean;
-  address: string | null;
-  connectedBy: string | null;
-  initialImportDone: boolean;
-  lastSyncAt: number | null;
-  /** Grant predates the gmail.modify scope (D74) — two-way archive stays off
-   *  for this mailbox until it's reconnected. */
-  needsReconnect: boolean;
-  /** Calendar scope granted (D77) — dashboard calendar + site-visit writes. */
-  calendarOn: boolean;
-  /** Google Tasks scope granted (D146) — Home Queue mirrored into a "Peak"
-   *  Google Tasks list, two-way for assignments. */
-  tasksOn: boolean;
-};
-
-export type GmailVM = { enabled: boolean; mailboxes: MailboxVM[]; redirectUri: string; redirectWarning: string | null };
-
-/** Recordings → Drive archive (Krisp recordings spec §1.3 / §5.1). */
-export type RecordingsVM = {
-  archiveMailbox: string | null;
-  rootFolderCached: boolean;
-  customerFolders: number;
-  lastRun: { at: number; archived: number; failed: number; skipped: string | null } | null;
-  betaUsers: string[];
-  /** Every connected mailbox — the picklist; `driveOn` = grant carries drive.file. */
-  mailboxes: { key: string; address: string; connectedBy: string; driveOn: boolean }[];
-};
-
-/** #283 — Catalog photos (Google Drive) account picker. */
-export type CatalogPhotosVM = {
-  mailbox: string | null;
-  /** Every connected mailbox; `readOn` = grant carries drive.readonly. */
-  mailboxes: { key: string; address: string; connectedBy: string; readOn: boolean }[];
-};
-
 export type CompanySettingsVM = {
   companyName: string;
   website: string;
@@ -99,51 +55,10 @@ export type CompanySettingsVM = {
   dashboardDefaults: DashboardLayout;
 };
 
-/** #334 — Settings → Data & Tools → Beta → Assist pilot (loaded only for an admin viewing that group). */
-export type AssistVM = {
-  settings: AssistSettings;
-  status: string;
-  /** D881 — where the Claude key comes from; carries last4, never the key. */
-  keyInfo: AssistKeyInfo;
-  /** YYYY-MM (America/Chicago) the report covers. */
-  month: string;
-  /** Month picker options, current month first. */
-  months: string[];
-  spendUsd: number;
-  report: AssistReport;
-  /** AI daily brief (spec §6) — briefs built, pre-drafts made / used, nudges. */
-  brief: BriefReport;
-  /** Ask AI (spec 2026-10-13 §6) — questions, models, Try harder, cards, web searches, cost. */
-  ask: AskReport;
-  /** Ask AI's two models in effect (env overrides applied) — the card's model hint. */
-  askModels: { ask: string; askHard: string };
-  /** #348 slice 5 — Read the PDF: reads, Try harder, saved / replaced, line accuracy at first save, math flags, cost. */
-  vendorPdf: VendorPdfReport;
-  /** Read the PDF's two models in effect (env overrides applied) — the card's model hint. */
-  vendorPdfModels: { read: string; hard: string };
-  /** #335 Inbox organization — the month's filing / court / promise rows,
-   *  the company-wide sender rules and the own-domain override. */
-  org: {
-    filing: FilingReport;
-    /** rule suggestions "Organize my inbox" made this month, by source (the
-     *  filing log leaves them out so a mass cleanup can't evict its entries) */
-    cleanupSuggested: Record<string, number>;
-    companyRules: SenderRuleRowVM[];
-    ownDomainOverride: string;
-    /** the domains in effect now (Peak's own + the override's, else the team's) */
-    ownDomains: string[];
-  };
-};
-
 /** Everything page.tsx loads for the Settings client. */
 export type SettingsData = {
   meId: string;
   meName: string;
-  gmail: GmailVM;
-  recordings: RecordingsVM;
-  /** #334 — null unless the viewer is an admin on the Data & Tools group. */
-  assist: AssistVM | null;
-  catalogPhotos: CatalogPhotosVM;
   settings: CompanySettingsVM;
   intakeCatalog: Record<string, string[]>;
   visitReasons: string[];

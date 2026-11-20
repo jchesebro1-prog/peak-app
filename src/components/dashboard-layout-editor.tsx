@@ -12,9 +12,6 @@ import { saveDashboardOverrideAction } from "@/app/(app)/account/actions";
 const LABELS: Record<DashboardWidgetKey, string> = {
   stats: "Stat tiles",
   pipeline: "Pipeline",
-  calendar: "Calendar",
-  queue: "My queue",
-  inbox: "Inbox",
   leads: "My leads",
   designs: "My designs",
   surveys: "Venue assessments",

@@ -5,8 +5,6 @@ import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { allVisits } from "@/lib/stores/site-visits";
-import { getAll as allComms, isAssignedTo, waitHours, unreadCountFrom } from "@/lib/stores/comms";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { getPrefs } from "@/lib/stores/notif-prefs";
 import { countOpenImmediateFindings } from "@/lib/stores/findings";
 import { unseenCustomerDocuments } from "@/lib/stores/documents";
@@ -81,14 +79,12 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     designs,
     inspections,
     surveys,
-    comms,
     visits,
     leadFollowUps,
     renewalRows,
     prefs,
     unseenDocs,
     immediateFindingCount,
-    viewer,
   ] = await Promise.all([
     allQuotes(),
     // Fix wave 3 (I3): the badge needs review / owner only — a plain record
@@ -97,7 +93,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     listDesignRecords(),
     allInspections(),
     allSurveys(),
-    allComms(),
     allVisits(),
     followUps({ unownedOrMine: true, me }),
     renewals({ dueOnly: true }),
@@ -109,8 +104,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       console.error("[assessments] nav badge: findings count failed", error);
       return 0;
     }),
-    // #349 — mailbox / assignment checks are by identity (no id: owns nothing)
-    mailboxViewer({ id: meId || "", name: me }),
   ]);
   // Everything below is derived from the arrays already fetched above — no
   // extra table scans. Previously these re-fetched inspections+repairs
@@ -118,7 +111,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
   // serial round-trip for unread after the parallel batch. navData runs on
   // every app page, so this is per-navigation overhead removed.
   const leadCount = leadFollowUps.length;
-  const inboxUnread = unreadCountFrom(comms, viewer);
 
   const approvalBell = quoteApprovalBell(quotes, me, canApprove);
   const reviewDesigns = designs.filter(
@@ -135,20 +127,8 @@ export async function navData(me: string, canApprove = false, meId: string | nul
   );
   const openVisits = visits.filter((v) => v.stage === "requested" || v.stage === "open");
   const myVisitsToSchedule = visits.filter((v) => v.stage === "claimed" && v.assignedTo === me);
-  const waitingComms = comms
-    // archived (Peak or Gmail side) stops nagging the bell too (S14)
-    .filter(
-      (t) =>
-        t.status === "waiting_us" &&
-        isAssignedTo(t, viewer) && // #349 — by identity
-        !t.deleted && // #341 — never a thread in Deleted
-        !t.archived &&
-        t.gmailInboxed !== false
-    )
-    .sort((a, b) => waitHours(b) - waitHours(a));
 
   const counts: NavCounts = {
-    inbox: inboxUnread,
     leads: leadCount,
     reviews: approvalBell.needs.length + reviewDesigns.length,
     flametests: renewalRows.length,
@@ -164,19 +144,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     groups.push({ key, label, items });
   };
 
-  push(
-    "comms",
-    "Customers waiting on a reply",
-    waitingComms.map((t) => ({
-      id: t.id,
-      title: t.customer || t.contactName || t.contactEmail || t.subject,
-      sub: `${t.subject} · waiting ${Math.round(waitHours(t))}h`,
-      // #341 — open the thread itself (read-only when it isn't in my mailbox)
-      href: `/inbox?thread=${encodeURIComponent(t.id)}`,
-      letter: "@",
-      color: "#b4543a",
-    }))
-  );
   push("reviews", "Needs your approval", [
     ...approvalBell.needs,
     ...reviewDesigns.map((d) => ({

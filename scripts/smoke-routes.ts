@@ -110,7 +110,6 @@ const ROUTES = [
   "/settings?section=sales",
   "/settings?section=field",
   "/settings?section=consulting",
-  "/settings?section=integrations",
   "/settings?section=team",
   "/settings?section=data",
   "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
@@ -121,12 +120,6 @@ const ROUTES = [
   "/design/specs/library/records/new", // Spec records (Task 10) — the new-record editor
   "/design/specs/templates", // Specs module (#205) — the template list
   "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
-  "/inbox",
-  "/inbox?view=unmatched",
-  "/inbox?view=meetings",
-  "/inbox?view=organize", // #335 Inbox organization
-  "/inbox?view=organize&tab=noise",
-  "/inbox?view=organize&tab=filed",
   "/templates",
   "/consulting",
   "/venue-assessments",
@@ -204,8 +197,6 @@ const ROUTES = [
   "/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0",
   "/portal/my-quotes?preview=lakefront&show=accepted",
   // #323 — Meeting notes: signed out, and a team preview (shared summaries only).
-  "/portal/meetings",
-  "/portal/meetings?preview=lakefront",
   // #282 phase 4 — the portal dashboard's team preview (the Rewards card
   // renders only while the program is on; the smoke DB leaves it off).
   "/portal?preview=lakefront",
@@ -278,9 +269,6 @@ const CONTENT_CHECKS: Array<{ route: string; reject: string; expect: string; lab
 const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true }> = [
   { route: "/inspections/RI-2042" },
   { route: "/venue-assessments/FS-1055" },
-  // #119 Recordings (D152): the recorder page for a seeded survey and the beta/no-Krisp gates.
-  { route: "/recordings/new?parent=survey:FS-1055" },
-  { route: "/recordings/new?parent=inspection:RI-2042" },
   { route: "/companies/lakefront" },
   { route: "/customers/lakefront" }, // the legacy path — this entry tests that the redirect to /companies/[id] still resolves
   { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}
@@ -290,8 +278,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/vendors/rose-brand?tab=contacts" },
   { route: "/vendors/rose-brand?tab=prices" },
   { route: "/vendors/rose-brand?tab=activity" },
-  { route: "/inbox?customer=rose-brand" },
-  { route: "/inbox?customer=rose-brand&log=1" },
   { route: "/estimator?id=Q-2041" },
   { route: "/estimator?id=Q-2041&step=package" },
   // #333 Build package tabs: BOM quote, Client package, and an unknown ptab (reads as Narrative).

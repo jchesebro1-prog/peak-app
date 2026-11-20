@@ -1,5 +1,6 @@
 "use server";
 
+import { boxSaleSendProblem } from "@/lib/estimate-box-sale/rules";
 import { revalidatePath } from "next/cache";
 import { REOPENED_AT_WON_NOTICE, reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { redirect } from "next/navigation";
@@ -54,6 +55,9 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   let q: Awaited<ReturnType<typeof setStatus>>;
   // #355 review M8: read first, to say so when the move reopened a won estimate at the version that won.
   const before = await get(id);
+  // Box goods sale: one that still carries labor is never marked sent (the same rule as Send to customer).
+  const boxProblem = status === "sent" && before && before.status === "draft" ? boxSaleSendProblem(before) : null;
+  if (boxProblem) redirect(back + (back.includes("?") ? "&" : "?") + "statusError=" + encodeURIComponent(boxProblem));
   try {
     // The actor is passed through so the automatic on-send revision is
     // attributed to whoever sent it (item 24).

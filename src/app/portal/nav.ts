@@ -19,7 +19,6 @@ export function portalNav(
     { href: "/portal/catalog" + pv, label: "Catalog", active: active === "catalog" },
     { href: "/portal/service" + pv, label: "Service", active: active === "service" },
     { href: "/portal/my-quotes" + pv, label: "My quotes", active: active === "my-quotes" },
-    { href: "/portal/meetings" + pv, label: "Meeting notes", active: active === "meetings" },
     opts.previewCid
       ? { href: "/portal/catalog/quote", label: "Cart", active: active === "quote", disabled: true }
       : { href: "/portal/catalog/quote", label: "Cart", active: active === "quote", badge: opts.cartCount ?? 0 },

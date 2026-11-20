@@ -2,8 +2,6 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { get, stageMeta, iso, msOf, fmtShort, fmtLong } from "@/lib/stores/flame-jobs";
 import { activeUsers } from "@/lib/users";
-import { RecordingsStrip } from "@/components/recordings/recordings-strip";
-import { loadRecordingsStrip } from "../../recordings/data";
 import { ResultsEditor, DeleteFlameJobButton, type VenueInit } from "./controls";
 
 export const metadata = { title: "Flame test results — Quartzite-6" };
@@ -86,7 +84,6 @@ export default async function FlameResultsPage({
   }
 
   const sm = stageMeta(job.stage);
-  const strip = await loadRecordingsStrip("flame_job", job.id);
   const r = job.results;
   const rvById = new Map((r?.venues || []).map((v) => [v.id, v]));
   const venues: VenueInit[] = (job.venues || []).map((v) => {
@@ -134,7 +131,6 @@ export default async function FlameResultsPage({
         >
           {job.stage === "completed" ? "Completed" : "Scheduled"}
         </span>
-        <RecordingsStrip parentKind="flame_job" parentId={job.id} recordings={strip.recordings} canRecord={strip.canRecord} />
         {job.stage === "completed" && (
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <Link

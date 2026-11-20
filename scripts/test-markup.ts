@@ -1,7 +1,7 @@
 /* Markup pricing (docs/superpowers/specs/2026-10-23-markup-pricing-design.md) — harness checks.
    `markupPureChecks` needs no database; `markupDbChecks` needs the test DB (test:specs runs both).
    Pure half alone: `npx tsx scripts/test-markup.ts`. */
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import {
   DEFAULT_MARKUP, MARKUP_MAX, PRICING_BASIS, costFromSell, fmtMarkupPct, keepSavedMarkup, legacyTwinOf, marginToMarkup,
   markupOf, markupPctString, markupToMargin, roundMarkupPct, sameWholeMarkup, sellAt,

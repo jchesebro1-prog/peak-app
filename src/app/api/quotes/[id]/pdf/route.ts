@@ -1,5 +1,5 @@
 import { coverPdfFileName } from "@/lib/estimate-output/cover";
-import { bidderFileOf, isCoverFileName } from "@/lib/estimate-email/compose";
+import { bidderFileOf, isCoverFileName } from "@/lib/quote-pdf/file-names";
 import { getCompany } from "@/lib/identity/companies";
 import { bidderPdfFileName } from "@/lib/parties/addressee";
 import { displayQuoteNumber } from "@/lib/estimate-number";

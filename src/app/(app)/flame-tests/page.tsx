@@ -648,7 +648,7 @@ export default async function FlameTestsPage({
                           <input type="hidden" name="id" value={r.id} />
                           <button
                             type="submit"
-                            title="Email the renewal — opens the Inbox with this year's quote attached at last year's price"
+                            title="Start the renewal — creates this year's quote at current rates and opens it"
                             style={{
                               display: "inline-flex",
                               alignItems: "center",

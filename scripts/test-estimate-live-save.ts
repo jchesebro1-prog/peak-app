@@ -2,7 +2,7 @@
    (test:specs runs both). Run the pure half alone with `npx tsx scripts/test-estimate-live-save.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
 import { liveSaveHookChecks } from "./test-estimate-live-save-hook";
 import { canAutoSave, DEBOUNCE_MS, flushLanded, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, reportedLiveStatus, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
@@ -283,8 +283,6 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(LIVE_COPY.notSavedYet === "Not saved yet" && LIVE_COPY.notSavedYetHint === "A new estimate saves itself when you add its first line.", "copy: the new-estimate chip words");
   ok((chipSrc.match(/className="pk-btn-outline"/g) ?? []).length === 2, "banner: Reload and Keep mine use pk-btn classes");
   const sendStepSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/send-step.tsx"), "utf8");
-  const composerSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/send-composer.tsx"), "utf8");
-  ok(sendStepSrc.includes("if (s.liveMode) await s.live.flush();") && composerSrc.includes("if (s.liveMode) await s.live.flush();"), "send: live mode flushes a pending autosave before taking the version stamp");
   const bomSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/package-bom-tab.tsx"), "utf8");
   ok(bomSrc.includes("contentUnsaved && <span"), "hints: the BOM tab's Save first reads contentUnsaved");
 

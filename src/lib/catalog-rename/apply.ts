@@ -44,7 +44,8 @@ import { CURTAIN_MOUNTS_BLOB } from "@/lib/curtain-mounts";
 import { CONDUIT_SIZES_BLOB } from "@/lib/conduit-sizes";
 import { favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
 import { EQUIPMENT_MAP_BLOB } from "@/lib/design/equipment-map";
-import { DRIVE_PHOTO_SYNC_BLOB } from "@/lib/part-docs/drive-photo-sync";
+/** The removed Drive photo sync's stored state blob — still rewritten so its SKUs follow a rename. */
+const DRIVE_PHOTO_SYNC_BLOB = "drive_photo_sync";
 import type { PartAccessoryLink, PartDocumentLink } from "@/lib/part-docs/types";
 import { RACK_DEFAULTS_BLOB } from "@/lib/rack/defaults";
 import { settingsFrom, updateSettings } from "@/lib/settings";

@@ -29,7 +29,7 @@ export default async function AssessmentReportPage({ params }: { params: Promise
   return (
     <div className="pk-content" style={{ maxWidth: 1000 }}>
       <style>{REPORT_CSS + TOOLBAR_CSS}</style>
-      <ReportToolbar id={a.id} canSend={can("send", user.roles)} />
+      <ReportToolbar id={a.id} />
       <AssessmentReport model={data.model} letterhead={data.letterhead} photos={photos} />
     </div>
   );

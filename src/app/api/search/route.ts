@@ -12,6 +12,6 @@ export async function GET(req: Request) {
   if (!session?.user?.active) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const groups = await globalSearch(new URL(req.url).searchParams.get("q") || "", session.user);
+  const groups = await globalSearch(new URL(req.url).searchParams.get("q") || "");
   return NextResponse.json({ groups });
 }

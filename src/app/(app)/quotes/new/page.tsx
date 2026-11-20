@@ -74,7 +74,6 @@ export default async function NewQuotePage({
       customers={customers}
       initial={intakeInitial(seed, customers)}
       replacing={replacing}
-      threadId={h.threadId}
       venueTypes={venueTypesFrom(settings.venueTypes)}
     />
   );

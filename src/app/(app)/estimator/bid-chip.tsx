@@ -185,7 +185,7 @@ export default function BidChip({
           onSync?.(r.sync);
           postChanged("quote", quoteId); // the status moved — other windows refresh (as changeStatus does)
         }
-        // The Bidders card (Send & track) reloads its plan: "Send revision to all bidders" now applies.
+        // The Bidders card (Send & track) reloads: its rows now need the next revision.
         window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId, source: "chip" } }));
         if (r.note) {
           setDueInput(toLocalInput(r.panel.dueAt));

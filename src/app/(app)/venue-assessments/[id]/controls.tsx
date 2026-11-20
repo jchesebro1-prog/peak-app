@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties} from "react";
 import Link from "next/link";
 import type {
   SurveyRecord,
@@ -33,12 +33,9 @@ import {
 import { LIFT_TYPES, LOADING_DOOR_TYPES, distanceText, shouldAutoFillTravel, showLiftDetails, travelTimeText } from "@/lib/field-lists";
 import { saveSurvey, advanceSurveyStage, deleteSurvey, createQuoteFromSurvey, type SurveyPatch } from "./actions";
 import Venue3D from "./venue-3d";
-import SuggestEstimate from "@/components/assist/suggest-estimate";
 import { saveThroughOutbox } from "@/lib/sync/save";
 import { SAVE_ACTION_TIMEOUT_MS } from "@/lib/sync/save-timeout";
 import { keepOutboxAfterFileSave, newEditorId, pendingStageSettled, type SaveStamp } from "@/lib/field-files/save-stamp";
-import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
-import { FromRecordingPanel, type FromRecordingPanelData } from "@/components/recordings/from-recording-panel";
 import type { Draft, EditorCustomer, EditorMeta, FieldDef, SectionDef } from "./sections/types";
 import {
   ACCENT,
@@ -238,12 +235,6 @@ export default function SurveyEditor({
   customers,
   roster,
   meta,
-  recordings = [],
-  canShowRecord = false,
-  fromRecording = [],
-  meetingsSlot = null,
-  canSuggest = false,
-  suggestionHref = null,
   travelSuggestion = null,
   blobEnabled = false,
   me = "",
@@ -252,18 +243,6 @@ export default function SurveyEditor({
   customers: EditorCustomer[];
   roster: string[];
   meta: EditorMeta;
-  /** Recordings on this survey (+ its linked site visits) — header strip (spec §6). */
-  recordings?: RecordingStripItem[];
-  /** spec §6 Record-control visibility, computed by the page. */
-  canShowRecord?: boolean;
-  /** "From recording" prefill panels, one per ready recording (spec §4.4). */
-  fromRecording?: FromRecordingPanelData[];
-  /** #323 — the server-rendered Meetings card (this survey + its site visits); null when none. */
-  meetingsSlot?: ReactNode;
-  /** Estimate suggestion (spec 2026-10-13 §3) — pilot + `estimate`, computed on the server. */
-  canSuggest?: boolean;
-  /** This assessment's latest suggestion ("Suggestion ready → Open"); null when none. */
-  suggestionHref?: string | null;
   /** #344 B5 — one-way drive to the venue's verified address, for a blank Travel time / Distance; null when none. */
   travelSuggestion?: TravelSuggestion;
   /** #344 C5 — the server's Blob flag: photos upload to private Blob, else (local dev) inline */
@@ -1287,17 +1266,6 @@ export default function SurveyEditor({
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: intakeMeta.ink, background: intakeMeta.soft, border: `1px solid ${intakeMeta.bd}` }}>{intakeMeta.label}</span>
             </div>
           </div>
-          <RecordingsStrip parentKind="survey" parentId={record.id} recordings={recordings} canRecord={canShowRecord} />
-          {canSuggest && (
-            <SuggestEstimate
-              source={{ kind: "survey", id: record.id }}
-              readyHref={suggestionHref}
-              disabled={dirty || saving}
-              disabledTitle={saving ? "Saving…" : "Save your changes first — Assist reads the saved assessment"}
-              compact
-              buttonStyle={{ fontSize: 13, color: "#5b616e", borderRadius: 9, padding: "10px 14px", minHeight: 42 }}
-            />
-          )}
           <button onClick={onPrintSheet} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
             Print sheet
           </button>
@@ -1359,7 +1327,6 @@ export default function SurveyEditor({
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {sectionSketches.overlay}
               {sectionPhotos.overlay}
-              {meetingsSlot}
               {visibleSections.map((sec, secIdx) => {
                 const locked = sec.kind === "discipline" && !tier1Done;
                 const collapsible = !locked;
@@ -1456,22 +1423,6 @@ export default function SurveyEditor({
                               setDisc={setDisc}
                               aside={sectionSketches.aside}
                             />
-                          )}
-                          {sec.id === "notes" && fromRecording.length > 0 && (
-                            <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-                              {fromRecording.map((p) => (
-                                <FromRecordingPanel
-                                  key={p.recordingId}
-                                  recordingId={p.recordingId}
-                                  title={p.title}
-                                  sections={p.sections}
-                                  target="survey"
-                                  disabled={dirty}
-                                  disabledHint="Save your changes first — Insert appends to the saved survey."
-                                  onInserted={() => setAdoptNextRecord(true)}
-                                />
-                              ))}
-                            </div>
                           )}
                           {sec.kind === "tier1" && (
                             <KillQuestions

@@ -19,9 +19,6 @@ import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import VisitRequests, { type VisitRequestVM } from "./visit-requests";
-import { RecordControl } from "@/components/recordings/record-control";
-import { RecordingCountBadge } from "@/components/recordings/record-control-link";
-import { recordingCountByParent } from "../recordings/data";
 import ActionError from "@/components/action-error";
 import { addressStatesForVisits } from "@/lib/address-verify/targets";
 import { ADDRESS_UNVERIFIED_TEXT } from "@/lib/address-verify/types";
@@ -106,8 +103,6 @@ export default async function FieldSurveyPage({
 }) {
   const [user, sp, all, visits, settings] = await Promise.all([requireUser(), searchParams, getAll(), allVisits(), getSettings()]);
   const tags = resolveSurveyTags(settings.surveyInternalTags);
-  // Recordings spec §6 — one pass over the collection for every card's count + Record control.
-  const recCounts = await recordingCountByParent("survey", all.map((s) => s.id));
 
   // Cross-screen deep links (Home, Inbox, Customers) use /venue-assessments?id=<id>;
   // the capture editor lives at /venue-assessments/[id]. Redirect to keep both working.
@@ -648,9 +643,6 @@ export default async function FieldSurveyPage({
                   </div>
                 </Link>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 15px", borderTop: "1px solid #f2f3f5" }}>
-                  {/* Recordings spec §6 — count badge + Record control per worklist card */}
-                  <RecordingCountBadge count={recCounts.get(s.id) ?? 0} />
-                  <RecordControl parentKind="survey" parentId={s.id} size="sm" hasRecordings={(recCounts.get(s.id) ?? 0) > 0} style={{ minHeight: 42, padding: "0 10px" }} />
                   <Link
                     href={`/venue-assessments/${encodeURIComponent(s.id)}`}
                     className="fs-open"

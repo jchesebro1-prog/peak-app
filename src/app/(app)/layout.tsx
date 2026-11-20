@@ -9,8 +9,6 @@ import { SyncProvider } from "@/lib/sync/SyncProvider";
 import PopHeader from "@/components/popout/pop-header";
 import LiveSync from "@/components/popout/live-sync";
 import PopBlockedNotice from "@/components/popout/pop-blocked-notice";
-import { assistSettingsOf } from "@/lib/assist/config";
-import { askGateFor } from "@/lib/assist/gate-server";
 
 export default async function AppLayout({
   children,
@@ -30,11 +28,6 @@ export default async function AppLayout({
     : [];
   const { counts, bell } = await navData(user.name, can("approve", user.roles), user.id);
 
-  // Ask AI (spec 2026-10-13 §1): the ⌘K "Ask AI" row shows only when the
-  // ask gate (pilot + switch + a Claude key) lets this user in. A failed
-  // check hides the row rather than breaking the page.
-  const askEnabled = (await askGateFor(user.id, { settings: assistSettingsOf(settings) }).catch(() => "error")) === null;
-  const askTeam = askEnabled ? (await activeUsers().catch(() => [])).map((u) => ({ id: u.id, name: u.name })) : [];
 
   return (
     <SyncProvider>
@@ -56,8 +49,6 @@ export default async function AppLayout({
           feedbackEmail={settings.feedbackEmail}
           devLogin={devLogin}
           roster={roster}
-          askEnabled={askEnabled}
-          askTeam={askTeam}
         />
         {/* Pop-out windows (spec §2, §5): the slim header shows only in a
             pop-out (html.pk-pop); LiveSync keeps every window current. */}

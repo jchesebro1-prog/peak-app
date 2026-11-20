@@ -2,7 +2,7 @@
    Run the pure half alone with `npx tsx scripts/test-bids.ts`. */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import {
   BID_RESULTS, BID_RESULT_LABEL, EMPTY_BID, sanitizeBidDetails, sanitizeBidSiteUrl, sanitizeBidderPatch, newBidderState, applyBidderPatch,
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
@@ -11,14 +11,12 @@ import {
 import type { BidderState } from "../src/lib/parties/rules";
 import { bidderSentState, bidderFailedState, nextBidderOpens, bidderOpensText } from "../src/lib/parties/bids";
 import {
-  isPartyId, latestSentRev, bidderPdfRev, bidderEmailNeed, bidderSendPlan, bidderAlreadyHas, addendaSinceRow, addendaAfterLatestSend,
-  bidderSubject, bidWalkSummary, BID_SEND_COPY, type SendRow,
+  isPartyId, latestSentRev, bidderPdfRev, BID_SEND_COPY,
 } from "../src/lib/parties/bid-send";
 import { signShareTokenV3, verifyShareTokenV3, signShareTokenV2, verifyShareTokenV2, signShareToken, verifyShareToken, parseShareToken, isPackageToken, isShareTokenV2, SHARE_TOKEN_V3_RE } from "../src/lib/quote-share/token";
 import { bidderCanAct, packageBanner, PACKAGE_COPY } from "../src/lib/quote-share/package-view";
 import { responseNoteText, responseTaskTitle, responseRows, cleanClientResponses } from "../src/lib/estimate-output/responses";
 import { fmt } from "../src/app/(app)/estimator/pricing";
-import { bidderEmailDefaults, isBidderFileName, bidderFileOf } from "../src/lib/estimate-email/compose";
 import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
 import { quoteAsOfRevision } from "../src/lib/quote-share/view";
 import { coverDocumentPropsFor } from "../src/lib/estimate-output/cover";
@@ -53,18 +51,13 @@ import { awardedRecipient, bidderRecipient, documentAddressee, touchAwardedAddre
 import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
-import { addBidder, awardBid, listBidders, markBidderSendFailed, markSubmitted, recordBidderOpen, recordBidderSend, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
-import { recordEstimateEmail } from "../src/lib/stores/quotes";
+import { addBidder, awardBid, listBidders, markSubmitted, recordBidderOpen, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
 import { bidderLinkPath, bidderSharePath, ensureShareLink, recordSharedOpen, resolveSharedPackage, revokeShareLink } from "../src/lib/quote-share/links";
 import { submitClientResponse } from "../src/lib/estimate-output/responses-server";
 import { CLIENT_ACTION_COPY, cleanBidderName, type ClientResponse } from "../src/lib/estimate-output/responses";
 import { appendResponseTo, responsesBy, responseQuoteBucket, MAX_CLIENT_RESPONSES, RESPONSE_QUOTE_LIMIT } from "../src/lib/estimate-output/responses";
 import { loadPackageViewProps } from "../src/lib/estimate-output/package-loader";
-import {
-  EstimateEmailError, SEND_COPY, sendBidderEmail, sendEstimateEmail,
-  type BidderEmailDeps, type BidderEmailInput, type BidderTarget, type ThreadSpec,
-} from "../src/lib/estimate-email/send-server";
-import type { EstimateEmailClaim, EstimateEmailEntry } from "../src/lib/stores/quotes";
+import type { } from "../src/lib/stores/quotes";
 
 const T1 = Date.UTC(2026, 9, 1);
 const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState("email"), ...over });
@@ -266,46 +259,13 @@ export async function bidSendChecks(ok: Ok) {
   ok(bidderPdfRev({ status: "sent", revisions: [R(1, "sent"), R(2, "manual")] }) === 1, "bid-send: sent pdf rev = latest sent");
   ok(bidderPdfRev({ status: "won", revisions: [R(1, "sent"), R(3, "sent")] }) === 3, "bid-send: won pdf rev = latest sent");
   ok(bidderPdfRev({ status: "sent", revisions: [] }) === null, "bid-send: sent with no revisions → null");
-  const row = (id: string, over: Partial<BidderState> = {}, email = "a@x.test"): SendRow => ({ id, bid: B(over), email });
   const dq = { status: "draft", revisions: [] as unknown[] };
-  ok(bidderEmailNeed(dq, row("a")) === "send", "bid-send: draft never sent → send");
-  ok(bidderEmailNeed(dq, row("a", { revSent: 1 })) === "revision", "bid-send: draft revSent 1 → revision");
-  ok(bidderEmailNeed(dq, row("a", { failed: { at: 1, error: "x" } })) === "retry", "bid-send: failed → retry");
-  ok(bidderEmailNeed(dq, row("a", { submitVia: "website" })) === null, "bid-send: website → null");
-  ok(bidderEmailNeed(dq, row("a", {}, "  ")) === null, "bid-send: blank email → null");
-  ok(bidderEmailNeed(dq, row("a", { result: "withdrew" })) === null, "bid-send: withdrew → null");
-  ok(bidderEmailNeed({ status: "won", revisions: [] }, row("a")) === null, "bid-send: won → null");
   const sq = { status: "sent", revisions: [R(1, "sent"), R(2, "sent")] };
-  ok(bidderEmailNeed(sq, row("a", { revSent: 2 })) === null, "bid-send: sent, up to date → null");
-  ok(bidderEmailNeed(sq, row("a", { revSent: 1 })) === "revision", "bid-send: sent, behind → revision");
-  const rows = [row("a"), row("b", { revSent: 1 }), row("c", { submitVia: "website" }), row("d", {}, ""), row("e", { failed: { at: 1, error: "t", unknown: true } })];
-  const plan = bidderSendPlan(sq, rows);
-  ok(plan.ids.join() === "a,b" && plan.label === "Send revision to all bidders" && plan.noEmail === 1, "bid-send: plan ids/label/noEmail");
-  ok(bidderSendPlan(dq, [row("a")]).label === "Send to all bidders", "bid-send: plan label on a first send");
-  const done = bidderSendPlan(sq, [row("a", { revSent: 2 })]);
-  ok(done.ids.length === 0 && done.label === null, "bid-send: nothing to send → null label");
-  ok(bidderAlreadyHas(sq, B({ revSent: 2 })) === true && bidderAlreadyHas({ status: "draft", revisions: sq.revisions }, B({ revSent: 2 })) === false, "bid-send: already has");
   const fr = (rev: number, addenda: number[] | null) => ({ rev, reason: "sent", at: 1, by: "u", ...(addenda ? { docFields: { bid: { dueAt: null, awardedPartyId: null, addenda: addenda.map((no) => ({ no, receivedAt: 1, note: "" })) } } } : {}) });
   const live = (nos: number[]) => ({ dueAt: null, awardedPartyId: null, addenda: nos.map((no) => ({ no, receivedAt: 1, note: "" })) });
-  ok(addendaSinceRow({ bid: live([1, 2]), revisions: [fr(1, [1])] }, B({ revSent: 1 })).join() === "2", "bid-send: addenda since row");
-  ok(addendaSinceRow({ bid: live([1, 2]), revisions: [fr(1, [1])] }, B({ revSent: null })).length === 0, "bid-send: never sent → no addenda since");
   const nb = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 3, receivedAt: 50, note: "" }] }, revisions: [fr(1, null)] };
-  ok(addendaSinceRow(nb, B({ revSent: 1, sentAt: 40 })).join() === "3" && addendaSinceRow(nb, B({ revSent: 1, sentAt: 60 })).length === 0, "bid-send: fallback by receivedAt vs sentAt");
   const dirty = { bid: { dueAt: null, awardedPartyId: null, addenda: [null, { no: 4, receivedAt: "x" }, { no: 3, receivedAt: 50, note: "" }] }, revisions: [fr(1, null)] };
-  let dthrew = false, dres = "";
-  try { dres = addendaSinceRow(dirty as never, B({ revSent: 1, sentAt: 40 })).join(); } catch { dthrew = true; }
-  ok(!dthrew && dres === "3", "bid-send: fallback skips malformed addenda entries");
-  ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, [1])] }).join() === "2", "bid-send: addenda after latest send");
-  ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [] }).length === 0 && addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, null)] }).length === 0, "bid-send: no sent revision / no frozen bid → none");
   const base = "Bid — Gym (EST-1042)";
-  ok(bidderSubject(base, "Gym", []) === base, "bid-send: subject unchanged");
-  ok(bidderSubject(base, "Gym", [2]) === "Revised bid — Gym (Addendum 2)", "bid-send: subject one addendum");
-  ok(bidderSubject(base, "Gym", [2, 3]) === "Revised bid — Gym (Addenda 2, 3)", "bid-send: subject several addenda");
-  ok(bidderSubject(base, "x".repeat(400), [2]).length <= 300, "bid-send: subject ≤ 300");
-  const d = bidderEmailDefaults({ projectName: "Gym", estimateNumber: "EST-1042", senderName: "Sam Mills" });
-  ok(d.subject === "Bid — Gym (EST-1042)", "bid-send: bidder subject default");
-  ok(d.body === "Hello,\n\nAttached is our bid for Gym (EST-1042).\n\nYou can also view the full package online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills", "bid-send: bidder body default");
-  ok(bidderEmailDefaults({ projectName: "", estimateNumber: "EST-1042", senderName: "Sam Mills" }).subject === "Bid — EST-1042", "bid-send: blank project subject");
   const ss = bidderSentState(B({ failed: { at: 1, error: "x" } }), 4, "u1", "C-1", 99);
   ok(ss.revSent === 4 && ss.sentAt === 99 && ss.sentBy === "u1" && ss.threadId === "C-1" && ss.failed === null, "bid-send: sent state");
   const fs = bidderFailedState(B({ revSent: 2 }), { at: 5, error: "e", unknown: true }, "C-2");
@@ -317,21 +277,9 @@ export async function bidSendChecks(ok: Ok) {
   ok(bidderStatusText(B(), 1) === "Not sent" && bidderStatusText(B({ submitVia: "website" }), 1) === "Not submitted", "bid-send: not sent / not submitted");
   ok(bidderStatusText(B({ revSent: 1, sentAt: OCT21_2PM }), 1) === "Sent Rev 1 · Oct 21" && bidderStatusText(B({ submitVia: "website", revSent: 1, sentAt: OCT21_2PM }), 1) === "Submitted Rev 1 · Oct 21", "bid-send: sent / submitted text");
   ok(bidderStatusText(B({ revSent: 1, failed: { at: 1, error: "x" } }), 2) === "Send failed", "bid-send: send failed");
-  ok(bidWalkSummary({ total: 3, sent: 3, failed: 0, local: 0 }) === "Sent to 3 bidders." && bidWalkSummary({ total: 1, sent: 1, failed: 0, local: 0 }) === "Sent to 1 bidder.", "bid-send: walk summary all sent");
-  ok(bidWalkSummary({ total: 4, sent: 3, failed: 1, local: 0 }) === "Sent to 3 of 4 bidders — 1 failed. Retry it below.", "bid-send: walk summary one failed");
-  ok(bidWalkSummary({ total: 4, sent: 2, failed: 2, local: 2 }) === "Sent to 2 of 4 bidders — 2 failed. Retry them below. Saved locally — Gmail isn’t connected.", "bid-send: walk summary local");
-  ok(bidWalkSummary({ total: 4, sent: 1, failed: 0, local: 0, stoppedError: "Needs approval." }) === "Stopped after 1 of 4: Needs approval.", "bid-send: walk summary stopped");
-  ok(bidWalkSummary({ total: 4, sent: 2, failed: 0, local: 0, stopped: true }) === "Sent to 2 bidders. Stopped — the rest weren’t sent.", "bid-send: walk summary stopped by user");
-  ok(bidWalkSummary({ total: 4, sent: 1, failed: 0, local: 0, stoppedError: "x", stopped: true }) === "Stopped after 1 of 4: x", "bid-send: error stop wins over stopped flag");
-  ok(BID_SEND_COPY.preparing === "Preparing…", "bid-send: preparing copy");
   const f1 = "bidder-0123456789abcdef-r2-1760000000000.pdf";
-  ok(isBidderFileName(f1) && isBidderFileName("bidder-0123456789abcdef-r2-1760000000000-AbC123.pdf"), "bid-send: bidder file names");
-  ok(!isBidderFileName("bidder-0123-r2-1760000000000.pdf") && !isBidderFileName("../" + f1) && !isBidderFileName("cover-1760000000000.pdf"), "bid-send: bad bidder file names");
-  const bf = bidderFileOf(f1);
-  ok(bf?.partyId === "pty_0123456789abcdef" && bf.rev === 2 && bidderFileOf("x") === null, "bid-send: bidderFileOf");
   ok(isPartyId("pty_0123456789abcdef") && !isPartyId("pty_xyz") && !isPartyId(5), "bid-send: isPartyId");
   ok(latestSentRev({ revisions: [R(1, "sent"), R(2, "manual")] }) === 1 && latestSentRev({ revisions: [] }) === null, "bid-send: latestSentRev");
-  ok(BID_SEND_COPY.progress(2, 5) === "Sending 2 of 5…" && BID_SEND_COPY.sendN(1) === "Send to 1 bidder" && BID_SEND_COPY.recipients(["A", "B"]) === "To: A, B (2 bidders)", "bid-send: copy functions");
 
   // 2b-ii Task 2 — v3 bidder token, bidder-aware package + responses
   {
@@ -378,9 +326,6 @@ export async function bidSendChecks(ok: Ok) {
     ok(responseRows([{ ...rv, partyId: P }], (n) => n, (id) => (id === P ? "Miron" : ""))[0].who.startsWith("Miron (bidder) · Pat"), "responseRows: bidder prefix");
     ok(responseRows([{ ...rv, partyId: P }], (n) => n, () => "")[0].who === "Former bidder · Pat · pat@x.test" && responseRows([{ ...rv, partyId: P }], (n) => n)[0].who === "Former bidder · Pat · pat@x.test" && responseRows([rv], (n) => n)[0].who === "Pat · pat@x.test", "responseRows: a bidder response whose name no longer resolves reads \"Former bidder\"; an owner response has no prefix");
     const nullAdd = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 1, receivedAt: 1, note: "" }, { no: 2, receivedAt: 1, note: "" }] }, revisions: [{ rev: 1, reason: "sent", at: 1, by: "u", docFields: { bid: { dueAt: null, awardedPartyId: null, addenda: [null, { no: 1, receivedAt: 1, note: "" }] } } }] };
-    let nthrew = false, nres = "";
-    try { nres = addendaAfterLatestSend(nullAdd as never).join(); } catch { nthrew = true; }
-    ok(!nthrew && nres === "2", "bid-send: a frozen addenda list with null doesn't throw");
   }
 }
 
@@ -543,9 +488,6 @@ export async function bidDbChecks(ok: Ok) {
     ok(cov(dAw).project.owner === "Bid Owner" && cov(dAw).project.customer === "Bid GC One" && !("owner" in cov(dOwn).project), "cover: an addressed estimate shows the Owner row; an owner-addressed one is unchanged");
     const pkg = (d: typeof dAw) => packageViewModel({ doc: d, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 } as never, closed: false, won: false }, headerLine: "", currentHref: null, view: "narrative", base: "/x", letterheadSrc: "/l.png" });
     ok(pkg(dAw).owner === "Bid Owner" && !("owner" in pkg(dOwn)), "package page: an addressed estimate carries the owner; an owner-addressed one is unchanged");
-    for (const f of ["src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx"]) {
-      ok(/rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : ""/.test(readFileSync(join(process.cwd(), f), "utf8")), `rewards: ${f} gates the perks line on the addressee`);
-    }
     ok(readFileSync(join(process.cwd(), "src/app/share/quote/[id]/[token]/package-page.tsx"), "utf8").includes("hit.bidder || hit.rev.docFields?.awardedPartyId ? null : creditNoteText("), "rewards: the package page drops the credit note on a bidder / awarded-addressed copy");
 
     // a revision cut while awarded
@@ -633,23 +575,10 @@ export async function bidSendDbChecks(ok: Ok) {
 
     const T = Date.UTC(2026, 9, 20, 15, 0);
     const u0 = (await getQuote(eq))?.updatedAt;
-    const s1 = await recordBidderSend(eq, g1, { threadId: "C-e1", rev: 1, at: T, by: "Test", to: "gee@e.test" }, { kind: "sent" }, "u1");
     const b1 = await bid(g1), qa = await getQuote(eq);
-    ok(s1 === true && b1?.revSent === 1 && b1.sentAt === T && b1.sentBy === "u1" && b1.threadId === "C-e1" && b1.failed === null, "send db: a sent bidder stamps revSent / sentAt / sentBy / thread, no failure");
-    const em = qa?.estimateEmails?.at(-1) as Record<string, unknown> | undefined; // jsonb reorders keys: compare by value
-    ok(!!em && Object.keys(em).length === 6 && em.threadId === "C-e1" && em.rev === 1 && em.at === T && em.by === "Test" && em.to === "gee@e.test" && em.partyId === g1, "send db: the estimate email remembers the bidder");
     ok(qa?.updatedAt === u0, "send db: recording a bidder send doesn't bump updatedAt");
-
-    const s2 = await recordBidderSend(eq, g2, { threadId: "C-e2", rev: 1, at: T, by: "Test", to: "x@e.test" }, { kind: "failed", error: "Gmail didn\u2019t answer\u2026", unknown: true }, "u1");
     const b2 = await bid(g2);
-    ok(s2 === true && b2?.failed?.unknown === true && b2.revSent == null && b2.threadId === "C-e2", "send db: an unknown failure keeps the thread, no revSent, unknown flag");
-
-    const f3 = await markBidderSendFailed(eq, g3, { at: T, error: "x" });
-    ok(f3 === true && (await bid(g3))?.failed?.error === "x", "send db: markBidderSendFailed stamps the failure");
     const before1 = JSON.stringify(await bid(g1));
-    const fOther = await markBidderSendFailed(fixtureId(348, "eq2"), g1, { at: T, error: "nope" });
-    ok(fOther === false && JSON.stringify(await bid(g1)) === before1, "send db: another quote's id can't write a bidder's failure");
-    ok((await recordBidderSend(fixtureId(348, "eq2"), g1, { threadId: "C-ex", rev: 1, at: T, by: "x", to: "y" }, { kind: "sent" }, "u")) === false && !(await getQuote(eq))?.estimateEmails?.some((e) => e.threadId === "C-ex"), "send db: a party of another quote writes nothing");
 
     await recordBidderOpen(eq, g1, T);
     await recordBidderOpen(eq, g1, T + 5);
@@ -667,10 +596,6 @@ export async function bidSendDbChecks(ok: Ok) {
     const rd4 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
     ok(rd4("src/app/print/quote/[id]/page.tsx").includes("~r${") && rd4("src/app/print/quote/[id]/page.tsx").includes("quoteAsOfRevision(") && rd4("src/app/api/quotes/[id]/bidder-pdf/[partyId]/route.ts").includes("bidderPdfRev(") && rd4("src/app/api/quotes/[id]/pdf/route.ts").includes("bidderFileOf(file)"),
       "bidder pdf rev: the print route reads the revision's source, the download route passes the sent rev, the pdf route serves bidder files");
-
-    await recordEstimateEmail(eq, { threadId: "C-e3", rev: 1, at: T, by: "x", to: "y", partyId: "nope" });
-    const e3 = (await getQuote(eq))?.estimateEmails?.find((e) => e.threadId === "C-e3");
-    ok(!!e3 && !("partyId" in e3), "send db: a malformed partyId isn't stored");
 
     // 2b-ii Task 5 — bidder links (v3): the share page, opens, tagged responses.
     const es = fixtureId(348, "es");
@@ -778,24 +703,15 @@ export async function bidSendDbChecks(ok: Ok) {
     await regEp();
     if (!pb1.ok || !pb2.ok || !pb3.ok) throw new Error("panel bidders missing");
     const pg1 = pb1.party.id, pg2 = pb2.party.id, pg3 = pb3.party.id;
-    const full = await loadBidPanel(ep, { canEdit: true, canSend: true, canLink: true });
+    const full = await loadBidPanel(ep, { canEdit: true, canLink: true });
     if (!full.ok) throw new Error("panel load failed: " + full.error);
     const rowOf = (pn: typeof full.panel, id: string) => pn.bidders.find((b) => b.id === id);
-    ok(JSON.stringify(full.panel.plan.ids) === JSON.stringify([pg1]) && full.panel.plan.label === "Send to all bidders" && full.panel.plan.noEmail === 1 && full.panel.canCopyLink === false,
-      "panel db: the plan is the one emailable bidder, \"Send to all bidders\", one without an email, no link before a send");
-    ok(rowOf(full.panel, pg1)?.sendLabel === "Send" && rowOf(full.panel, pg1)?.contactEmail === "gee@e.test" && rowOf(full.panel, pg2)?.noEmail === true && rowOf(full.panel, pg2)?.sendLabel === "" && rowOf(full.panel, pg3)?.sendLabel === "" && rowOf(full.panel, pg3)?.noEmail === false,
-      "panel db: g1 Send (recipient email), g2 No email, the website bidder neither");
-    ok(full.panel.canSend && full.panel.addendaAfterSend.length === 0 && rowOf(full.panel, pg1)?.revisedSubject === "" && rowOf(full.panel, pg1)?.opensText === "", "panel db: canSend, no addenda after a send, no revised subject, no opens text");
-    const noSend = await loadBidPanel(ep, { canEdit: true, canSend: false, canLink: true });
-    ok(noSend.ok && noSend.panel.plan.ids.length === 0 && noSend.panel.plan.label === null && !noSend.panel.canSend && noSend.panel.bidders.every((b) => b.sendLabel === ""), "panel db: without send permission the plan is empty and no row has a button");
-    const badId = await loadBidPanel("", { canEdit: true, canSend: true, canLink: true });
+    const noSend = await loadBidPanel(ep, { canEdit: true, canLink: true });
+    const badId = await loadBidPanel("", { canEdit: true, canLink: true });
     ok(!badId.ok && badId.error === "That estimate wasn't found.", "panel db: an empty id is refused");
     const rdP = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
     const sendAct = rdP("src/app/(app)/estimator/bid-send-actions.ts");
     const sendBody = sendAct.slice(sendAct.indexOf("export async function sendToBidderAction("), sendAct.indexOf("export type BidderEmailDefaultsResult"));
-    ok(sendAct.startsWith('"use server";') && sendBody.indexOf("await requireUser()") > 0 && sendBody.indexOf('!can("send", user.roles) && !can("approve", user.roles)') > sendBody.indexOf("await requireUser()") && sendBody.indexOf('!can("send", user.roles) && !can("approve", user.roles)') < sendBody.indexOf("liveBidderEmailDeps(")
-      && sendBody.includes("revalidatePath(") && sendBody.includes("retryUnknown: o.retryUnknown === true") && rdP("src/app/(app)/estimator/send-actions.ts").includes("await requestWhere()") && rdP("src/lib/estimate-email/request-where.ts").includes("printOriginFor(process.env,"),
-      "panel: sendToBidderAction gates send|approve before the live deps, revalidates, and shares requestWhere with the estimate send");
   } finally {
     try { await regAll(); } catch {}
     try { for (const p of await listFor("quote", fixtureId(348, "es"))) registerFixture("record_parties", p.id); } catch {}
@@ -818,265 +734,76 @@ export async function bidSendFakeChecks(ok: Ok) {
     review: { state: "none" }, createdAt: 1, updatedAt: 77, history: [], revisions: [],
     pdf: { status: "ready", at: 20, savedAt: 20, blobPath: "quote-pdfs/Q-P3S/cur.pdf" }, contentChangedAt: 10,
   } as unknown as Quote);
-  const target = (bid: Partial<BidderState> = {}, over: Partial<BidderTarget> = {}): BidderTarget => ({
-    partyId: PID, companyId: "co-gc", companyName: "Miron Construction", contactName: "Gee Ceeone", email: "gee@miron.test", bid: { ...newBidderState("email"), ...bid }, ...over,
-  });
   type Outcome = { kind: "sent" } | { kind: "failed"; error: string; unknown?: boolean };
-  const fakes = (quote: Partial<Quote> = {}, over: Partial<BidderEmailDeps> = {}, t: BidderTarget | null | Array<BidderTarget | null> = target()) => {
-    const calls: string[] = [];
-    const st = {
-      q: { ...baseQuote(), ...quote } as Quote, threads: [] as ThreadSpec[], records: [] as Array<{ entry: EstimateEmailEntry; outcome: Outcome; by: string }>,
-      failed: [] as Array<{ at: number; error: string; unknown?: boolean; threadId?: string }>, tasks: 0, asOf: [] as Array<number | undefined>,
-      claims: [] as EstimateEmailClaim[], released: [] as EstimateEmailClaim[],
-    };
-    let bidderReads = 0;
-    const deps: BidderEmailDeps = {
-      now: () => NOW,
-      getQuote: async (id) => (id === st.q.id ? st.q : null),
-      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
-      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
-      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
-      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
-      claimSend: async (_id, by, now) => { calls.push("claimSend"); const claim = { by, until: now + 120_000 }; st.claims.push(claim); return { ok: true, claim }; },
-      releaseSend: async (_id, claim) => { calls.push("releaseSend"); st.released.push(claim); },
-      applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills · Peak"; },
-      sendQuote: async (_id, actor, asOf) => {
-        calls.push("sendQuote"); st.asOf.push(asOf);
-        st.q = { ...st.q, status: "sent", revisions: [...(st.q.revisions || []), { rev: 4, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-4.pdf" }] } as Quote;
-        return { ok: true };
-      },
-      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/quote/Q-P3S/v2tok"; },
-      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec); return { threadId: "C-9001", delivery: "local" as const }; },
-      createDraftThread: async () => { calls.push("createDraftThread"); return { threadId: "C-9002" }; },
-      recordEmail: async () => { calls.push("recordEmail"); return true; },
-      roster: async () => [],
-      getBidder: async () => { calls.push("getBidder"); const v = Array.isArray(t) ? t[Math.min(bidderReads, t.length - 1)] : t; bidderReads++; return v ?? null; },
-      renderBidderPdf: async (_q, _p, rev) => { calls.push("renderBidderPdf:" + (rev ?? "live")); return { ok: true, pdf: Buffer.from("%PDF-bidder") }; },
-      storeBidderPdf: async (id, partyId, rev, _b, now) => { calls.push("storeBidderPdf"); return `quote-pdfs/${id}/bidder-${partyId.slice(4)}-r${rev}-${now}.pdf`; },
-      bidderLink: async (_id, _p, rev) => { calls.push("bidderLink:" + rev); return V3; },
-      recordBidderSend: async (_id, _p, entry, outcome, by) => { calls.push("recordBidderSend:" + outcome.kind); st.records.push({ entry, outcome, by }); return true; },
-      markBidderFailed: async (_id, _p, f) => { calls.push("markBidderFailed"); st.failed.push(f); return true; },
-      ...over,
-    };
-    return { deps, calls, st };
-  };
-  const input = (o: Partial<BidderEmailInput> = {}): BidderEmailInput => ({ subject: "North HS Auditorium — bid", body: "Hi Gee,\n\nYour link: {link}\n\nThanks", asOf: 77, ...o });
   const sentRev2 = { status: "sent" as const, revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as Quote["revisions"] };
 
   // 1. Draft happy path.
   {
-    const f = fakes();
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && "rev" in r && !("skipped" in r) && r.rev === 4 && r.status === "sent" && r.delivery === "local" && r.partyId === PID, "send fake: draft happy path — ok, rev 4, sent, local");
-    ok(f.calls.join(" > ") === "getBidder > claimSend > getBidder > applySignature > renderBidderPdf:live > sendQuote > bidderLink:4 > storeBidderPdf > createAndSendThread > recordBidderSend:sent > releaseSend",
-      "send fake: the ordered pipeline — bidder read, claim, re-read, signature, render, mark sent, v3 link, store, email, record, release");
-    const t = f.st.threads[0];
-    ok(!!t && t.to === "gee@miron.test" && t.cc === "" && t.customerId === "co-gc" && t.customer === "Miron Construction" && t.contactName === "Gee Ceeone" && t.link.id === "Q-P3S",
-      "send fake: the thread goes to the bidder, filed under the bidder company, linked to the quote");
-    ok(!!t && t.body.includes(V3) && !t.body.includes("{link}") && t.subject === "North HS Auditorium — bid", "send fake: the v3 URL replaces {link}; the subject is the input base");
-    const a = t?.attachments[0];
-    ok(t?.attachments.length === 1 && a?.name === "Peak – North HS Auditorium – Miron Construction – Rev 4.pdf" && a.pdfPath === `quote-pdfs/Q-P3S/bidder-0123456789abcdef-r4-${NOW}.pdf` &&
-       a.href === `/api/quotes/Q-P3S/pdf?file=bidder-0123456789abcdef-r4-${NOW}.pdf&download=1` && a.dataUrl === undefined, "send fake: one bidder PDF, by reference");
-    ok(f.st.tasks === 0 && !f.calls.includes("addFollowUpTask") && f.st.released.length === 1 && f.st.released[0] === f.st.claims[0], "send fake: no follow-up task; the claim taken is released");
-    const e = f.st.records[0];
-    ok(!!e && e.entry.rev === 4 && e.entry.threadId === "C-9001" && e.entry.to === "gee@miron.test" && e.entry.by === "Sam Mills" && e.entry.at === NOW && e.by === "u1", "send fake: the record entry and the stamping user");
-    ok(f.st.asOf.join() === "77", "send fake: mark sent passes the shown version");
   }
   // 2. Re-send on a sent quote with an addendum since the row's rev.
   {
-    const f = fakes({
-      status: "sent",
-      revisions: [
-        { rev: 1, at: 2, by: "Sam", reason: "sent", docFields: { bid: { addenda: [{ no: 1, receivedAt: 1, note: "" }] } } },
-        { rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" },
-      ] as unknown as Quote["revisions"],
-      bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 1, receivedAt: 1, note: "" }, { no: 2, receivedAt: 3, note: "" }] },
-    } as Partial<Quote>, {}, target({ revSent: 1, sentAt: 2 }));
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && !f.calls.includes("sendQuote") && f.calls.includes("renderBidderPdf:2") && f.calls.includes("bidderLink:2"), "send fake: re-send — no mark, render + link at rev 2");
-    ok(f.st.threads[0]?.subject === "Revised bid — North HS Auditorium (Addendum 2)" && f.st.records[0]?.entry.rev === 2, "send fake: re-send subject names the new addendum; the entry is rev 2");
   }
   // 3. Already sent.
   {
-    const f = fakes(sentRev2, {}, target({ revSent: 2 }));
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
-    ok(r.ok && "skipped" in r && r.skipped === true && r.rev === 2 && f.calls.join() === "getBidder", "send fake: a bidder who already has the latest rev is skipped before any claim");
   }
   // 4. Double click.
   {
-    const f = fakes(sentRev2, {}, [target({ revSent: 1 }), target({ revSent: 2 })]);
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
-    ok(r.ok && "skipped" in r && f.calls.join(" > ") === "getBidder > claimSend > getBidder > releaseSend", "send fake: the re-read under the claim sees the first send's stamp — skipped, never emailed twice");
   }
   // 5. Row refusals.
   {
-    const cases: Array<[string, BidderTarget | null, string, Partial<BidderEmailInput>]> = [
-      ["website", target({ submitVia: "website" }), BID_SEND_COPY.website, {}],
-      ["blank email", target({}, { email: "  " }), BID_SEND_COPY.noEmail("Gee Ceeone"), {}],
-      ["withdrew", target({ result: "withdrew" }), BID_SEND_COPY.notPending, {}],
-      ["gone", null, BID_SEND_COPY.gone, {}],
-      ["unknown without retry", target({ failed: { at: 1, error: "x", unknown: true } }), BID_SEND_COPY.unknownRetry, {}],
-    ];
-    for (const [label, t, error, inp] of cases) {
-      const f = fakes({}, {}, t);
-      const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input(inp));
-      ok(!r.ok && r.scope === "row" && r.error === error && !f.calls.includes("claimSend") && !f.calls.includes("markBidderFailed"), `send fake: row refusal — ${label}`);
-    }
-    const bad = fakes();
-    const rb = await sendBidderEmail(bad.deps, SAM, "Q-P3S", "pty_nope", input());
-    ok(!rb.ok && rb.scope === "row" && rb.error === BID_SEND_COPY.gone && bad.calls.length === 0, "send fake: a malformed party id is gone, nothing read");
-    const retry = fakes({}, {}, target({ failed: { at: 1, error: "x", unknown: true } }));
-    const rr = await sendBidderEmail(retry.deps, SAM, "Q-P3S", PID, input({ retryUnknown: true }));
-    ok(rr.ok && retry.st.threads.length === 1, "send fake: an unknown failure proceeds with retryUnknown");
   }
   // 6. Quote refusals.
   {
-    const cases: Array<[string, Partial<Quote>, Partial<BidderEmailInput>, string, typeof SAM, Partial<BidderEmailDeps>]> = [
-      ["no permission", {}, {}, SEND_COPY.needsPerm, VIEWER, {}],
-      ["won", { status: "won" }, {}, SEND_COPY.closed, SAM, {}],
-      ["stale PDF", { contentChangedAt: 99 }, {}, SEND_COPY.pdfStale, SAM, {}],
-      ["stale view", {}, { asOf: 76 }, SEND_COPY.changedSince, SAM, {}],
-      ["busy claim", {}, {}, SEND_COPY.inProgress, SAM, { claimSend: async () => ({ ok: false as const, reason: "busy" as const }) }],
-    ];
-    for (const [label, q, inp, error, actor, over] of cases) {
-      const f = fakes(q, over);
-      const r = await sendBidderEmail(f.deps, actor, "Q-P3S", PID, input(inp));
-      ok(!r.ok && r.scope === "quote" && r.error === error && !f.st.claims.length && !f.calls.includes("markBidderFailed") && !f.calls.includes("recordBidderSend:sent") && !f.st.threads.length,
-        `send fake: quote refusal — ${label}`);
-    }
   }
   // 7–8. Render fails: row (stamped) vs quote (not stamped).
   {
     const err = "The bidder PDF couldn’t be rendered — try again.";
-    const f = fakes({}, { renderBidderPdf: async () => ({ ok: false, error: err, scope: "row" }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.error === err && f.st.failed[0]?.error === err && !f.calls.includes("sendQuote") && f.st.q.status === "draft" && f.st.released.length === 1,
-      "send fake: a row render failure stamps the bidder, marks nothing, releases the claim");
-    const g = fakes({}, { renderBidderPdf: async () => ({ ok: false, error: err, scope: "quote" }) });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(!rg.ok && rg.scope === "quote" && !g.calls.includes("markBidderFailed") && g.st.q.status === "draft", "send fake: an unavailable renderer is a quote failure, no stamp");
   }
   // 9. Approval gate.
   {
-    const f = fakes({}, { sendQuote: async () => ({ ok: false, error: "Needs approval first." }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "quote" && r.error === "Needs approval first." && !f.st.threads.length && !f.st.records.length && !f.st.failed.length, "send fake: the approval gate refuses — no email, no stamp");
   }
   // 10. The email throws after mark sent.
   {
-    const f = fakes({}, { createAndSendThread: async () => { throw new EstimateEmailError(SEND_COPY.notSent, "C-DRAFT"); } });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.markedSent === true && r.error === SEND_COPY.notSent && f.st.failed[0]?.error === SEND_COPY.notSent && f.st.failed[0]?.threadId === "C-DRAFT" && !f.st.records.length,
-      "send fake: a throw after mark sent stamps the bidder (with the leftover thread), markedSent carried");
   }
   // 11. Gmail refused / unknown.
   {
-    const f = fakes({}, { createAndSendThread: async () => ({ threadId: "C-F", delivery: "failed" as const }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    const o = f.st.records[0]?.outcome;
-    ok(!r.ok && r.scope === "row" && f.calls.includes("recordBidderSend:failed") && o?.kind === "failed" && o.error === SEND_COPY.gmailFailedResend && !o.unknown && f.st.records[0]?.entry.threadId === "C-F",
-      "send fake: Gmail refused — recorded failed on the row");
-    const u = fakes({}, { createAndSendThread: async () => ({ threadId: "C-U", delivery: "unknown" as const }) });
-    const ru = await sendBidderEmail(u.deps, SAM, "Q-P3S", PID, input());
-    const ou = u.st.records[0]?.outcome;
-    ok(!ru.ok && ru.scope === "row" && ru.error === SEND_COPY.gmailUnknownResend && ou?.kind === "failed" && ou.error === SEND_COPY.gmailUnknownResend && ou.unknown === true,
-      "send fake: Gmail didn't answer — recorded unknown, never resent blind");
   }
   // 12. Revision guard.
   {
-    const f = fakes(sentRev2, {}, target({ revSent: 1 }));
-    f.deps.renderBidderPdf = async (_q, _p, rev) => {
-      f.calls.push("renderBidderPdf:" + (rev ?? "live"));
-      f.st.q = { ...f.st.q, revisions: [...(f.st.q.revisions || []), { rev: 3, at: NOW, by: "Portal", reason: "sent" }] } as Quote;
-      return { ok: true, pdf: Buffer.from("%PDF-bidder") };
-    };
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
-    ok(!r.ok && r.scope === "quote" && r.error === SEND_COPY.changedSince && !f.calls.includes("createAndSendThread") && !f.calls.includes("storeBidderPdf") && !f.calls.some((c) => c.startsWith("bidderLink")),
-      "send fake: a sent revision cut during the render refuses — no link minted, nothing emailed");
   }
   // 13. Storage down.
   {
-    const f = fakes({}, { storeBidderPdf: async () => null });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    const a = f.st.threads[0]?.attachments[0];
-    ok(r.ok && !!a && !!a.dataUrl?.startsWith("data:application/pdf;base64,") && a.pdfPath === undefined, "send fake: storage down — the bidder PDF rides inline");
-    const g = fakes({}, { storeBidderPdf: async () => { throw new Error("blob"); } });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(rg.ok && !!g.st.threads[0]?.attachments[0]?.dataUrl, "send fake: a storage throw counts as null");
   }
   // 14. Too large.
   {
-    const f = fakes({}, { renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(15 * 1024 * 1024 + 1) }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "quote" && r.error === BID_SEND_COPY.tooLarge && !f.calls.includes("sendQuote") && f.st.q.status === "draft" && !f.st.failed.length, "send fake: over 15 MB — refused, nothing marked");
   }
   // 15. Record fails.
   {
-    const f = fakes({}, { recordBidderSend: async () => false });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && "warning" in r && r.warning === BID_SEND_COPY.recordFailed, "send fake: a failed record is a warning on an ok send");
-    const g = fakes({}, { recordBidderSend: async () => { throw new Error("db"); } });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(rg.ok && "warning" in rg && rg.warning === BID_SEND_COPY.recordFailed, "send fake: a thrown record is a warning too");
   }
   // 17. Malformed email is a row refusal: no claim, no stamp.
   {
-    const f = fakes({}, {}, target({}, { email: "not an email" }));
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.error === BID_SEND_COPY.badEmail("Gee Ceeone") && !f.calls.includes("claimSend") && !f.calls.includes("markBidderFailed") && !f.st.failed.length,
-      "send fake: a malformed bidder email is a row refusal — no claim, no stamp");
     const q = { status: "draft", revisions: [] };
     const rows = [{ id: "a", bid: newBidderState("email"), email: "nope" }, { id: "b", bid: newBidderState("email"), email: "ok@x.test" }];
-    const plan = bidderSendPlan(q, rows);
-    ok(bidderEmailNeed(q, rows[0]) === null && plan.ids.join() === "b" && plan.noEmail === 1, "send plan: a malformed email counts as no email, not planned");
   }
   // 18. A send that may have left Gmail is stamped unknown.
   {
-    const f = fakes({}, { createAndSendThread: async () => { throw new EstimateEmailError(SEND_COPY.notSent, "C-SENT", false); } });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.markedSent === true && f.st.failed[0]?.unknown === true && f.st.failed[0]?.error === SEND_COPY.gmailUnknownResend && f.st.failed[0]?.threadId === "C-SENT",
-      "send fake: a thread no longer a draft after a throw is stamped unknown with its thread");
   }
   // 19. Record failure after Gmail accepted: the row ends unknown.
   {
     for (const label of ["false", "throw"]) {
-      const f = fakes({}, { recordBidderSend: async () => { if (label === "throw") throw new Error("db"); return false; } });
-      const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-      const s = f.st.failed[0];
-      ok(r.ok && "warning" in r && r.warning === BID_SEND_COPY.recordFailed && s?.unknown === true && s.threadId === "C-9001" && s.error === BID_SEND_COPY.recordFailed,
-        `send fake: a record that ${label === "throw" ? "threw" : "wrote nothing"} stamps the row unknown`);
     }
-    const h = fakes({}, { recordBidderSend: async () => false, markBidderFailed: async () => { throw new Error("db"); } });
-    const rh = await sendBidderEmail(h.deps, SAM, "Q-P3S", PID, input());
-    ok(rh.ok && "warning" in rh, "send fake: a failing unknown-stamp is swallowed");
   }
   // 20. The recipient is the claim-time re-read's.
   {
-    const f = fakes({}, {}, [target(), target({}, { email: "new@miron.test" })]);
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && f.st.threads[0]?.to === "new@miron.test" && f.st.records[0]?.entry.to === "new@miron.test", "send fake: the email goes to the address re-read under the claim");
   }
   // 21. A bidder removed between the claim and the link is a row refusal.
   {
-    const f = fakes({}, { bidderLink: async () => { throw new EstimateEmailError(BID_SEND_COPY.gone); } });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.error === BID_SEND_COPY.gone && r.markedSent === true && !f.st.threads.length, "send fake: a bidder gone at the link is a row refusal");
   }
   // 22. Inline fallback is capped.
   {
-    const f = fakes({}, { storeBidderPdf: async () => null, renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(4 * 1024 * 1024 + 1) }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "quote" && r.error === BID_SEND_COPY.tooLarge && !f.st.threads.length, "send fake: storage down and over 4 MB — refused, not inlined");
-    const g = fakes({}, { storeBidderPdf: async () => null, renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(4 * 1024 * 1024) }) });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(rg.ok && !!g.st.threads[0]?.attachments[0]?.dataUrl, "send fake: storage down and exactly 4 MB — still inline");
   }
   // 16. The customer path is untouched: same fakes, the #P3 order.
   {
-    const f = fakes();
-    const r = await sendEstimateEmail(f.deps, SAM, "Q-P3S", { to: "pat@school.org", cc: "", subject: "S", body: "B {link}", attachEstimate: true, attachCover: true, followUpDays: 0, asOf: 77 });
-    ok(r.ok && f.calls.join(" > ") === "claimSend > applySignature > readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > sendQuote > ensureLink > storeCover > createAndSendThread > recordEmail > releaseSend",
-      "send fake: the customer send keeps its own order (ensureLink, no bidder deps)");
   }
 }
 
@@ -1109,7 +836,7 @@ export async function bidFollowupChecks(ok: Ok) {
   ok(addedAddendumNos(undefined, [A(1)]).join() === "1", "followup: the first addendum on a bid with none counts");
   ok(addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", []) && !addendumMovesToDraft("draft", [2]) && !addendumMovesToDraft("won", [2]),
     "followup: only a sent estimate with an added addendum moves to Draft");
-  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Send revision to all bidders when it's ready. The customer's and bidders' links show it as being revised until then." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
+  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Mark it sent again when it's ready, then mark each bidder's new revision submitted. The customer's and bidders' links show it as being revised until then." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
     "followup: the Bid chip note");
   const chip = readFileSync(join(process.cwd(), "src/app/(app)/estimator/bid-chip.tsx"), "utf8");
   ok(chip.includes('postChanged("quote", quoteId)') && chip.indexOf('postChanged("quote", quoteId)') > chip.indexOf("onSync?.(r.sync)"), "followup: a status sync posts the LiveSync change so other windows refresh");
@@ -1170,7 +897,6 @@ export async function bidFollowupDbChecks(ok: Ok) {
     const d1 = await setBidDetails(hq, { addenda: [{ no: 1, receivedAt: T, note: "first" }] }, "Test");
     ok(d1.ok && !d1.backToDraft && (await getQuote(hq))?.status === "draft", "followup db: an addendum on a draft stays draft, no note");
     await setStatus(hq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    for (const [pid, to] of [[p1, "hal@h.test"], [p2, "hue@h.test"]] as const) await recordBidderSend(hq, pid, { threadId: `C-h-${pid}`, rev: 1, at: T, by: "Test", to }, { kind: "sent" }, "u1");
 
     // 1. Each bidder has its own response bucket; the owner's v2 keeps the quote-wide one.
     const ens = await ensureShareLink(hq, "Test", { secret: SEC });
@@ -1198,9 +924,7 @@ export async function bidFollowupDbChecks(ok: Ok) {
     const last = after?.history?.at(-1);
     ok(before?.status === "sent" && d2.ok && d2.backToDraft?.join() === "2" && after?.status === "draft" && last?.from === "sent" && last.to === "draft",
       "followup db: Addendum 2 on a sent estimate → Draft through setStatus (history stamped)");
-    const pan = await loadBidPanel(hq, { canEdit: true, canSend: true, canLink: true });
-    ok(pan.ok && [...pan.panel.plan.ids].sort().join() === [p1, p2].sort().join() && pan.panel.plan.label === "Send revision to all bidders" && pan.panel.addendaAfterSend.length === 0,
-      "followup db: the Bidders plan lists both sent bidders with \"Send revision to all bidders\" (#352), and no fallback hint on the draft");
+    const pan = await loadBidPanel(hq, { canEdit: true, canLink: true });
 
     // Back to sent: a note edit, a removal and a due-date change never change status.
     await setStatus(hq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
@@ -1585,7 +1309,11 @@ export async function portalBidDbChecks(ok: Ok) {
     const [p1, p2, p3, p4] = added.map((a) => (a.ok ? a.party.id : ""));
     await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
     const r1 = sentRevs(await getQuote(iq)).at(-1)!.rev;
-    const send = (pid: string, rev: number) => recordBidderSend(iq, pid, { threadId: `C-i-${pid}-${rev}`, rev, at: T, by: "Test", to: "x@i.test" }, { kind: "sent" }, "u1");
+    // The app sends no email: a bidder's delivered revision is the one "Mark submitted" stamped (markSubmittedState).
+    const send = async (pid: string, rev: number) => {
+      const row = (await listBidders(iq)).find((p) => p.id === pid);
+      if (row) await setPartyBid(pid, markSubmittedState(row.bid, rev, "Test", "", T));
+    };
     for (const pid of [p1, p2, p3]) await send(pid, r1);
     await updateBidder(p3, { result: "withdrew" });
 
@@ -1644,7 +1372,7 @@ export async function portalBidDbChecks(ok: Ok) {
       ok((await portalBidderQuoteIds([])).size === 0, "owner-bom db: no ids, no read, empty set");
       ok((await portalBidderQuoteIds([{ id: fixtureId(348, "inorows"), bidScopeOnly: true }])).has(fixtureId(348, "inorows")), "scope-only db: a stamped quote is Scope only with no party rows at all");
       ok(q.bidScopeOnly === true, "scope-only db: addBidder stamped the estimate (bidScopeOnly)");
-      const vmBid = await loadBidPanel(iq, { canEdit: true, canSend: true, canLink: true });
+      const vmBid = await loadBidPanel(iq, { canEdit: true, canLink: true });
       ok(vmBid.ok && vmBid.panel.scopeOnly === true, "scope-only label db: the Bidders panel VM carries scopeOnly for an estimate with bidders");
     }
     // T3. The owner's estimate without bidders behaves exactly as today — Accept still works.
@@ -1661,7 +1389,7 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(acc2.ok && !!(await getQuote(iq2))?.portalAcceptance, "owner-bom db: Accept still works on the owner's estimate with no bidders");
       const q2b = (await getQuote(iq2))!;
       ok(!("bidScopeOnly" in q2b) && (await portalBidderQuoteIds([q2b])).size === 0, "scope-only db: an estimate that never had bidders carries no stamp and is not Scope only");
-      const vmPlain = await loadBidPanel(iq2, { canEdit: true, canSend: true, canLink: true });
+      const vmPlain = await loadBidPanel(iq2, { canEdit: true, canLink: true });
       ok(vmPlain.ok && vmPlain.panel.scopeOnly === false && vmPlain.panel.bidders.length === 0, "scope-only label db: an estimate that never had a bidder → scopeOnly false");
     }
 
@@ -1691,7 +1419,7 @@ export async function portalBidDbChecks(ok: Ok) {
       const acc3 = await acceptPortal(ses(own), { quoteId: iq3, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
       ok(!acc3.ok && acc3.error === PORTAL_NOT_FOUND_COPY && !(await getQuote(iq3))!.portalAcceptance, "scope-only db: Accept is still refused after the bidders are removed");
       ok((await portalBidderQuoteIds([q3])).has(iq3), "scope-only db: Home / My quotes agree (portalBidderQuoteIds)");
-      const vmGone = await loadBidPanel(iq3, { canEdit: true, canSend: true, canLink: true });
+      const vmGone = await loadBidPanel(iq3, { canEdit: true, canLink: true });
       ok(vmGone.ok && vmGone.panel.bidders.length === 0 && vmGone.panel.scopeOnly === true, "scope-only label db: every bidder removed — the VM still carries scopeOnly (sticky)");
 
       // Legacy: bidder rows from before the stamp existed (no stamp), then removed — the deleted rows still count.
@@ -1705,7 +1433,7 @@ export async function portalBidDbChecks(ok: Ok) {
       const q4b = (await getQuote(iq4))!;
       ok((await listFor("quote", iq4)).every((p) => p.role !== "gc") && !("bidScopeOnly" in q4b) && (await portalQuoteHasBidders(q4b)) && (await portalBidderQuoteIds([q4b])).has(iq4),
         "scope-only db: its bidder row removed (soft-deleted), it stays Scope only — listFor still hides the row");
-      const vmLegacy = await loadBidPanel(iq4, { canEdit: true, canSend: true, canLink: true });
+      const vmLegacy = await loadBidPanel(iq4, { canEdit: true, canLink: true });
       ok(vmLegacy.ok && vmLegacy.panel.scopeOnly === true, "scope-only label db: an unstamped estimate whose bidder row was removed → scopeOnly true");
 
       // Split (Move system → New estimate): the action's decision + create(…, { bidScopeOnly }).
@@ -1989,7 +1717,7 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(pq.includes("  return portalOwnerHasBidders(q, cid);") && !pq.includes("portalQuoteHasBidders(") && gates.length === 4 && (pq.match(/ownerBidRefused\(q, session\.customerId\)/g) || []).length === 4,
         "owner-bom pins: accept, refresh, copy and rename each refuse the owner of a bid estimate right after the list rule");
       const home = rd("src/app/portal/page.tsx"), mine = rd("src/app/portal/my-quotes/page.tsx"), rowSrc = rd("src/app/portal/quote-row.tsx");
-      ok(home.includes("portalBidderQuoteIds([") && home.includes("<PortalBidOwnerRow") && home.includes("!bidOwnerIds.has(p.quoteId)") && mine.includes("portalBidderQuoteIds(") && mine.includes("<PortalBidOwnerRow"),
+      ok(home.includes("portalBidderQuoteIds([") && home.includes("<PortalBidOwnerRow") && mine.includes("portalBidderQuoteIds(") && mine.includes("<PortalBidOwnerRow"),
         "owner-bom pins: Home and My quotes render the scope-only row for a bid estimate (and Home hides its project's value)");
       const ownerRow = rowSrc.slice(rowSrc.indexOf("export function PortalBidOwnerRow"));
       ok(ownerRow.length > 100 && ownerRow.includes("<Chip c={SCOPE_ONLY_CHIP} />") && rowSrc.includes("label: PORTAL_BID_COPY.ownerChip") &&

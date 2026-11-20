@@ -16,7 +16,7 @@ const EMPTY: Stored = { home: null, reports: null };
 const blobId = (userId: string) => `dashboard_layouts:${userId}`;
 const LEGACY_HOME: Record<string, string[]> = {
   stats: ["my-open-pipeline", "my-win-rate", "my-out-for-signature", "my-avg-quote"],
-  pipeline: ["my-pipeline"], calendar: ["calendar"], queue: ["my-queue"], inbox: ["inbox"],
+  pipeline: ["my-pipeline"], calendar: ["calendar"], queue: ["my-queue"],
   leads: ["my-leads"], designs: ["my-designs"], surveys: ["venue-assessments"],
   teamActivity: ["team-activity"], needsAttention: ["needs-attention"], catalog: ["catalog"],
 };

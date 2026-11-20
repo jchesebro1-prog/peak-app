@@ -1,7 +1,6 @@
 // SERVER ONLY — exceljs + stores. Never import from a "use client" file.
 import ExcelJS from "exceljs";
 import { parseCsv } from "@/app/(app)/import/parse";
-import type { DriveListedPhoto } from "@/lib/google/drive-photos";
 import { cellText } from "@/lib/import/xlsx-to-csv";
 import { departmentOfCategory } from "@/lib/portal-departments";
 import { list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
@@ -11,8 +10,7 @@ import { allDocumentLinks, allDocuments, detachedDocumentLinks } from "@/lib/sto
 import { getDepartments } from "@/lib/stores/portal-departments";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { listFixtures } from "@/lib/stores/fixtures";
-import { listDrivePhotosForSheet } from "./drive-photo-sync";
-import { buildPartMatcher, driveIdOf, exportRows, PHOTO_SHEET_HEADERS, PHOTO_SHEET_NAME, rowsToGrid, type PartMatcher, type PhotoSheetRow, type SheetImage } from "./photo-sheet";
+import { buildPartMatcher, driveIdOf, exportRows, PHOTO_SHEET_HEADERS, PHOTO_SHEET_NAME, rowsToGrid, type DriveListedPhoto, type PartMatcher, type PhotoSheetRow, type SheetImage } from "./photo-sheet";
 import { quotedPartStats } from "./quoted-parts";
 import { buildImageIndex } from "./views";
 
@@ -21,6 +19,10 @@ import { buildImageIndex } from "./views";
  * into a grid, write the workbook, and load everything a plan needs (the
  * catalog matcher, each part's real images, the Drive listing).
  */
+
+/** Google Drive is no longer a photo source: a file name on the sheet must be dropped with it (or be a link). */
+export const NO_DRIVE_REASON = "Drive photos are no longer a source — drop the file with the sheet or use a link";
+const listDrivePhotosForSheet = async (): Promise<{ files: null; reason: string }> => ({ files: null, reason: NO_DRIVE_REASON });
 
 export type ListDrive = () => Promise<{ files: DriveListedPhoto[] } | { files: null; reason: string }>;
 

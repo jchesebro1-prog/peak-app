@@ -2,7 +2,7 @@
    Run alone with `npx tsx scripts/test-va-notes.ts` (pure checks only). */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import {
   SECTION_ORDER, STEP_BY_ID, STEP_LABELS, GROUP_BY_ID, GROUP_META, RIG_SYSTEMS, isQuoteVisit, scopeSet, inScope,
   rigSystems, hasCounterweight, hasLinesets, sectionVisible, splitGoalLines, recapFor, recapScopeText,
@@ -27,7 +27,6 @@ import {
 } from "../src/lib/field-lists";
 import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
 import { sanitizeSurveyDisciplineGoals, withSanitizedSurveyGoals, goalsFromSurvey, goalListsFromSurvey } from "../src/lib/estimate-output/goals";
-import { surveyText } from "../src/lib/assist/features/suggest-sources";
 import { curtainItemText, positionRowLine, monthText } from "../src/lib/survey-format";
 import { cleanPlainText } from "../src/lib/estimate-output/fields";
 import * as FLX from "../src/lib/field-lists";
@@ -626,7 +625,6 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
   ok(pageB4.includes("fabricPartsByCategory") && pageB4.includes("fabricOptions") && ctlB4.includes("fabricOptions={meta.fabricOptions}"),
     "#344 B4: the fabric datalist comes from the catalog's fabric parts via meta");
   ok(rd(`${b3dir}/goals-list.tsx`).includes("e.keyCode === 229"), "#344 B4: goals Enter also ignores Safari's IME keyCode 229");
-  ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctlB4), "#344 B4: the meetings slot still sits right before the sections");
   /* progress: bound fields read measurements; curtain rows and lighting positions count */
   const dp = (disc: Record<string, Record<string, unknown>>, meas: Record<string, string | boolean> = {}, venueClass = "theatre") =>
     ({ ...(d0 as object), venueClass, measurements: meas, disciplines: disc }) as never;
@@ -690,7 +688,6 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     "#344 B5: the page passes the suggestion; toDraft fills blank Travel time / Distance and the hint shows while it matches");
   ok(sectionVisible({ scope: ["rigging"] }, "finalQuestions") === false && sectionVisible({ scope: ["curtain"] }, "finalQuestions") === true,
     "#344 B5: Final questions shows only with curtains in scope");
-  ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctlB5), "#344 B5: the meetings slot still sits right before the sections");
   {
     /* a cleared access / track-operation answer stays cleared; the old answer stays visible as an Older note */
     const L = "Kind of lift needed (before #344)";
@@ -879,26 +876,14 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(surveyFindings({ loadingDoorSize: "8x10", liftNeeded: "Scissor", liftSupplier: "Sunbelt" } as never) === "Access/logistics: loading door: 8x10; lift: Scissor (Sunbelt)",
       "#344 B7: findings fall back to the old access keys when the new ones are empty");
     ok(!fx7.includes("tg_price_sensitive"), "#344 B7: internal tags never reach the findings");
-
-    const st7 = surveyText(b7);
-    ok(st7.includes("  - Main / act curtain: qty 4 · Velour 25 oz · Standard track · 40' × 22' · Good") && !st7.includes("Unticked"),
-      "#344 B7: Assist's site-visit text carries each ticked curtain row");
-    ok(st7.includes("  - Electric 1 · 24 circuits · 40' · trim 22' · needs new cable") && st7.includes("  - Condition: Fair") && st7.includes("  - Last flame test: Mar 2024"),
-      "#344 B7: Assist's text carries lighting position rows, the AV condition label and month fields");
-    ok(!st7.includes("[object Object]") && !st7.includes("tg_price_sensitive"), "#344 B7: no raw objects or internal tags in Assist's text");
     const many: Record<string, unknown> = { present: Array.from({ length: 60 }, (_, i) => `Type ${i}`), items: {} };
     for (let i = 0; i < 60; i++) { many[`f${i}`] = `v${i}`; (many.items as Record<string, unknown>)[`Type ${i}`] = { qty: String(i + 1) }; }
-    const stMany = surveyText({ id: "FS-B7", disciplines: { curtain: many } } as never);
-    ok(stMany.split("\n").filter((l) => l.startsWith("  - ")).length === 40, "#344 B7: Assist's discipline lines stay within their 40-line budget");
 
     /* Fix 1: a cleared field stays cleared in print, Assist and the condition sliders; the pipes row follows its chip */
     const clearedBound = { ...(b7 as object), measurements: { gridH: "" }, disciplines: { rigging: { gridHeight: "OLD" } } } as never;
     const cbRows = buildAssessmentSheet(clearedBound).fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Rigging intake")!.rows;
     ok(cbRows.find((r) => r.label === "Grid height")?.value === "" && !JSON.stringify(cbRows).includes("OLD"),
       "#344 B7 fix: a cleared bound field (measurement blank) never prints its old discipline value on the sheet");
-    const stBound = surveyText(b7);
-    ok(!stBound.includes("OLD-GRID") && !stBound.includes("gridHeight"),
-      "#344 B7 fix: Assist skips a bound discipline key (the measurement is already in the findings)");
     const pipesRow = (present: string[], qty: string) => {
       const d = { ...(b7 as object), disciplines: { curtain: { present, fixedPipeQty: qty } } } as never;
       return buildAssessmentSheet(d).fieldSheet!.pages.flatMap((p) => p.sections).find((x) => x.heading === "Curtain intake")!.rows
@@ -945,12 +930,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const noneSheet = JSON.stringify(buildAssessmentSheet(noneRec as never).fieldSheet);
     ok(!noneSheet.includes("SECRET-NOTE") && !noneSheet.includes("Console location") && !noneSheet.includes("FOH 1") && noneSheet.includes("Brighter") && noneSheet.includes("New fixtures"),
       "#344 B-final2: a None-only discipline prints only goals, Present and scope on the sheet");
-    const noneText = surveyText(noneRec as never);
-    ok(!noneText.includes("SECRET-NOTE") && !noneText.includes("Console location") && !noneText.includes("FOH 1") && noneText.includes("Present: None"),
-      "#344 B-final2: a None-only discipline prints no console, positions or notes in Assist");
     const someRec = { ...noneRec, disciplines: { lighting: { ...(noneRec.disciplines.lighting as object), present: ["None", "Dimmers"] } } };
-    ok(JSON.stringify(buildAssessmentSheet(someRec as never).fieldSheet).includes("SECRET-NOTE") && surveyText(someRec as never).includes("SECRET-NOTE"),
-      "#344 B-final2: with anything besides None ticked, the discipline prints in full");
   }
 
   /* ---- B-final: whole-branch review fixes ---- */
@@ -985,18 +965,6 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
         av: { condition: "Good", conditionLevel: 1 },
       },
     } as unknown as MigratableSurvey);
-    const stBF = surveyText(oldRec as never);
-    t("Assist never prints removed or old keys as fields (legsQtyPairs, trackOperationOld, consoleLocationOld, lastFlameTestOld, AV condition text)", () =>
-      !/legsQtyPairs|trackOperationOld|consoleLocationOld|lastFlameTestOld|junkKey|JUNKVAL/.test(stBF) && !/condition: Good/i.test(stBF));
-    t("Assist skips an unticked Other's text, an Other text when the console isn't Other, an unticked pipes qty and unticked positions", () =>
-      !stBF.includes("UNTICKED-OTHER") && !stBF.includes("HIDDEN-OTHER") && !stBF.includes("PIPEQTY9") && !stBF.includes("UNTICKEDPOS"));
-    t("Assist prints the editor's fields by label: Present, curtain rows, scope, notes, console location, positions, AV condition", () =>
-      stBF.includes("  - Present: Legs") && stBF.includes("  - Legs: qty 4") && stBF.includes("  - Curtain scope of interest: Flame test") &&
-      stBF.includes("  - Notes: Curtain note") && stBF.includes("  - Replace vs. reuse (curtains): Reuse") && stBF.includes("  - Console location: Booth") &&
-      stBF.includes("  - Electric 1 · 24 circuits") && stBF.includes("  - Condition: Poor"));
-    t("Assist appends the record's Older notes (the old answers' text survives)", () =>
-      stBF.includes("Older notes:") && stBF.includes("  - Track operation (before #344): Manual OLDOP") &&
-      stBF.includes("  - Console location (before #344): Booth by the window") && stBF.includes("  - Last flame test (before #344): spring OLDFLAME"));
 
     /* 3. Fill down on Condition never resurrects an old rating */
     t("Fill down from an unrated row writes null Condition below, which stays null through migrate", () => {
@@ -1726,7 +1694,6 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     ok(!ctl.includes("readPhoto") && !/\bonPhotos\b/.test(ctl) && !/\bremovePhoto\b/.test(ctl) && /draft\.photos\.length > 0[\s\S]{0,200}id: "photos"/.test(ctl) &&
       ctl.includes("photos={draft.photos}") && /tone: "photo"/.test(ctl) && ctl.includes("useSectionPhotos(") && ctl.includes("photoRefs: draft.photoRefs"),
       "#344 C5: the editor drops the 8-photo inline path, shows Earlier photos only when there are any, keeps findings on draft.photos, badges photo counts, saves photoRefs");
-    ok(/\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctl), "#344 C5: the meetings slot still sits right before the sections");
     const psv = ctl.slice(ctl.indexOf("async function savePhotoRefs"), ctl.indexOf("const sectionPhotos = useSectionPhotos"));
     const osv = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function advanceStage"));
     ok(psv.includes("serialSave(") && psv.includes("{ ...lastSaved.current, photoRefs: refsNow.current") && !psv.includes("validate(") && !psv.includes("...draft") && psv.includes("buildPatch(undefined, sent)") &&
@@ -1847,7 +1814,7 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
     const osv = ctl.slice(ctl.indexOf("async function onSave"), ctl.indexOf("async function advanceStage"));
     ok(ctl.includes("useSectionSketches(") && psv.includes("{ ...lastSaved.current, photoRefs: refsNow.current, sketches: sketchesNow.current }") &&
       osv.includes("sketches: sketchesNow.current") && ctl.includes("sketches: draft.sketches") && ctl.includes("foldOther:") &&
-      /\{meetingsSlot\}\s*\{visibleSections\.map\(/.test(ctl) && /\| "sketches"/.test(act),
+      /\| "sketches"/.test(act),
       "#344 C6: sketch saves send the last-saved draft + current photos + current sketches (never unsaved edits); Save changes sends the current sketches; a patch may carry sketches");
     ok(/from "\.\.\/ink\/backgrounds"/.test(fls) && fls.includes("isSketchKey(") && fls.includes("SURVEY_SKETCH_CAP"),
       "#344 C6: the server's sanitize validates sketch keys against the pad registry");
@@ -2354,9 +2321,6 @@ export async function vaNotesChecks(ok: Ok): Promise<void> {
       ok(JSON.stringify(stripped) === '{"a":1}', "#344 C-final C: withoutSaveFields drops the stamp and the seq map");
       // the plain-text readers never print the map
       const rec = { ...(sheetBase as object), _saveSeqs: { zzeditorid99: { seq: 7, at: 1 } }, saveStamp: { editor: "zzeditorid99", seq: 7 } } as never;
-      const outs = [JSON.stringify(buildAssessmentSheet(rec)), surveyFindings(rec), surveyText(rec), JSON.stringify(recapFor(rec)),
-        JSON.stringify(MGX.printRecordFor(sheetBase as never, { _saveSeqs: { zzeditorid99: { seq: 1, at: 1 } }, saveStamp: { editor: "zzeditorid99", seq: 1 } }))];
-      ok(outs.every((t) => !t.includes("zzeditorid99")), "#344 C-final C: the field sheet, findings, Assist text, recap and print record never carry _saveSeqs / saveStamp");
     }
     const FF = await import("../src/lib/field-files/files");
     const fp = FF.fileOnlyPatch({ notes: "x", photoRefs: [], saveStamp: { editor: "abcdefgh12", seq: 4 } } as Record<string, unknown>);

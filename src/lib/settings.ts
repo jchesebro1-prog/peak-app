@@ -166,30 +166,6 @@ export type AppSettingsData = {
   defaultQuotePipelineId?: string;
   /** One-time pipeline fixes already applied to the stored lists (Jeff 2026-10-15 #42: "bid-spec-lead-qualify"). */
   pipelineFixes?: string[];
-  /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
-   *  of the mailbox whose Google account owns the archive; null = not
-   *  configured, the nightly archive job waits. */
-  recordingsArchiveMailbox: string | null;
-  /** #283 — connection key of the mailbox whose Google account can read the
-   *  Peak Product Photos folder (drive.readonly); null = not set. */
-  catalogPhotosMailbox: string | null;
-  /** Cached Drive id of the root `Peak Recordings` folder (spec §5.2). */
-  recordingsArchiveFolderId: string | null;
-  /** Cached per-customer Drive subfolder ids, keyed by customerId (spec §5.2). */
-  recordingsArchiveFolders: Record<string, string>;
-  /** Pilot gate (spec §1.3, Settings → Beta): user ids allowed to see the
-   *  Record button. Empty = everyone. See canRecord(). */
-  recordingsBetaUsers: string[];
-  /** #334 Assist pilot (Settings → Beta): allow-listed user ids. Empty = NOBODY (unlike recordingsBetaUsers). Read via assistSettingsOf(). */
-  assistUsers?: string[];
-  /** #334: per-feature switches; a missing key counts as on, except the
-   *  opt-in ones (file, promise, brief, ask, vendorpdf — OPT_IN_FEATURES), which count as off. */
-  assistFeatures?: { tasks?: boolean; reply?: boolean; estimate?: boolean; file?: boolean; promise?: boolean; brief?: boolean; ask?: boolean; vendorpdf?: boolean };
-  /** #334: monthly API spend cap in dollars (default 200). */
-  assistMonthlyCapUsd?: number;
-  /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown
-   *  on Settings → Recordings. Optional: absent until the job has run once. */
-  recordingsArchiveLastRun?: RecordingsArchiveLastRun | null;
   /** #122 — Settings → Catalog: who receives the vendor price-list tasks
    *  (spec §1). null/absent = the default rule in resolveCatalogOwner()
    *  (the user named "Jena Tolksdorf" if present, else the first Admin). */
@@ -198,30 +174,10 @@ export type AppSettingsData = {
   dashboardDefaults: DashboardLayout;
 };
 
-export type RecordingsArchiveLastRun = {
-  at: number;
-  archived: number;
-  failed: number;
-  skipped: string | null;
-};
 
 /** #321: the digits an issued designator number is padded to (default 2). */
 export function designatorDigitsOf(s: { designatorDigits?: 1 | 2 | null } | null | undefined): 1 | 2 {
   return s?.designatorDigits === 1 ? 1 : 2;
-}
-
-/**
- * Pilot gate for the Record button (Recordings spec §1.3 / §7): an empty
- * `recordingsBetaUsers` list means the feature is open to everyone; a
- * non-empty list restricts it to those user ids. Pure — settings come from
- * getSettings() so the caller can gate a whole render in one read.
- */
-export function canRecord(
-  userId: string,
-  settings: Pick<AppSettingsData, "recordingsBetaUsers">
-): boolean {
-  const allowed = Array.isArray(settings.recordingsBetaUsers) ? settings.recordingsBetaUsers : [];
-  return allowed.length === 0 || allowed.includes(userId);
 }
 
 /** #145 — the intake four (survey-intake.ts DISCIPLINE_GROUPS) as defaults. */

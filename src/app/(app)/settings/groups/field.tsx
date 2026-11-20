@@ -151,9 +151,7 @@ export function FieldGroup({
           <div>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Site visits — reason picklist</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
-              The reasons offered when scheduling a site visit (Inbox →
-              Site visit). One per line; the reason becomes part of the
-              calendar-event title.
+              The reasons offered on a site-visit request. One per line.
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

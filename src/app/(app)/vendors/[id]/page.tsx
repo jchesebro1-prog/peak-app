@@ -127,9 +127,6 @@ export default async function VendorDetailPage({
             <Link href={`/companies/${encodeURIComponent(row.id)}?edit=1`} style={{ fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 8, padding: "9px 14px", textDecoration: "none" }}>
               Edit
             </Link>
-            <Link href={`/inbox?customer=${encodeURIComponent(row.id)}`} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)", borderRadius: 8, padding: "10px 15px", textDecoration: "none" }}>
-              New email
-            </Link>
           </div>
         </div>
 
@@ -179,14 +176,6 @@ export default async function VendorDetailPage({
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 600 }}>Activity</div>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{feedRows.length}</span>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Link href={`/inbox?customer=${encodeURIComponent(row.id)}&log=1`} style={{ fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_SOFT}`, borderRadius: 8, padding: "8px 12px", textDecoration: "none" }}>
-                  Log call
-                </Link>
-                <Link href={`/inbox?customer=${encodeURIComponent(row.id)}`} style={{ fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_SOFT}`, borderRadius: 8, padding: "8px 12px", textDecoration: "none" }}>
-                  New email
-                </Link>
               </div>
             </div>
             <ActivityComposer customerId={row.id} />

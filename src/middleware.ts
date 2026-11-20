@@ -17,22 +17,16 @@ import { authConfig } from "./auth.config";
  * be reachable without one (#245). /placeholders/ holds the four static
  * placeholder images (Manufacturer section Part 1) that the portal, the
  * share page and the headless-Chrome print route show without a team
- * session. /api/gmail/sync is the cron
- * endpoint (D74) — no session exists on a cron call, so it is exempted
+ * session. /api/drive/sync is the daily maintenance cron
+ * endpoint — no session exists on a cron call, so it is exempted
  * here and guards itself with a CRON_SECRET bearer check instead.
- * /api/drive/sync (the daily maintenance cron) is exempt for the same reason.
  * /api/native/auth/* (start, exchange) run before a session exists in the
  * WebView — see docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md.
- * /api/recordings/upload is the Vercel Blob client-upload broker (Recordings
- * spec §2.3): Vercel's own infra POSTs the `upload-completed` callback there
- * with no session, so it is exempted and authenticates per-event itself —
- * `auth()` for the device's token request, the Blob signature for the
- * callback (see the route).
  */
 export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/native/auth|api/leads/intake|api/booth/share-back|api/gmail/sync|api/drive/sync|api/recordings/upload|login|lead-intake|c/|portal|print/|share/|d/ds/|pdf\\.worker\\.min\\.mjs|placeholders/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/native/auth|api/leads/intake|api/booth/share-back|api/drive/sync|login|lead-intake|c/|portal|print/|share/|d/ds/|pdf\\.worker\\.min\\.mjs|placeholders/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
   ],
 };

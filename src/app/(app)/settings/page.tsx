@@ -14,22 +14,9 @@ import { reviewLimitsFrom } from "@/lib/review-limits";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { sanitizeEstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import { allUsers } from "@/lib/users";
-import {
-  callbackUrl,
-  GMAIL_MODIFY_SCOPE,
-  gmailEnabled,
-  hasCalendarScope,
-  hasDriveScope,
-  hasDriveReadScope,
-  hasTasksScope,
-  redirectHostMismatch,
-  SHARED_KEYS,
-} from "@/lib/gmail/config";
-import { listConnections } from "@/lib/gmail/connections";
 import { loadPipelines, stageUsage } from "@/lib/pipelines-server";
 import SettingsClient from "./settings-client";
-import { resolveSettingsSection, visibleSettingsSections } from "./settings-sections";
-import { loadAssistVM } from "./assist-data";
+import { visibleSettingsSections } from "./settings-sections";
 
 export const metadata = { title: "Settings — Quartzite-6" };
 
@@ -64,7 +51,6 @@ export default async function SettingsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
   const me = await requireUser();
   const isAdmin = can("manage_users", me.roles);
   // Settings cleanup: the left-menu groups this viewer may open. Every group
@@ -76,84 +62,13 @@ export default async function SettingsPage({
   const pipelineUsage = isAdmin ? await stageUsage() : {};
   const estimateOutput = isAdmin ? await getEstimateOutputDefaults() : sanitizeEstimateOutputDefaults({});
 
-  // ---- Mailboxes (Gmail) — admin surface, env-gated ----
-  const gmailOn = gmailEnabled();
-  const redirectUri = callbackUrl();
-  const redirectWarning = gmailOn ? redirectHostMismatch() : null;
-  const connections = isAdmin && gmailOn ? await listConnections() : [];
-  const connByKey = new Map(connections.map((c) => [c.mailboxKey, c]));
-  // Personal mailbox settings belong only on /account. Settings exposes the
-  // company-owned shared boxes; this prevents an admin settings view from
-  // becoming a directory of individual account preferences.
-  const mailboxVMs = SHARED_KEYS.map((k) => ({
-      key: k as string,
-      label: SHARED_LABEL[k] || k,
-      kind: "shared" as const,
-      desc:
-        k === "sales"
-          ? "Quotes, bids & customer questions."
-          : k === "installs"
-            ? "Field coordination."
-            : "General inbound — the address on the website.",
-    })).map((mb) => {
-    const c = connByKey.get(mb.key);
-    return {
-      ...mb,
-      connected: !!c,
-      address: c?.address || null,
-      connectedBy: c?.connectedBy || null,
-      initialImportDone: c?.initialImportDone ?? false,
-      lastSyncAt: c?.lastSyncAt ?? null,
-      // Grant predates the gmail.modify scope (D74) — two-way archive stays
-      // off for this mailbox until it's reconnected.
-      needsReconnect: !!c && !c.scope.includes(GMAIL_MODIFY_SCOPE),
-      // Calendar opt-in granted (D77) — drives the dashboard calendar and
-      // direct site-visit writes for this mailbox's owner.
-      calendarOn: !!c && hasCalendarScope(c.scope),
-      // Google Tasks opt-in granted (D146) — mirrors this mailbox owner's
-      // Home Queue into a "Peak" Google Tasks list, two-way for assignments.
-      tasksOn: !!c && hasTasksScope(c.scope),
-    };
-  });
-
-  // Recordings → Drive archive (Krisp recordings spec §1.3 / §5.1): the
-  // archive-account picklist runs over every connected mailbox, flagged by
-  // whether its grant already carries drive.file.
-  const recordings = {
-    archiveMailbox: settings.recordingsArchiveMailbox ?? null,
-    rootFolderCached: !!settings.recordingsArchiveFolderId,
-    customerFolders: Object.keys(settings.recordingsArchiveFolders || {}).length,
-    lastRun: settings.recordingsArchiveLastRun ?? null,
-    betaUsers: Array.isArray(settings.recordingsBetaUsers) ? settings.recordingsBetaUsers : [],
-    mailboxes: connections.map((c) => ({
-      key: c.mailboxKey,
-      address: c.address,
-      connectedBy: c.connectedBy,
-      driveOn: hasDriveScope(c.scope),
-    })),
-  };
-
-  // #283 — Catalog photos: the photos-account picklist over every connected
-  // mailbox, flagged by whether its grant carries drive.readonly.
-  const catalogPhotos = {
-    mailbox: settings.catalogPhotosMailbox ?? null,
-    mailboxes: connections.map((c) => ({ key: c.mailboxKey, address: c.address, connectedBy: c.connectedBy, readOn: hasDriveReadScope(c.scope) })),
-  };
-
-  // #334 — Assist pilot card + monthly report. Admin only, and only when the
-  // Data & Tools group is the one being opened (the report scans a month of runs).
-  const assist =
-    isAdmin && resolveSettingsSection(one(sp.section) ?? null, { visible: sections }) === "data"
-      ? await loadAssistVM(settings, one(sp.assistMonth))
-      : null;
-
   return (
     <div className="pk-content" style={{ maxWidth: 1200, padding: "26px 30px 64px" }}>
       <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.015em" }}>
         Settings
       </div>
       <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5, marginBottom: 22 }}>
-        Company setup, sales rules, integrations, team access and data tools.
+        Company setup, sales rules, team access and data tools.
       </div>
 
       {!isAdmin || sections.length === 0 ? (
@@ -203,10 +118,6 @@ export default async function SettingsPage({
           sections={sections}
           meId={me.id}
           meName={me.name}
-          gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}
-          recordings={recordings}
-          assist={assist}
-          catalogPhotos={catalogPhotos}
           pipelines={pipelines!}
           pipelineUsage={pipelineUsage}
           settings={{

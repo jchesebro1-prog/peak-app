@@ -3,20 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { VendorGroupsList } from "@/components/vendors/vendor-groups";
 import { VENDOR_COPY, vendorCardGroups, vendorCompanyIdsOf } from "@/lib/vendor-quotes/rules";
-import type { VendorCompanyVM, VendorThreadVM } from "@/lib/vendor-quotes/vm";
+import type { VendorCompanyVM } from "@/lib/vendor-quotes/vm";
 import { vendorsPanelAction } from "../vendor-actions";
 import type { VendorQuote } from "../types";
 
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 } as const;
 
 /**
- * #348 slice 4 — the Vendors card: per vendor company, its quotes on this estimate and the emails filed to it. Quotes
- * come from the LIVE editor state (so they show unsaved); company names and threads from the server, which lists a
- * thread only to someone who may see it (#341). Reloads when the estimate, `refreshKey` or the vendor companies change.
+ * The Vendors card: per vendor company, its quotes on this estimate. Quotes come from the LIVE editor state (so they
+ * show unsaved); company names from the server. Reloads when the estimate, `refreshKey` or the vendor companies change.
  */
-export function VendorsCard({ quoteId, vendorQuotes, refreshKey }: { quoteId: string; vendorQuotes: VendorQuote[]; refreshKey: number }) {
+export function VendorsCard({ quoteId, vendorQuotes, refreshKey = 0 }: { quoteId: string; vendorQuotes: VendorQuote[]; refreshKey?: number }) {
   const [companies, setCompanies] = useState<VendorCompanyVM[]>([]);
-  const [threads, setThreads] = useState<VendorThreadVM[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const companyKey = vendorCompanyIdsOf(vendorQuotes).join();
   useEffect(() => {
@@ -26,7 +24,6 @@ export function VendorsCard({ quoteId, vendorQuotes, refreshKey }: { quoteId: st
         if (!live) return;
         if (r.ok) {
           setCompanies(r.companies);
-          setThreads(r.threads);
           setErr(null);
         } else setErr(r.error);
       },
@@ -38,7 +35,7 @@ export function VendorsCard({ quoteId, vendorQuotes, refreshKey }: { quoteId: st
       live = false;
     };
   }, [quoteId, refreshKey, companyKey]);
-  const groups = useMemo(() => vendorCardGroups({ vendorQuotes, companies, threads }), [vendorQuotes, companies, threads]);
+  const groups = useMemo(() => vendorCardGroups({ vendorQuotes, companies }), [vendorQuotes, companies]);
   return (
     <div>
       <div style={CARD_LABEL}>

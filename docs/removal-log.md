@@ -175,3 +175,278 @@ What this does and does not prove:
   Tasks lists the app created earlier stay in people's Google accounts (map risk R9).
 - Native apps: the client `FIELD_COLLECTIONS` list changed, so rebuild them with the release; a device
   holding queued project / task / repair pushes will have them refused (map risk R10).
+
+## Stage 2 — done 2026-11-20
+
+Scope: the Inbox email client and the thread store, the Gmail integration (connect / callback,
+tokens, send, import, labels, polling, the `/api/gmail/sync` cron), mailbox identity and visibility,
+Inbox organization, Krisp meetings and in-app recordings, the whole Assist / AI layer (Ask AI,
+estimate suggestion, Read the PDF, AI filing, the leftover brief types), Google Calendar / Tasks /
+Drive clients, and the Google Drive catalog-photo sync. Map:
+`docs/handoff/removal-map-inbox-krisp-ai.md`.
+
+State at hand-off: `tsc --noEmit` 0 errors; `eslint src --quiet` 0 errors; every `scripts/test-*.ts`
+exits 0 (figures under Tests). Nothing committed by the stage-2 agent. No table, migration or
+`src/db/schema.ts` change; no data script. `npm run build` was NOT run.
+
+### Rules that changed
+
+- **The app sends no email.** The Send & track step keeps Status (with the next-step control),
+  Client link (+ link opens and client responses), Bidders, Vendors, Pipeline and the bonus card.
+  The email composer, the email Activity card, Open in Inbox, the per-bidder email panel and
+  "Send to all bidders" are gone. An estimate is marked sent by hand: **Send to customer →** (or the
+  status select). That is the same `setStatus("sent")` an emailed send ran, so it still moves the
+  status, cuts the sent revision (frozen spec + printed header; the revision's time is the sent
+  time), copies the current PDF onto that revision or schedules a render when the file is behind,
+  and the client link is minted on it by Copy client link. See "Mark sent" below.
+- **Bidders are stamped by hand.** "Mark submitted" (which stamps the bidder with the current
+  revision, who, when and an optional confirmation #) is now offered on every pending bidder, not
+  only bid-website rows. Download PDF, Copy link, link opens, Award / Undo award are unchanged.
+- **A box goods sale that still carries labor is refused on the manual path too** (Send to
+  customer → and the Quotes-hub / Estimator status move to Sent). The email send used to be the
+  path that checked this.
+- **Vendor quotes are upload-only.** "Add as vendor quote…" from an email, the `?vq=` hand-off,
+  "File to estimate / project…" and Read the PDF are gone. The Vendors card lists vendor companies
+  and their quotes; no email threads. A posted vendor quote never stores `extracted` /
+  `extractedIndex` (stripped on save and on move / copy).
+- **No AI anywhere.** No Assist gate, provider, prompt, run log, key store or Settings card;
+  `@anthropic-ai/sdk` is removed. ⌘K is plain search again (no Ask AI row, no thread / meeting /
+  recording groups).
+- **Google Drive is no longer a catalog photo source.** The Drive sync, its panel and "Sync now",
+  the photos-account picker and the cron rider are gone. Photos already attached stay (their
+  `Drive` source label still shows). The photo sheet still works with links and dropped files; a
+  bare file name that used to resolve from Drive now reads "Drive photos are no longer a source —
+  drop the file with the sheet or use a link".
+- **Activity feeds** (company page, vendor page, company summary) list notes, quotes, visits,
+  flame / inspection jobs and surveys — no email threads or meetings. The company page's
+  Communications, Recordings and Meetings cards are gone.
+- **Portal sign-in links are copied, not emailed** (the grant actions answer "Copy the link and
+  send it yourself"). Portal is stage 3; this was the smallest cut.
+- **Renewal one-click (flame / inspection, stage 3 code)** still mints this year's quote, then opens
+  it in the Quotes hub instead of an Inbox draft.
+
+### Deleted (269 files, 3 of them moved — see "New small modules")
+
+- Screens / routes: `src/app/(app)/{inbox,recordings}/`, `src/app/api/{gmail,inbox,assist,recordings}/`,
+  `home-inbox.tsx`, the Account signature / Krisp / Inbox-organization cards, the Settings
+  Integrations group (`groups/integrations.tsx`), `groups/assist-pilot.tsx`, `groups/assist-org.tsx`,
+  `settings/assist-data.ts`, `catalog/documents/drive-photos-panel.tsx`, the assessment report's
+  Email action (`assessments/[id]/report/actions.ts`), and in the Estimator `send-actions.ts`,
+  `assist-actions.ts`, `vendor-pdf-actions.ts`, `vendor-pdf-panel.tsx`, `suggested-bom-panel.tsx`,
+  `assist-draft-banner.tsx`, `steps/{send-composer,send-activity,bidder-send-panel}.tsx`,
+  `steps/use-bidder-walk.ts`.
+- Libraries: `src/lib/{gmail,inbox-org,meetings,krisp,recorder,assist,brief,estimate-email,vendor-pdf,google}/`,
+  the stores `comms, comms-visibility, inbox-org, meetings, recordings, assist-runs,
+  estimate-suggestions, signatures`, every `src/lib/inbox-*.ts`, `mailbox-viewer, mailbox-names,
+  inbox-thread-guard, comms-owner-stamp, comms-attachments, mail-attachments(-server),
+  thread-pdf-read, email-signature, reply-all, quote-email, recording-deep-link, attachment-limits`,
+  `vendor-quotes/{thread-attachment-server,threads-server}.ts`,
+  `part-docs/{drive-photo-plan,drive-photo-sync,drive-photo-view}.ts`, `booth/followup-server.ts`.
+- Components: `src/components/{ask,assist,meetings,recordings}/`,
+  `vendors/{project-vendors-card,filing-target-search}.tsx`.
+- Seeds / boot: `src/db/seeds/comms.ts`, `src/instrumentation.ts` (it only started the Gmail timer).
+- Scripts: `comms-stamp-owners, test-inbox-org, test-ask, test-thread-visibility, test-assist,
+  test-meetings-323, test-suggest, test-quote-email-regression, test-portal-invite`, with their
+  `package.json` entries.
+
+### Later-stage files deleted early
+
+Stage 3 (Flame / Inspections / Assessments / Portal):
+
+- `src/app/portal/meetings/page.tsx` (and its nav item) — it read Krisp meetings.
+- `src/lib/portal-invite.ts`, `scripts/test-portal-invite.ts` — the invite went out through the Gmail
+  bridge.
+
+Stage 4 (Design):
+
+- `src/lib/consulting-files-server.ts`, `src/app/api/engagement-files/` (upload + download routes) —
+  engagement files lived in Google Drive, and their only screen (the Activity tab) went in stage 1.
+  The pure `src/lib/consulting-files.ts` stays.
+
+Later-stage files cut minimally (still present): `flame-tests/{page,actions,results/page}.tsx`,
+`inspections/{page,actions}.ts(x)`, `inspections/[id]/{page,controls}.tsx`,
+`venue-assessments/{page,[id]/page,[id]/controls}.tsx`, `assessments/[id]/report/{page,toolbar}.tsx`,
+`design/engagements/[id]/page.tsx`, `src/lib/renewal-outreach.ts`, `src/app/portal/nav.ts`,
+`companies/[id]/portal-access.tsx`.
+
+### New small modules (helpers moved out of deleted directories)
+
+- `src/lib/crypto/token.ts` — `gmail/crypto.ts`, **moved unchanged** (same AES-256-GCM format, same
+  `AUTH_SECRET` key). Used by the MyETC key store, the native sign-in hand-off, portal grants and the
+  (unused) Krisp / Google connection rows. No stored secret was touched.
+- `src/lib/identity/placeholder.ts` — `inbox-org/placeholder.ts`, unchanged.
+- `src/lib/search/link-targets.ts` — `inbox-link-targets.ts`, unchanged; its action
+  `searchLinkTargetsAction` now lives in `src/app/(app)/companies/link-target-actions.ts`.
+- `src/app/(app)/people/quick-add-actions.ts` — `quickAddContactAction` (vendor Contacts tab),
+  without the thread re-sweep.
+- `src/lib/quote-pdf/file-names.ts` — `isCoverFileName`, `isBidderFileName`, `bidderFileOf`,
+  `ESTIMATE_EMAIL_ATTACH_MAX` (the 15 MB ceiling the PDF appendix merge keeps under; the name is
+  historical). `src/lib/quote-pdf/request-where.ts` — `requestWhere`.
+- `src/lib/estimate-steps/send-layout.ts` — `SEND_STEP_IDS`, `SendCard`, `sendStepLayout` (a draft
+  leads with Status; no composer / activity cards).
+- `src/lib/vendor-quotes/panel-server.ts` — `loadVendorCompanies` (the Vendors card's server half).
+- `src/lib/lead-for-create.ts` — `leadIdForCreate` (a quote opened from a lead still stamps `leadId`
+  on create).
+- `scripts/ok-type.ts` — the `Ok` check-callback type every standalone test script imported from the
+  deleted `test-inbox-org.ts`.
+
+### Wiring
+
+- Nav / Home: the Home "Inbox" tab, the Inbox nav badge and pop-out, the Home Inbox widget (registry,
+  preset, legacy layout keys `inbox` / `calendar` / `queue`), the "meetings to file" link, the Krisp
+  triggers on Home, and the Ask AI row / phone button / drawer row are gone.
+- Bell: "Customers waiting on a reply" (`comms`) removed, with its Account switch.
+- Pop-outs: kinds are `estimate` and `customer`; the `thread` / `inbox` kinds, `threadPopUrl`, the
+  `thread` / `inbox` broadcast entities and the legacy `inbox-changed` mapping are gone.
+- Settings: the Integrations group is removed (`?section=integrations` now lands on Company);
+  Data & Tools lost the Recordings pilot and Assist pilot cards; Team add / rename no longer stamp
+  mailbox names. Account: signature, mailbox connect, Inbox organization and Krisp cards removed.
+- Cron: `vercel.json` has one job, `/api/drive/sync` (venue address stamp + ETC daily price sync).
+  `/api/gmail/sync` is deleted. Middleware no longer exempts `api/gmail/sync` or
+  `api/recordings/upload`.
+- Offline sync: `recordings` removed from `SYNCABLE_COLLECTIONS` and `FIELD_COLLECTIONS` together.
+- Go-live wipe: `comms`, `meetings`, `recordings` joined `assist_runs` on the keep-list
+  (`CONFIG_COLLECTIONS`) so "Clear demo data" never empties tables of removed features. Their
+  `DOC_TABLES` registrations are untouched.
+- Settings type / defaults: `recordingsArchive*`, `recordingsBetaUsers`, `catalogPhotosMailbox`,
+  `assistUsers`, `assistFeatures`, `assistMonthlyCapUsd` and `canRecord` removed from
+  `src/lib/settings.ts` and the seed defaults. Stored values stay.
+- `.env.example`: Gmail, Assist and Inbox-organization variables removed; `CRON_SECRET` kept and
+  re-described. `DEPLOY.md` §5–§6 replaced by clean-up notes.
+- npm: removed `@anthropic-ai/sdk`, `@capacitor/local-notifications`,
+  `@capgo/capacitor-audio-recorder`, `@capawesome-team/capacitor-android-foreground-service`
+  (`npm install --package-lock-only`; nothing else changed). The two generated native plugin lists
+  (`ios/App/CapApp-SPM/Package.swift`, `android/{capacitor.settings.gradle,app/capacitor.build.gradle}`)
+  had the recorder / foreground-service lines removed by hand, as `npx cap sync` would.
+
+### The vendor price-list check (map risk R2)
+
+Nothing was left to move. Stage 1 already removed the only daily work (`ensureVendorAssignments`,
+which created queue assignments). The price-list status itself (`vendorStatus` in
+`src/lib/vendor-status.ts`: no list / no claims / newer list / outdated / current) is computed when a
+vendor or catalog page renders and is still shown there; it stores nothing and needs no cron.
+
+### "Mark sent" (map risk R8) — trace
+
+`Send to customer →` → `nsSendAction` → `sendQuoteToCustomer` → `setStatus(id, "sent")`; the status
+select → `setQuoteStatus` → the same `setStatus`. The removed email send called exactly this
+`sendQuoteToCustomer` first, then minted the link, attached the PDF and recorded the email.
+
+| What an emailed send did | Manual path |
+| --- | --- |
+| status → sent, pipeline stage follows | same `setStatus` |
+| sent revision cut (spec + printed header frozen, by / at) | same; there is no separate `sentAt` field — the sent revision's `at` is the sent time |
+| PDF on the revision | same: copied when current, else a render is scheduled and settles onto it |
+| approval gate, version check | same (`checkApprovalGate`, `expectUpdatedAt`) |
+| client link | Copy client link (`ensureShareLink`), refused on a draft, as before |
+| bidder revision stamp | "Mark submitted" (`markSubmitted` → `revSent = current sent revision`), now on every pending bidder |
+| box sale with labor refused | **was missing — added** (`boxSaleSendProblem` in `sendQuoteToCustomer` and the status action) |
+| stored per-bidder PDF copy | not stored; Download PDF and the portal render the bidder PDF on demand, as they already could |
+| follow-up task | already gone (stage 1) |
+| email / thread record (`estimateEmails`) | gone with the Inbox |
+
+Test: `scripts/test-mark-sent.ts` (`npm run test:mark-sent`, 23 checks) — the approval gate still
+applies, one sent revision with who / when and the frozen spec and header, no double send, the status
+select does the same, the client link is refused on a draft and minted after, Mark submitted stamps
+an email bidder with the sent revision and again after a revise + re-send, a box sale with labor
+stays a draft.
+
+One thing not changed: "Mark submitted" on an estimate that was never marked sent stamps the
+current revision number without a frozen revision behind it (as it always did for bid-website
+rows). Mark the estimate sent first.
+
+### Judgement calls
+
+1. Stored keys of removed features on a quote (`estimateEmails`, `emailSending`, `assistDraft`,
+   `assistNudge`, `assistNudgeLeaseUntil`) stay typed as `unknown` and `update()` still drops them
+   from incoming saves, so an old browser tab cannot write them back. Their writers are deleted.
+2. `fromThreadId` on a stored vendor quote is still kept by the save when well-formed; nothing
+   writes a new one and nothing links to it.
+3. The catalog rename engine still rewrites SKUs inside the stored `drive_photo_sync` blob (the
+   step and its tests are unchanged; the blob id is now a local constant).
+4. Pop-out tests were ported from the removed `thread` kind to `estimate` / `customer` rather than
+   cut, and the #43 layout tests from the `inbox` widget id to `my-leads`.
+5. The addendum note now reads "…Mark it sent again when it's ready, then mark each bidder's new
+   revision submitted." An addendum on a sent estimate still moves it back to Draft (map risk R9).
+6. `src/lib/parties/bid-send.ts` lost the email-only helpers and copy (`bidderEmailNeed`,
+   `bidderSendPlan`, `bidderSubject`, the addenda-since-send helpers, the walk summary). The Bidders
+   view model lost `sendLabel`, `failedText`, `failedUnknown`, `noEmail`, `revisedSubject`, `plan`,
+   `canSend`, `addendaAfterSend`.
+7. The legacy "Dashboard defaults" keys `calendar`, `queue` and `inbox` were removed from
+   `DASHBOARD_WIDGETS` (stage 1 had left the first two); a stored layout naming them is ignored.
+
+### Tests
+
+**Found and fixed: stage 1 had switched off most of the main harness.** `scripts/test-review-and-spec.ts`
+ends in one promise chain (`seeded().then(suiteA).then(suiteB)… .finally(teardownFixtures)` and the
+exit code). Stage 1's compiler-driven prune cut that whole statement, because it named suites that
+were deleted. From then on only the top-level assertions ran: none of the ~330 remaining async
+suites (bids, vendors, parties, booth, assessments, portal, specs, pricing, the DB-backed checks),
+fixtures were never torn down, and the script exited 0 whatever failed. Stage 1's "10,674 PASS"
+was that reduced run. Stage 2 restored the chain (same order, suites of deleted features left out,
+each suite wrapped so one that throws is reported as a failure and the rest still run) and triaged
+what it surfaced: 32 suites that only covered removed features were deleted (Daylite, Rewards,
+tasks, repairs / rentals, Krisp recordings and archive, the estimate email send / track, Drive
+photos), about 45 assertions that pinned stage-1 removals (won-quote spawns, "Install sold"
+assignments, project pipelines, the perks line) were cut, and a handful were updated to the new
+behaviour (the client-response notify no longer creates a task; the daily cron route pin).
+
+Otherwise the same method as stage 1 (compiler-driven prune, then one suite at a time on a
+throwaway `PGLITE_PATH`). Every removed, ported or restored statement is listed in
+`docs/removal-stage2-pruned-tests.txt` (about 2,900 entries). `test-review-and-spec.ts` went from
+66,841 to about 62,100 lines; `test-vendors.ts` from 1,267 to about 200 (it was mostly Read the PDF
+and the email hand-off).
+
+Result on 2026-11-20: `test-review-and-spec.ts` 19,764 PASS / 0 FAIL, `ALL PASSED`, exit 0; every other `scripts/test-*.ts` exits 0
+(30 scripts, each run alone). New: `scripts/test-mark-sent.ts` (23 checks).
+
+Lessons for stages 3–4:
+
+- **After pruning the harness, check that the suite chain at the end of the file is still there**
+  and that the run prints `ALL PASSED`. Drop deleted suites from the chain by name; never let the
+  prune take the statement.
+- Re-run `tsc` before every prune pass. A prune against a stale error file cut live code once here
+  (all scripts were restored from `HEAD` and redone).
+- The runtime cut tool has two traps: its crash-cut can remove a whole suite's entry call, and a
+  failing message that starts like a template-literal message (`` `parties db: ${role} …` ``) makes
+  it cut those too. Both happened here and were put back; check that "cut N" equals "matched N".
+- The prune cuts a statement whose example value is a removed kind (`"thread"`, the `inbox` widget).
+  Where the statement tested a kept feature it was ported instead: pop-outs (now `estimate` /
+  `customer`), saved layouts (`my-leads`), portal nav indexes, the Settings groups, box-sale and
+  discard-confirm source pins, and the portal bidder tests (a delivered revision is now stamped the
+  way Mark submitted does it).
+
+Where one assertion mixed a kept check with a removed one and could not be split cheaply, the whole
+assertion went. Known cases worth re-adding in a shorter form: `#P3 send UI` (the Send step card
+order — `test-mark-sent.ts` now pins the layout), bidder DB checks that walked an email send before
+asserting on the row, the vendor "hand-off" pins around the vendor quote modal, and the
+`pipelines-server` save checks (an invalid pipeline refused, the saved label read back) — they
+exercised the project pipeline, whose input stage 1 had pruned to `{}`; a quote-pipeline version
+would be worth having.
+
+### Loose ends
+
+- Unused code left in later-stage files: `flameLetterDoc` / `inspectionLetterDoc` and their helpers
+  in `src/lib/renewal-outreach.ts` (they built the emailed renewal PDF), the renewal email
+  templates in `src/lib/templates.ts`, `followUpCopy` in `src/lib/booth/capture.ts`.
+- Unused but harmless in kept code: `bidderSentState` / `bidderFailedState` in
+  `src/lib/parties/bids.ts`, the `track` input of the Estimator readiness badges,
+  `mergeSettingsObject` in `src/lib/settings.ts` (its last caller was the Assist switches; its race
+  test still runs), `DocCond` `where` on `searchDocs`.
+- `ESTIMATE_EMAIL_ATTACH_MAX` keeps its name. Whether the 14 MB finished-PDF cap still matters with
+  nothing emailed is Jeff's call.
+- `@capacitor/filesystem` and `@capacitor/preferences` are no longer imported by `src/` (only the
+  recorder used them) but are still in `package.json` and the native plugin lists. Remove them with
+  the next `npx cap sync`.
+- Native apps: rebuild both after `npx cap sync`; the microphone / notification permission strings
+  can go, and a shipped build still schedules the two brief notifications (ids 64501 / 64502) until
+  a new build cancels them.
+- Secrets still at rest, unused: `gmail_connections` (OAuth refresh tokens), `krisp_connections`
+  (API keys), the `assist_secrets` blob (Anthropic key). Revoke them at the source (map risk R6).
+- `fileRefHref` in `src/lib/consulting-files.ts` (stage 4) still builds `/api/engagement-files/…` links; the
+  routes are gone and no screen calls it.
+- Portal "Resend link" now only answers with the copy-it note; the bidder portal rule still reads
+  `revSent` as "delivered". Both go with stage 3.
+- `AGENTS.md` got a short stage-2 note at the top of the phase list; phases 7, 8, 26 (Drive half),
+  42 (Phase 3), 46, 53–58, 60, 63 still describe removed code. `MASTER-HOWTO.md` and `docs/specs/*`
+  are untouched.

@@ -14,7 +14,6 @@ export default function HomeGreeting({
   openReviewCount,
   lastLogin,
   timezone,
-  meetingsToFile = 0,
 }: {
   greeting: string;
   firstName: string;
@@ -22,8 +21,6 @@ export default function HomeGreeting({
   openReviewCount: number;
   lastLogin: string;
   timezone: string;
-  /** #323 — the viewer's unfiled, non-noise Krisp meetings (Inbox → Meetings). */
-  meetingsToFile?: number;
 }) {
   return (
     <div
@@ -49,27 +46,6 @@ export default function HomeGreeting({
         </div>
       </div>
       <div className="pkh-actions" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        {meetingsToFile > 0 && (
-          <Link
-            href="/inbox?view=meetings"
-            className="pkh-outbtn"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#3a3f4a",
-              background: "#fff",
-              border: "1px solid #e4e7ec",
-              padding: "11px 16px",
-              borderRadius: 9,
-              textDecoration: "none",
-            }}
-          >
-            {meetingsToFile} meeting{meetingsToFile === 1 ? "" : "s"} to file →
-          </Link>
-        )}
         <Link
           href="/reviews"
           className="pkh-outbtn"

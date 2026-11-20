@@ -2,7 +2,7 @@
    test DB. Run alone with `npx tsx scripts/test-assessments.ts` (pure checks only). */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { ASSESSMENT_DEF, allQuestions, allModules, getDef } from "../src/lib/assessments/defs";
 import type { AssessmentDef, Cond, ModuleDef, QuestionDef, Rule } from "../src/lib/assessments/defs/types";
 import type { Answer, Answers } from "../src/lib/assessments/answers";
@@ -54,7 +54,6 @@ import {
 } from "../src/lib/assessments/report-model";
 import { findingsPdfHref, parseFindingsScope } from "../src/lib/assessments/register";
 import { assessmentIdOfPdfPath, assessmentPdfAttachment, assessmentPdfFitsThread, assessmentPdfPath, isAssessmentPdfFile, isAssessmentPdfPath } from "../src/lib/assessments/report-pdf-path";
-import { attachmentHref, attachmentMimePart } from "../src/lib/comms-attachments";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { VISIT_TYPES } from "../src/lib/assessments/defs";
 import { NAV, activeKeyFor, parentGroupOf } from "../src/components/nav/nav-data";
@@ -632,10 +631,7 @@ async function finalReviewEmailChecks(ok: Ok) {
   threw = false;
   try { assessmentPdfAttachment("AS-1002", "x.pdf", 1, P); } catch { threw = true; }
   ok(threw, "final I2: an attachment for another assessment's folder is refused");
-  ok(attachmentHref(att) === att.href, "final I2: the Inbox reader links the stored copy");
   const reads: string[] = [];
-  const part = await attachmentMimePart(att, async (p) => { reads.push(p); return Buffer.from("%PDF-1.7"); });
-  ok(part?.dataBase64 === Buffer.from("%PDF-1.7").toString("base64") && part.mime === "application/pdf" && reads.join() === P, "final I2: the sender builds the MIME part from the stored bytes");
   // which threads may read it
   ok(assessmentPdfFitsThread(P, { customerId: "c1", link: null }, "c1") && !assessmentPdfFitsThread(P, { customerId: "c2", link: null }, "c1"), "final I2: a thread for the assessment's customer reads it; another customer's doesn't");
   ok(assessmentPdfFitsThread(P, { customerId: null, link: null }, "c1") && !assessmentPdfFitsThread(P, { customerId: null, link: { type: "lead", id: "L-1" } }, "c1"), "final I2: an unlinked thread with no customer reads it; a linked one without a customer doesn't");
@@ -647,12 +643,6 @@ async function finalReviewEmailChecks(ok: Ok) {
   ok(over.mode === "refuse" && over.error === EMAIL_TOO_LARGE, "final I2: past 10 MB it is refused even with Blob");
   const local = emailAttachmentMode(EMAIL_INLINE_MAX_BYTES + 1, false);
   ok(emailAttachmentMode(EMAIL_INLINE_MAX_BYTES, false).mode === "inline" && local.mode === "refuse" && local.error === EMAIL_TOO_LARGE_LOCAL, "final I2: without Blob it rides inline up to 1.5 MB, then refuses");
-  // wiring
-  const act = readFileSync(join(ROOT, "src/app/(app)/assessments/[id]/report/actions.ts"), "utf8");
-  ok(/emailAttachmentMode\(r\.pdf\.length, blobEnabled\(\)\)/.test(act) && /storeAssessmentPdf\(a\.id, r\.pdf/.test(act) && /assessmentPdfAttachment\(/.test(act) && act.indexOf("dataUrl") > act.indexOf('plan.mode === "reference"'), "final I2: Email report stores + attaches by reference, inline only in the no-Blob branch");
-  const br = readFileSync(join(ROOT, "src/lib/gmail/bridge.ts"), "utf8");
-  const tpr = readFileSync(join(ROOT, "src/lib/thread-pdf-read.ts"), "utf8");
-  ok(/readThreadPdf\(path, t\)/.test(br) && /isAssessmentPdfPath\(path\)/.test(tpr) && /assessmentPdfFitsThread\(path, t, a\?\.customerId \?\? null\) \? readAssessmentPdf\(path\)/.test(tpr), "final I2: the Gmail bridge reads an assessment PDF only when it fits the thread, from Blob");
   const rt = readFileSync(join(ROOT, "src/app/api/assessments/[id]/report-pdf/route.ts"), "utf8");
   ok(/isAssessmentPdfFile\(file\)/.test(rt) && /streamAssessmentPdf\(`assessment-pdfs\/\$\{id\}\/\$\{file\}`\)/.test(rt), "final I2: the report route serves a stored copy by ?file=, guarded");
 }
@@ -1886,7 +1876,6 @@ async function task9DbChecks(ok: Ok) {
     const ordered = [f1.doc, f2.doc].sort((a, b) => a.printedId!.localeCompare(b.printedId!, undefined, { numeric: true }));
     ok(ordered[0].key === k9(2), "quote db: precondition — the ELC finding's printed id sorts first");
     const rep = await quoteFromFindings([k9(1), k9(2)], "repair", U);
-    ok(rep.ok && !rep.quote && rep.href === `/repairs/quote?customer=${encodeURIComponent(co1)}&findings=${encodeURIComponent(`${k9(2)},${k9(1)}`)}` && (await getFinding(k9(1)))!.status === "open", "quote db: Repair quote hands over /repairs/quote?customer=&findings= (printed-id order) and creates nothing");
 
     // estimator: a draft quote, linked
     const est = await quoteFromFindings([k9(2), k9(1)], "estimator", U);
@@ -2037,8 +2026,6 @@ async function task10Checks(ok: Ok) {
   ok(six2.length === six.length && six2.equals(six), "report PDF routes: a 6 MB buffer streams back byte-identically (shared chunker)");
   const routeSrc = ["src/app/api/assessments/[id]/report-pdf/route.ts", "src/app/api/assessments/findings-pdf/route.ts"].map((f) => readFileSync(join(ROOT, f), "utf8"));
   ok(routeSrc.every((s) => s.includes("zipStream(r.pdf)") && !s.includes("new Uint8Array(r.pdf)")), "report PDF routes: both stream the PDF instead of buffering it");
-  const actSrc = readFileSync(join(ROOT, "src/app/(app)/assessments/[id]/report/actions.ts"), "utf8");
-  ok(!/link:\s*\{/.test(actSrc), "email report: the draft carries no invented link type (the customer rides customerId)");
 
   const gaps = ["Question: Seat count", `Prompt: ${ruleP.prompt!.text}`, `Prompt: ${flagQ.flag!.text}`, "Prompt: Nothing like this exists"];
   const fg = followUpGaps(gaps, def, findings);

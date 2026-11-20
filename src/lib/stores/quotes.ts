@@ -12,7 +12,6 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
-import type { AssistNudge } from "@/lib/brief/types";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
 import { isBoxSaleQuoteType, isBoxSaleSource } from "@/lib/estimate-box-sale/rules";
@@ -421,11 +420,6 @@ export type Quote = {
    *  (QUOTE_CONTENT_FIELDS — a toggle stales the PDF) and frozen in a sent revision's docFields. Nothing narrative is
    *  ever deleted for it. Read through boxSaleOf (src/lib/estimate-box-sale/rules.ts). */
   boxSale?: boolean;
-  /** Estimator Phase 3 — the comms threads this estimate was emailed on
-   *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
-   *  by recordEstimateEmail under the row lock; update() drops it so an
-   *  Estimator save can never erase it; never content, never snapshotted. */
-  estimateEmails?: EstimateEmailEntry[] | null;
   /** Estimator Phase 4 (spec §11.3) — review comments pinned to systems
    *  (sectionId null = the whole estimate), oldest first, ≤ 200. Written only
    *  by addReviewComment / resolveReviewComment / deleteReviewComment under
@@ -433,54 +427,20 @@ export type Quote = {
    *  never content (not a QUOTE_CONTENT_FIELDS member), never snapshotted, never
    *  copied by buildQuote, never bumps updatedAt. Staff-only. */
   reviewComments?: ReviewComment[] | null;
-  /** Estimator Phase 3 fix round 1 — an in-flight estimate email: who holds
-   *  the send and until when (epoch-ms). Written only by
-   *  claimEstimateEmailSend / releaseEstimateEmailSend under the row lock;
-   *  update() drops it; never content (not a QUOTE_CONTENT_FIELDS member),
-   *  never snapshotted, never bumps updatedAt. An expired claim is ignored. */
-  emailSending?: EstimateEmailClaim | null;
-  /** #334: set when Assist drafted this estimate from an email (D877). Never
-   *  content, never snapshotted, never copied by buildQuote; staff-only. */
-  assistDraft?: AssistDraftInfo;
-  /** AI daily brief (spec §2) — a follow-up note + nudge email for a quiet
-   *  sent quote. Written only by setAssistNudge (a key-level write — never
-   *  under the row lock's read-modify-write, never bumps updatedAt, never
-   *  touches estNo); update() drops it. Never content, never snapshotted;
-   *  staff-only. Fresh while the quote is still sent and `basis` is its send
-   *  time (`nudgeFresh`). */
-  assistNudge?: AssistNudge | null;
-  /** AI daily brief — the draft queue's per-quote lease (epoch-ms), taken and
-   *  released by compare-and-set (`casAssistNudgeKey`); update() drops it. */
-  assistNudgeLeaseUntil?: number | null;
+  /** Stored keys of removed features (estimate emails, an in-flight send claim, the Assist draft marker, the daily
+   *  brief's nudge and its lease). Nothing reads or writes them; update() still drops them from incoming saves so an
+   *  old browser tab can't write them back. */
+  estimateEmails?: unknown;
+  emailSending?: unknown;
+  assistDraft?: unknown;
+  assistNudge?: unknown;
+  assistNudgeLeaseUntil?: unknown;
   /** #368 — what the last Revise re-priced to today's catalog (estimate-reprice/rules.ts). Written only by
    *  setStatus's revise, in the same write as the move to Draft; a revise that changed nothing clears it.
    *  update() drops it; never content, never snapshotted, never copied by buildQuote. Staff-only (the Build banner). */
   repricedOnRevise?: RepricedOnRevise | null;
 };
 
-/** #334 (D877) — where an Assist-drafted estimate came from. `reasons` is
- *  keyed `"<sectionId>:<lineId>"`; `dismissedAt` hides the Estimator banner. */
-export type AssistDraftInfo = {
-  runId: string;
-  threadId: string;
-  at: number;
-  notes: string;
-  reasons: Record<string, string>;
-  dismissedAt?: number;
-};
-
-/** One in-flight estimate email (`Quote.emailSending`). */
-export type EstimateEmailClaim = { by: string; until: number };
-
-/** How long a send claim holds — the Estimator page's maxDuration (120 s). */
-export const ESTIMATE_EMAIL_CLAIM_MS = 120_000;
-
-/** One emailed copy of the estimate: the comms thread, the sent revision it
- *  carried, when, by whom (user name) and the To line. */
-export type EstimateEmailEntry = { threadId: string; rev: number; at: number; by: string; to: string; partyId?: string };
-
-/** Most entries kept on a quote; the oldest are dropped past it. */
-export const ESTIMATE_EMAILS_MAX = 50;
 
 /** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
 export type QuoteShareLink = {
@@ -1091,42 +1051,6 @@ export async function markBidScopeOnly(quoteId: string): Promise<boolean> {
   return res.ids.length > 0;
 }
 
-/** AI daily brief (spec §2) — the ONLY writer of `Quote.assistNudge`: set
- *  (or, with null, remove) it as one key-level write (`doc || {assistNudge}`
- *  in SQL). The UPDATE takes the row lock itself, so it lands before or after
- *  a patchQuote, never inside one; estNo/estSuffix and updatedAt are left as
- *  stored. False = missing / deleted quote. */
-export async function setAssistNudge(quoteId: string, nudge: AssistNudge | null): Promise<boolean> {
-  const res = await patchDocKey("quotes", [quoteId], "assistNudge", nudge === null ? undefined : nudge);
-  return res.ids.length > 0;
-}
-
-/** AI daily brief — compare-and-set the nudge or its lease (the draft queue's
- *  writes): `next` lands only if the stored value still equals `expected`
- *  (undefined = absent). One key, in SQL — estNo and updatedAt untouched. */
-export async function casAssistNudgeKey<K extends "assistNudge" | "assistNudgeLeaseUntil">(
-  quoteId: string,
-  key: K,
-  expected: Quote[K] | undefined,
-  next: Quote[K] | undefined
-): Promise<boolean> {
-  return casDocKey("quotes", quoteId, key, expected, next);
-}
-
-/** #334 (D877) — hide an Assist-drafted estimate's banner. Under the row
- *  lock; never bumps updatedAt (a dismiss is not an edit, so it can't stale an
- *  open Estimator's version-checked send). False when there is no live draft
- *  marker to dismiss. */
-export async function dismissAssistDraft(id: string, now: number = Date.now()): Promise<boolean> {
-  let wrote = false;
-  await patchQuote(id, (q) => {
-    if (!q.assistDraft || typeof q.assistDraft !== "object" || q.assistDraft.dismissedAt) return;
-    q.assistDraft = { ...q.assistDraft, dismissedAt: now };
-    wrote = true;
-  });
-  return wrote;
-}
-
 /* ---- revisions (punch item 24) ---- */
 
 /** #293 slice 3 — the header fields a revision freezes (spec §1.5). Pure. */
@@ -1475,37 +1399,6 @@ export async function recordShareOpen(id: string, rev: number, now: number): Pro
   return wrote;
 }
 
-/**
- * Estimator Phase 3 — the ONLY writer of `Quote.estimateEmails`: remember
- * that this estimate went out on a comms thread. Under the row lock, append-
- * only, de-duplicated by threadId (a repeat is a no-op), capped at
- * ESTIMATE_EMAILS_MAX with the oldest dropped. Never bumps `updatedAt` and
- * never changes content. false = nothing written (unknown quote, a malformed
- * entry, or the thread was already recorded).
- */
-export async function recordEstimateEmail(id: string, entry: EstimateEmailEntry): Promise<boolean> {
-  const threadId = typeof entry?.threadId === "string" ? entry.threadId.trim() : "";
-  if (!threadId || threadId.length > 200) return false;
-  if (!Number.isSafeInteger(entry.rev) || entry.rev < 0 || !Number.isFinite(entry.at)) return false;
-  const clean: EstimateEmailEntry = {
-    threadId,
-    rev: entry.rev,
-    at: entry.at,
-    by: String(entry.by ?? "").slice(0, 200),
-    to: String(entry.to ?? "").slice(0, 1000),
-    // #348 2b-ii — which bidder this email went to (a bidder send only).
-    ...(typeof entry.partyId === "string" && /^pty_[0-9a-f]{16}$/.test(entry.partyId) ? { partyId: entry.partyId } : {}),
-  };
-  let wrote = false;
-  await patchQuote(id, (doc) => {
-    const cur = Array.isArray(doc.estimateEmails) ? doc.estimateEmails : [];
-    if (cur.some((e) => !!e && e.threadId === threadId)) return;
-    doc.estimateEmails = [...cur, clean].slice(-ESTIMATE_EMAILS_MAX);
-    wrote = true;
-  });
-  return wrote;
-}
-
 export type ReviewCommentWrite =
   | { ok: true; comments: ReviewComment[]; comment?: ReviewComment }
   | { ok: false; reason: "gone" | "invalid" | "no-system" | "full" | "missing" | "forbidden" };
@@ -1602,42 +1495,6 @@ export async function deleteReviewComment(id: string, commentId: string, allow: 
     res.v = { ok: true, comments: doc.reviewComments };
   });
   return res.v;
-}
-
-/**
- * Estimator Phase 3 fix round 1 — claim the quote's one in-flight estimate
- * email (`Quote.emailSending`) under the row lock. "busy" = another send's
- * claim hasn't expired; an expired claim is taken over. Never bumps
- * `updatedAt`, never changes content. Returns the claim to release with.
- */
-export async function claimEstimateEmailSend(
-  id: string,
-  by: string,
-  now: number,
-  ttlMs: number = ESTIMATE_EMAIL_CLAIM_MS
-): Promise<{ ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" }> {
-  if (!Number.isFinite(now) || !(ttlMs > 0)) return { ok: false, reason: "gone" };
-  let out: { ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" } = { ok: false, reason: "gone" };
-  await patchQuote(id, (doc) => {
-    const cur = doc.emailSending;
-    if (cur && typeof cur.until === "number" && cur.until > now) {
-      out = { ok: false, reason: "busy" };
-      return;
-    }
-    const claim: EstimateEmailClaim = { by: String(by ?? "").slice(0, 200), until: now + ttlMs };
-    doc.emailSending = claim;
-    out = { ok: true, claim };
-  });
-  return out;
-}
-
-/** Release a claim taken by claimEstimateEmailSend — only that exact claim
- *  (a later sender's takeover of an expired one is left alone). */
-export async function releaseEstimateEmailSend(id: string, claim: EstimateEmailClaim): Promise<void> {
-  await patchQuote(id, (doc) => {
-    const cur = doc.emailSending;
-    if (cur && cur.by === claim.by && cur.until === claim.until) doc.emailSending = null;
-  });
 }
 
 /** #301 slice C (R13) — mirror the drawings list onto the latest SENT
