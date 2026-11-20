@@ -133,7 +133,8 @@ export function addOptions(p: Pick<QuoteDocumentProps, "sections" | "pdfOptions"
   return out;
 }
 
-export type CoverTotals = { credit: number; creditLabel: string | null; totalLabel: string; total: number; standingLines: string[] };
+/** `rewardsLine` is vestigial (the Rewards program was removed): always "", kept so stored props stay byte-identical. */
+export type CoverTotals = { credit: number; creditLabel: string | null; totalLabel: string; total: number; rewardsLine: string; standingLines: string[] };
 
 /** R1: the totals lines exactly where QuoteDocument prints them. */
 export function coverTotals(p: Pick<QuoteDocumentProps, "t" | "sections" | "isPortalCatalog" | "standingLines">): CoverTotals {
@@ -145,6 +146,7 @@ export function coverTotals(p: Pick<QuoteDocumentProps, "t" | "sections" | "isPo
     creditLabel: credit > 0 ? CREDIT_APPLIED_LABEL : null,
     totalLabel: anyPor ? "Total (excludes items pending price)" : "Total",
     total: p.t.grand,
+    rewardsLine: "",
     standingLines: (p.standingLines || []).map((l) => l.trim()).filter(Boolean),
   };
 }

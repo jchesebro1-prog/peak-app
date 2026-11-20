@@ -32,7 +32,7 @@ export type CoverDocumentProps = {
   /** `heading` (Batch 5 #56) — each scope's own heading: the system name, else its discipline, else "Scope N". */
   scopes: Array<{ id: string; heading: string; text: string; missing: boolean; priceLabel: string }>;
   summary: string;
-  totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; standingLines: string[] };
+  totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
   options: Array<{ label: string; desc: string; reason: string; price: string }>;
   /** Estimator Phase 2b — present only when the quote has printed alternates
    *  (always shown then, whatever the Options toggle). */
@@ -129,6 +129,7 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
       creditAmount: t.credit > 0 ? "−" + fmt(t.credit) : null,
       totalLabel: t.totalLabel,
       total: fmt(t.total),
+      rewardsLine: t.rewardsLine,
       standingLines: t.standingLines,
     },
     options: addOptions(d).map((o) => ({ label: o.label, desc: o.desc, reason: o.reason, price: fmt(o.price) })),

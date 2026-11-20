@@ -854,7 +854,6 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
     const forged = { id: id("k-pushed"), title: "Pushed", assigneeUserId: ME.id, assigneeName: ME.name, status: "open", threadId: ids.pushed, threadShare: { threadId: ids.pushed, by: OWNER.id, to: ME.id, at: NOW }, createdAt: NOW };
     await createFixture("tasks", sanitizePushedDoc("tasks", forged, null) as never);
     ok(!(await sees(ME, ids.pushed)) && !(await getDoc<{ id: string; threadId?: string }>("tasks", forged.id))?.threadId, "task share db (#351): a pushed task (insert) carrying a forged stamp and threadId shares nothing; both are dropped");
-    await createFixture("tasks", pushedOver as never);
     const route = readFileSync("src/app/api/sync/push/route.ts", "utf8");
     ok(/let doc: Record<string, unknown> = sanitizePushedDoc\(coll, \{ \.\.\.(?:rec\.doc|pushDoc), id: rec\.id \}, existing\.length \? \{ doc: existing\[0\]\.doc, deleted: !!existing\[0\]\.deleted \} : null\);/.test(route), "sync push (#351): the push route sanitises every document before insert or update");
     ok(!readFileSync("src/lib/inbox-org/ai-court.ts", "utf8").includes("threadShare"), "task share db (#351): applyPromises never sets threadShare");

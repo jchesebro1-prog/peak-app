@@ -285,14 +285,6 @@ async function cmdEnrich(hosted: boolean) {
     const state = get(r, cols.state);
     const zip = get(r, cols.zip);
     matchedCo++;
-    if (coHasAddress && !OVERWRITE) coSkipped++;
-    else {
-      coUpdated++;
-    }
-    if (siteHasAddress && !OVERWRITE) venueSkipped++;
-    else {
-      venueUpdated++;
-    }
   }
 
   console.log("");
