@@ -1,17 +1,16 @@
 /**
  * Design module consolidation (D97) — the single source of truth for the
- * old→new path map.
+ * old→new path map. The Design overview, Quick Design, the Grid, Specs and
+ * Consulting are gone (stage 4 of the shrink); what is left maps old paths
+ * onto the kept builders (Assembly Builder, Lineset Builder, Motor Library)
+ * and the Knowledge tools.
  *
  * Deliberately dependency-free: imported by server route stubs AND by
  * scripts/test-review-and-spec.ts, so it must not reach the doc-store.
  */
 
-const QS_ORDER: Record<string, string[]> = {
-  "/consulting/markup": ["eng", "phase", "doc"],
-};
-
 function qs(pathname: string, query: Record<string, string>): string {
-  const keys = QS_ORDER[pathname] || Object.keys(query);
+  const keys = Object.keys(query);
   const parts: string[] = [];
   for (const k of keys) {
     const v = query[k];
@@ -40,24 +39,15 @@ export function designRedirect(
   pathname: string,
   query: Record<string, string>
 ): string | null {
-  // Bare /design is the new Overview. Only the ?id= deep link moves.
-  if (pathname === "/design") {
-    return query.id ? "/design/designs?id=" + encodeURIComponent(query.id) : null;
-  }
-
-  if (pathname === "/consulting") return "/design/engagements";
-
-  if (pathname.startsWith("/consulting/")) {
-    const rest = pathname.slice("/consulting/".length);
-    return "/design/engagements/" + rest + qs(pathname, query);
-  }
+  // The Design overview is gone: /design lands on the Assembly Builder.
+  if (pathname === "/design") return "/design/assemblies";
 
   // Subassemblies became a tab of the Assembly Builder (#130), then merged
   // into its one list (#210).
   if (pathname === "/design/subassemblies") return "/design/assemblies";
   if (KNOWLEDGE_MOVES[pathname]) return KNOWLEDGE_MOVES[pathname];
 
-  if (pathname === "/design-studio") return "/design";
+  if (pathname === "/design-studio") return "/design/assemblies";
 
   // Weights was folded into the lineset builder — it has no standalone
   // /design/weights page, so it needs an explicit mapping instead of
@@ -71,8 +61,6 @@ export function designRedirect(
     const next = "/design/" + leaf;
     return (KNOWLEDGE_MOVES[next] || next) + qs(pathname, query);
   }
-
-  if (pathname === "/quick-design") return "/design/quick" + qs(pathname, query);
 
   return null;
 }

@@ -21,7 +21,6 @@ import { getSettings, type Office } from "@/lib/settings";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { getFixtureRates, loadBonusRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
-import { allSpecRecords } from "@/lib/stores/spec-records";
 import { listTrackSeries } from "@/lib/stores/track-series";
 import { listLinesetTypes, listPipeTypes } from "@/lib/stores/rigging-types";
 import { linesetTypeSkus, pipeTypeSkus } from "@/lib/rigging-config/types";
@@ -29,12 +28,11 @@ import { getSystemCategories } from "@/lib/stores/system-categories";
 import type { CategoryOption } from "@/lib/system-categories";
 import { listIntros } from "@/lib/stores/narrative-intros";
 import { seriesSkus } from "@/lib/track-series";
-import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
-import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
+import { mergedConsultingAssumptions } from "@/lib/assumptions";
 import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
 import { quoteSentOnce } from "@/lib/quote-people-lock";
 import EstimatorClient from "./estimator-client";
@@ -306,12 +304,12 @@ export default async function EstimatorPage({
   const preCategory = handoff?.category || undefined;
 
   const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
-  // #221: a quote created by a different builder (flame test, repair,
-  // inspection, consulting, rental) opens its own builder, not the
-  // Estimator — this is the server-side backstop behind every link fix.
+  // #221: a quote whose builder was removed (consulting, flame test, repair,
+  // inspection, rental) opens its Quotes-hub row, not the Estimator — the
+  // server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
   const settingsLoad = getSettings();
-  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, specRecords, trackSeries, pipeTypes, linesetTypes, narrativeIntros, estimateOutputDefaults, systemCategories] =
+  const [fabricRows, laborRows, customerDocs, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule, trackSeries, pipeTypes, linesetTypes, narrativeIntros, estimateOutputDefaults, systemCategories] =
     await Promise.all([
       fabricParts(),
       byCategory("Labor"),
@@ -324,7 +322,6 @@ export default async function EstimatorPage({
       listFixtures(),
       loadCurtainSewingPct(),
       loadFreightRule(),
-      allSpecRecords(),
       listTrackSeries(),
       listPipeTypes(),
       listLinesetTypes(),
@@ -498,7 +495,6 @@ export default async function EstimatorPage({
       // #368: what the last Revise re-priced (the Build banner shows it while the estimate is a draft).
       repricedOnRevise={repricedOnReviseOf(q?.repricedOnRevise)}
       // Spec records design §6: the Spec select's options, as plain strings.
-      specKeys={systemMatchKeys(specRecords)}
       canApplyCredit={can("create", user.roles)}
       // #287 task B: the Lead estimator select — the viewer may always take
       // the quote; only an approver may hand it to someone else.

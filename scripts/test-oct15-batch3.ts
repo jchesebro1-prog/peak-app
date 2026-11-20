@@ -23,9 +23,6 @@ import { isPreviewDeploy } from "../src/lib/deploy-env";
 import { withTransaction } from "../src/db";
 import { getSettingsPatch, setSettings } from "../src/lib/settings";
 import { get as getQuote } from "../src/lib/stores/quotes";
-import { pickManualPhases } from "../src/lib/consulting-stages";
-import { phaseWeightsFor } from "../src/lib/settings";
-import { createManualEngagement, DEFAULT_CONSULTING_PHASES } from "../src/lib/stores/engagements";
 import { getDocRows, softDeleteDoc } from "../src/db/doc-store";
 import { DOC_TABLES } from "../src/db/doc-tables";
 import { inArray } from "drizzle-orm";
@@ -250,33 +247,16 @@ async function pipelineDbChecks(ok: Ok) {
 
 function phasePickerChecks(ok: Ok) {
   const menu = ["Programming", "Schematic Design", "Design Development", "Construction Documents", "Construction Admin"];
-  ok(JSON.stringify(pickManualPhases(menu, undefined)) === JSON.stringify(menu), "b3 #34: no posted list (an older client) = every phase, as before");
-  ok(JSON.stringify(pickManualPhases(menu, ["construction admin", " Programming ", "Nope"])) === '["Programming","Construction Admin"]',
-    "b3 #34: ticked phases are kept in menu order; names off the menu are dropped");
-  ok(pickManualPhases(menu, []) === null && pickManualPhases(menu, ["Nope"]) === null && pickManualPhases(menu, "Programming") === null,
-    "b3 #34: no phase ticked (or garbage) is refused");
   // Only ticked phases get tasks: generateSchedule places lines by the engagement's own phases.
   const eng = [{ id: "ph-a", name: "Programming" }, { id: "ph-b", name: "Construction Admin" }];
-  const modal = src("src/app/(app)/design/engagements/new-engagement-modal.tsx");
-  ok(/useState<string\[\]>\(\(\) => \[\.\.\.phaseMenu\]\)/.test(modal) && /data-testid="new-engagement-phases"/.test(modal) && /disciplines,\s*phases,\s*\}\);/.test(modal),
-    "b3 #34 pin: the modal's phase checklist starts all ticked and posts the ticks");
-  const act = src("src/app/(app)/design/engagements/actions.ts");
-  ok(/requirePerm\("create"\)[\s\S]{0,2200}pickManualPhases\(mergedConsultingPhases\(\(await getSettings\(\)\)\.consultingPhases\), input\?\.phases\)/.test(act) && /if \(!phases\) return \{ ok: false, error: "Tick at least one phase\." \}/.test(act) && /^      phases,$/m.test(act),
-    "b3 #34 pin: the create action (create permission) allowlists the ticked phases against Settings and seeds only those");
-  ok(src("src/app/(app)/design/engagements/view.tsx").includes("phaseMenu={data.phaseMenu}"), "b3 #34 pin: the hub hands the modal the Settings phase menu");
 }
 
 async function phaseDbChecks(ok: Ok) {
-  const eng = await createManualEngagement({ customerId: "TESTb3:co-none", customer: "B3 Co", name: "TESTb3 phases", phases: ["Programming", "Construction Admin"], startAt: Date.UTC(2026, 0, 1), endAt: Date.UTC(2026, 5, 1) }, { name: "Pat" });
   try {
-    ok(eng.phases.map((p) => p.name).join("|") === "Programming|Construction Admin" && eng.phases.every((p) => p.status === "pending"),
-      "b3 #34 db: a hand-added project seeds exactly the ticked phases, all pending");
-    ok(DEFAULT_CONSULTING_PHASES.length > 2, "b3 #34 db: (the full menu is longer than the pick)");
   } finally {
     const db = await getDb();
     const { DOC_TABLES } = await import("../src/db/doc-tables");
     const { eq } = await import("drizzle-orm");
-    await db.delete(DOC_TABLES.consulting_engagements).where(eq(DOC_TABLES.consulting_engagements.id, eng.id));
   }
 }
 
@@ -297,9 +277,6 @@ function visitRightsChecks(ok: Ok) {
   const gate = "if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };";
   const before = (text: string, a: string, b: string) => text.indexOf(a) >= 0 && text.indexOf(b) > text.indexOf(a);
   const cp = src("src/app/(app)/companies/[id]/page.tsx");
-  const vh = src("src/lib/venue-history-server.ts"), cs = src("src/lib/consulting-stages.ts");
-  ok(/so the directory is a single pass over the data\.\n \*\/\nexport async function loadVenueDirectory/.test(vh) && /amount\. Nothing here reads settings or the store\.\n \*\/\nexport function manualMilestoneSeeds/.test(cs),
-    "M6 pin: the moved doc comments sit on their own functions again");
 }
 
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */

@@ -751,3 +751,301 @@ Lessons for stage 4:
 - `AGENTS.md` got a short stage-3 note; phases 4, 5 (Field Survey), 6 (the capture editors), 15,
   19, 20, 22, 23, 28, 30, 59, 61 and the portal slice of 62 still describe removed code.
   `README.md`, `MASTER-HOWTO.md` and `docs/specs/*` are untouched.
+
+## Stage 4 — done 2026-11-20
+
+Scope: the Design tab. The Grid (`/design/grid/*`: workspace, riser, lighting and A/V conduit
+risers, drawing set, schedule, designators, the room-shape editor, Auto fill, the Equipment map,
+Grid Settings, wire types, device types, object symbols, the DXF route, `/print/grid-set`, venue
+background templates), Quick Design and saved Designs (`/design`, `/design/quick`,
+`/design/designs`, the equations engine, equipment vocabulary and pricing), Specs (the builder and
+library, sections / templates / curtain templates editors, spec records, `.docx` generation, the
+one-time seed, the D94 bid-spec generator), Consulting (engagements, the consulting quote builder
+and proposal document, consulting settings) and the Estimator's hooks into all of them. Map:
+`docs/handoff/removal-map-design.md` (written before stages 1–3; checked against the import graph).
+
+State at hand-off: `tsc --noEmit` 0 errors; `eslint src --quiet` 0 errors; every `scripts/test-*.ts`
+exits 0, each run alone (figures under Tests); **`npm run build` passes** (a clean build, no
+`DATABASE_URL`, 117 routes). Nothing committed by the stage-4 agent. No table, migration or
+`src/db/schema.ts` change; no data script. The dev server was never started — nothing here was
+looked at in a browser.
+
+### Rules that changed
+
+- **The builders moved to Estimating.** The Design nav group is gone. Assembly Builder, Lineset
+  Builder and Motor Library are the last three children of Estimating, at their old routes
+  (`/design/assemblies`, `/design/lineset`, `/design/motors`). `/design` redirects to the Assembly
+  Builder; their "← Design" links read "← Estimator". Top level is Home · Estimating · Customers ·
+  Knowledge.
+- **Old consulting quotes are rows only.** The same treatment as repair, rental, flame-test and
+  inspection quotes: `quoteBuilderHref` sends them to `/quotes?id=`, `hasNoBuilder` hides the open
+  button, "+ New quote" and the intake no longer offer the type, the hub's Consulting filter chip
+  is gone (`?type=consulting` still filters) and the engagement chip is gone. Status moves,
+  history, value and the `CON-` number still read. Review limits hide the Consulting column (a
+  stored limit round-trips and still applies).
+- **A quote the Grid or Quick Design made is an ordinary system quote.** It lists in the hub and
+  opens in the Estimator as before. Nothing links back to a design. Its SKUs (`asm:`, `allow:`,
+  `custom:`, `labor:`) are still recognised by the reports, review limits, client packages and rack
+  submittals (`src/lib/quote-line-ids.ts`). Curtain cut sheets for a Grid-made quote read its
+  quoted CURTAIN lines (the path that already existed for a deleted design) and say so.
+- **The Estimator has no Grid or Specs hooks.** "Design in the Grid →", "Open Grid design →" and
+  "Generate from Grid" are gone; Plans & risers are uploaded by hand, as before. The Spec select on
+  Customer review is gone and new curtain / custom lines no longer get a `specKey`; a stored
+  `specKey` rides along untouched. A drawing set the Grid generated earlier stays in a quote's
+  package files (labelled "From the Grid") and still downloads.
+- **Client packages carry no specification file.** The Quotes-hub package zip no longer holds
+  `specification.docx` (and with it the rack "Equipment Racks" section); the estimate package zip
+  no longer holds `Specifications.docx` or spec-builder Word files. Datasheets, the datasheet book,
+  spec sheets, manuals, cut sheets, rack sheets and the equipment summary are unchanged. The zip
+  cache version went 3 → 4, so a zip cached with a specification in it is never served again. A
+  "missing spec" gap is no longer raised.
+- **Catalog.** The part editor keeps the Spec panel and the narrative paragraph, and the importer
+  keeps its spec columns. Gone from the part editor: Designator code, Device type, Riser tag
+  defaults, Outside diameter, and the Symbol / Riser drawing slots. Gone screens: Catalog → Device
+  types, Catalog → Riser data. Stored values are left alone — the form no longer posts those keys,
+  so a save keeps them (`mergeUpsert`), and every catalog write still preserves `deviceTypeKey`.
+  Catalog → Datasheets counts quotes only as "quoted" (not Grid designs or D94 specs).
+- **Estimating Rules** lost the Wire pull, Cable package, System labor and "Auto BOM & sizing"
+  groups, the System-design freight and contingency rows, and Conduit sizes. Stored values stay in
+  the `pricing_rules` blob.
+- **Settings.** The Consulting group is gone; its **Assumptions library** card (the list the
+  Estimator's Quote details offers) moved to Sales, same stored key (`consultingAssumptions`) —
+  `?section=consulting` lands on Sales. The Templates screen (it held only the consulting proposal
+  and specification wording) and the Grid Settings tile are gone. Venue types lost the Background
+  column; a stored `background` is carried through a save unchanged.
+- **Home and Reviews.** The "My designs" card, designs in Team activity and Needs attention, the
+  design-review badge and bell rows are gone. "New estimate" on Home opens the quote intake
+  (`/quotes/new`). Reviews holds quotes only (no Claim).
+- **The build no longer seeds the Spec Library.** `npm run build` is
+  `node scripts/migrate.mjs && next build`.
+
+### Deleted (404 files under `src/`, 16 under `scripts/`; 1 more moved)
+
+- Screens / routes: `src/app/(app)/design/{grid,specs,engagements,quick,designs}/`, the Design
+  overview (`design/page.tsx` is now a redirect stub), `src/app/(app)/{consulting,quick-design,templates}/`,
+  `home-my-designs.tsx`, `peak-header-actions.ts`, `catalog/{device-types,riser-data}/`,
+  `catalog/{tag-defaults-field,part-device-type-field}.tsx`, `estimating-rules/conduit-sizes/`,
+  `estimator/grid-design-actions.ts`, `settings/groups/consulting.tsx`,
+  `src/app/api/{grid,grid-sheets,spec,spec-documents,spec-library}/`, `src/app/print/grid-set/`.
+- Libraries: all of `src/lib/design/` except `curtain-pricing, goods, lineset, steel, venue-dims`
+  (+ `steel-shapes.json`, `fixture-crossref.json`) — 138 files including `conduit-riser/`,
+  `room-shape/`, `venue-templates/`, `device-types.ts` and `grid-scopes.ts`; all of
+  `src/lib/specs/` except `articles, sections, outline, templates` (+ the new `part-spec.ts`); the
+  stores `grid-projects, grid-catalog, grid-riser, grid-conduit-riser, designs, design-pricing,
+  equipment-map, device-types, spec-documents, spec-records, spec-curtain-templates,
+  generated-specs, engagements, review-snapshots, riser-box-types, conduit-sizes`; and
+  `bid-spec(-docx), letterhead-docx, annotations, consulting-{stages,review,files},
+  grid-sheet-{file,serve}, conduit-sizes, riser-box-types, riser-data-{sheet,sheet-server,preview},
+  templates, davinci/symbols-plan, rack/{raster,png-size},
+  estimate-output/{package-spec-docs-server,package-spec-ready}`.
+- Components: `src/components/{design,room-shape}/`, `drawing/*` except `title-block.tsx`,
+  `spec-key-select.tsx`.
+- Seeds: `src/db/seeds/{designs,grid-projects}.ts`.
+- Scripts: `backfill-blob-sheets, build-grid-icons, grid-icons-gen, grid-icon-picks.json,
+  fixture-grid-drawing-set, room-shape-renders, test-room-shape, test-grid-options,
+  smoke-grid-sheet-upload, symbols-davinci, dxf-audit.py, venue-template-convert.py,
+  seed-specs-once, specs-renumber-bray, specs-seed-northhs.py, import-spec-library`, with their
+  `package.json` entries (`symbols:davinci, specs:seed, specs:renumber-bray, specs:import-library,
+  icons:grid, test:grid-options, test:smoke:grid-sheet`).
+- Left over from earlier stages and unreachable from any route or script (found by the orphan scan):
+  `reports/controls.tsx`, `components/signature-pad.tsx`, `lib/people-search.ts`,
+  `lib/quote-pdf/request-where.ts`, `lib/stores/subassemblies.ts`.
+
+### New small modules (helpers moved out of deleted files)
+
+- `src/lib/quote-line-ids.ts` — `ASSEMBLY_PART_PREFIX`, `ALLOWANCE_PART_PREFIX`,
+  `CUSTOM_ITEM_PREFIX`, `LABOR_SKU_PREFIX`, `isLaborSku`, `isPerLengthUnit`, `PLACEHOLDER_SKUS`,
+  `isPlaceholderSku`, `parseVirtualPartId`, `internalSkuCheck`, `gridSpecBomRows`. Unchanged code
+  from `design/grid-virtual-parts`, `grid-custom-items`, `wire-labor`, `grid-bom` and
+  `specs/record-keys`, with two differences: `parseVirtualPartId` accepts an `allow:<row>:<tier>` id
+  on its shape (the Equipment-map vocabulary it used to check the row against is gone), and
+  `gridSpecBomRows` no longer passes a `specKey` through.
+- `src/lib/title-block.ts` — `titleBlockData`, `revLetter`, `revisionStatus`, `REV_ROWS` and the
+  title-block types, from `design/grid-drawing-set`. Rack sheets and cut sheets print through
+  `src/components/drawing/title-block.tsx`, which stays at its path.
+- `src/lib/specs/part-spec.ts` — `PartSpecFields`, `SpecCatalogPart`, `BomRow` (types, from `bid-spec`).
+- `src/lib/assumptions.ts` — `DEFAULT_CONSULTING_ASSUMPTIONS`, `mergedConsultingAssumptions`.
+- `src/lib/file-ref.ts` — the `FileRef` type (`Note.attachments`).
+- `src/components/part-picker.tsx` (moved from the Equipment map's folder) and
+  `src/app/(app)/estimating-rules/part-search-actions.ts` (`EquipPartHit`,
+  `searchEquipmentPartsAction`) — the admin part picker five Estimating Rules screens use.
+- `src/app/(app)/settings/assumptions-card.tsx` — the Assumptions library card.
+- `GRID_CURTAIN_TYPES` / `GridCurtainType` now live in `src/lib/curtain-cut-sheets/vocab.ts`.
+- `quotePackageParts` in `src/lib/client-package-server.ts` — was `quoteSpecParts`; it returns the
+  package documents, items, gaps and covered notes (no spec).
+
+### Wiring
+
+- Nav, ⌘K (no Designs group), Home widget registry / presets / legacy layout key `designs` (a
+  stored layout naming it is skipped), the bell and nav counts.
+- `next.config.ts`: the Chromium trace entries for `/design/designs`, `/design/quick` and
+  `/design/grid/[id]` are removed.
+- `src/lib/design-routes.ts`: the `/consulting…`, `/quick-design` and `/design?id=` redirects are
+  gone; `/design` and `/design-studio` land on `/design/assemblies`.
+- Seeds: the design and Grid demo seeds and the curtain-template starter seed are gone; the starter
+  spec templates still seed (the part's Spec panel offers them).
+- Go-live wipe: `designs`, `grid_projects`, `grid_sheets`, `grid_catalog`,
+  `consulting_engagements`, `review_snapshots`, `generated_specs`, `spec_documents`,
+  `spec_curtain_templates` joined the keep-list (`CONFIG_COLLECTIONS`), with `spec_records` and
+  `spec_record_revisions` already on it. `spec_sections`, `spec_articles` and `spec_templates`
+  were added too: the part editor still reads them and their only editor is gone, so a wipe would
+  leave nothing to pick from. Every `DOC_TABLES` registration is untouched.
+- Settings type: the consulting phase / weight / discipline keys, `reviewChecklistTemplates`,
+  `templates`, `templatesMeta` and the Grid settings keys (`gridCategoryShapes`,
+  `gridCategoryIcons`, `gridSymbolColors`, `gridStandardNotes`, `designatorDigits`) are typed
+  `unknown` (stored values stay, nothing reads them).
+- `scripts/smoke-routes.ts` lost 47 routes of removed screens (type-checked, not run).
+- npm: removed `docx`, `three`, `@types/three`, `@capacitor/filesystem`, `@capacitor/preferences`
+  and (dev) `@tabler/icons` (`npm install --package-lock-only`; the lockfile lost only those and
+  their dependencies). The two capacitor plugins were taken out of
+  `ios/App/CapApp-SPM/Package.swift`, `android/capacitor.settings.gradle` and
+  `android/app/capacitor.build.gradle` by hand, as `npx cap sync` would.
+- `public/sw.js`: the cache name is `quartzite-shell-v3`, so a device drops its cached copies of
+  every removed screen on the next load.
+- `.env.example`: the Blob comment no longer speaks of plan sheets. `vercel.json`: unchanged (one
+  cron). `DEPLOY.md`: Blob and cron variables added to the Vercel step; §5–§6 rewritten as
+  clean-up notes for the whole shrink.
+
+### Judgement calls
+
+1. **The builders went into Estimating** rather than a three-item Design group — they exist to
+   feed the Estimator, and a "Design" tab would promise the removed program.
+2. **Device types were removed whole** (screen, the part editor's field, both modules). Jeff's
+   list named the device-type mapping; nothing but the Grid typed parts.
+3. **Ports stay.** The part editor's Ports section was not on Jeff's list, so it stays (with copy
+   that no longer names the Grid), as do `catalog-connect.ts`, the port-rule modules and
+   `npm run ports:rules`. Wire types have no editor any more — the defaults, or whatever is stored.
+4. **Spec sections, articles and templates are read-only now.** The part's Spec panel still picks a
+   section and article and inserts a template, and the Displays API still serves spec text; the
+   screens that created sections, articles and templates went with the Specs library, so nothing
+   in the app adds a new one.
+5. **The Templates screen was removed** — after stage 3 it held only the two consulting documents.
+6. **The symbol / riser drawing kinds stay in the part-document types and the upload code**; only
+   the part editor's two slots were removed. Stored drawings are untouched and nothing shows them.
+7. **The catalog rename engine keeps its Grid and spec steps** (`grid-symbols`, `grid-projects`,
+   `spec-documents`, the Equipment map, conduit sizes and Grid favourites blobs), with the blob ids
+   as local constants — the precedent from stages 1–3 for `projects`, `portal_carts` and
+   `drive_photo_sync`.
+8. **`curtainFabricLookups` / `readCurtains` / `gridCurtains` keep a `project` parameter that is
+   always null**, so callers and tests read the same; the branch that read a live Grid design is
+   gone.
+9. **The package view models keep a `specifications` flag that is always false** (`downloadsView`,
+   `staffPackageExtras`, `BuiltPackageZip`). Their "Specifications (Word)" strings can no longer
+   print.
+10. **The one-click "adopt legacy spec pointers" action went with the Specs library.** Readers that
+    adopt at read time (`articleIdForPart`) are unchanged.
+
+### Tests
+
+Method as in stages 1–3, with stage 3's tooling: re-point imports of moved helpers, hand ports
+(4 rules before the prune), the compile-driven prune, the dead-path and dead-dir passes, a new pass
+for `const dir = "<removed folder>"` variables, then each script alone on a throwaway
+`PGLITE_PATH`, top-level crashes cut one at a time, and the failures triaged by hand. Every change
+is listed in `docs/removal-stage4-pruned-tests.txt` (about 10,600 lines).
+
+Result on 2026-11-20: `test-review-and-spec.ts` 10,601 PASS / 0 FAIL, `ALL PASSED`, exit 0 (stage 3:
+15,579 — the difference is the Grid, Specs, Quick Design and Consulting assertions); all 27 other
+`scripts/test-*.ts` exit 0, each run alone. The harness went from 57,473 to 41,513 lines;
+`test-review-regressions.ts` from 3,542 to 2,436. The suite chain was compared before and after:
+294 → 225 entries. All 69 removed are suites of removed features (Grid, risers, designators, sheet
+upload, room shapes, venue templates, spec records / builder / library, device-type icons, wire
+labor, cable package); none was added. 64 were deleted by name after the prune left them with no
+assertion; `riserPhase2B1Checks`, `gridNotes7Checks` and `specBuilderMatchReportAsyncChecks` were
+deleted because what was left threw or only read removed files; the two room-shape suites went
+with `scripts/test-room-shape.ts`.
+
+Ported rather than cut (62 edits in the harness, 4 elsewhere): the go-live keep-list, the nav
+shape, active keys and design redirects, the Settings groups and cards, the Reviews rules, the
+quote links for consulting, the zip cache version (v4) and path, the single package builder
+(racks, book, cut-sheet deadline, letterhead), the package zip without a specification, the
+package staff panel split, the intake's typed example (`consulting` → `box_sale` / `custom`), the
+per-row rate reset (now on the freight base rate), the markup-settings conversion (same), and the
+"stored device type key survives every catalog write" checks (the key is seeded with a direct
+in-place write, since its admin writer is gone). `scripts/test-moved-helpers.ts` gained 10 stage-4
+pins (and had 3 stage-3 pins updated): consulting quotes are rows, the keep-list, the nav and redirects, the part form ignoring the
+Grid-only fields, the catalog page keeping the Spec panel, the Estimator having no Grid or Spec
+hooks, packages building no specification, the `docx` dependency gone, and the build script.
+
+What this does not prove: no removed feature's own behaviour is tested any more. The quote package
+and estimate zip were exercised only through their existing harness suites (stubbed Blob and
+Chrome), not against a real store. `scripts/smoke-routes.ts` needs a running dev server and was not
+run. Some harness suites for Grid-era work keep a few passing assertions on kept helpers (catalog
+ports, wire-type defaults, the rename engine) beside fixture set-up that no longer feeds anything.
+
+### What the build surfaced (all four stages)
+
+`npm run build` passed on its first run after stage 4 — `tsc` already covers `src/` and
+`scripts/`, so no dangling import was left for the build to find. A scan of every path literal in
+`src/` against the built route list found **one dead link**, to `/catalog/riser-data` on
+Catalog → Datasheets (this stage's; removed). No link, redirect, `router.push` or
+`revalidatePath` in `src/` points at a route removed in stages 1–3. The build prints one warning,
+which is not new: Next 16 wants `src/middleware.ts` renamed to `proxy`.
+
+### Loose ends
+
+- `src/middleware.ts` still uses the deprecated `middleware` file name (the build warns). Renaming
+  it is a one-file change plus the tests that read the matcher; it was left alone because it could
+  not be tried in a browser here.
+- Unused exports left in kept files: `cleanWireTypes`, `copyBlob`, `setBlobKeysIfAbsent`,
+  `gridSetBlobPath`, `racksInGrid`, `venueDimsFromEstimator`, `letterheadHtml`,
+  `datasheetSatisfiedSkus`, `getCatalogRates`, `insertIfAbsent`, `getManyAnyCase`,
+  `engagementMatchesVenue`, `cutSheetsUnreadableNote`, `ClientPackageManifest`, the create / update
+  / delete functions of the three spec stores, `fillSlots`. `src/lib/curtain-pricing.ts` (the
+  customer-safe curtain mirror) and `src/lib/tier-pricing.ts` have no caller in `src/`; test
+  scripts still exercise them.
+- The part-document upload code still accepts the `symbol` and `riser` kinds (SVG included) though
+  no screen offers them.
+- A Grid-made quote opened in the Estimator shows no systems (its flat `spec.lines` were never
+  shown there); saving it would replace those lines with sections. This is unchanged behaviour,
+  but the Grid — where such a quote used to be edited — is gone. Its hub row, value, status and
+  history are intact.
+- Files in Blob stay: `grid-sheets/…` plan sheets, engagement files, spec downloads, client-package
+  zips built with a specification in them. Nothing lists the first three any more.
+- Stored and unread: the collections on the keep-list above; the settings keys typed `unknown`;
+  the `grid_equipment_map`, `conduit_sizes`, `riser_box_types`, `spec_seed_applied`,
+  `gridFavorites:*`, `gridRecent:*`, `gridDeviceTypes` and `gridTypeMap` blobs; the removed
+  Estimating Rules values; on catalog parts `designatorCode`, `tagDefaults`, `cableOdIn`,
+  `deviceTypeKey`; on quotes `specKey`, `gridProjectId`, `gridOptionId`, `fromDesign`, the
+  `consulting` subdoc.
+- Source documents that only the removed code used are still in the repository:
+  `docs/venue-templates/`, `docs/room-shape/`, `docs/specs-seed/`.
+- `README.md`, `MASTER-HOWTO.md`, `PUNCHLIST.md`, `DECISIONS.md` and `docs/specs/*` still describe
+  removed screens.
+- Local `node_modules` was not pruned (only the lockfile was regenerated); run `npm ci` before
+  trusting a local build to prove a removed package is truly unused.
+
+## Final state — 2026-11-20
+
+What is left, in one place (the fuller map is "What the app is now" in `AGENTS.md`):
+
+- **CRM**: Opportunities, Leads (with the public intake form and trade-show booth capture),
+  Companies, People, Venues, Vendors; notes, documents and parties on those records.
+- **Estimating**: the Estimator (four steps, live save, configurators, vendor quotes, bids, the
+  estimate and cover PDFs, the client link and package page, cut sheets, the datasheet book and
+  package zip), the Quotes hub with its intake and Reviews, the Catalog (parts, datasheets /
+  photos / manuals, manufacturers, model numbers, rack data, the ETC price sync, spec text on
+  parts), the Assembly Builder with equipment racks, the Lineset Builder, the Motor Library, and
+  Estimating Rules.
+- **Knowledge**: the steel calculator and the fixture cross-reference.
+- **Home and Reports**, **Settings**, **Account**, **Import / Export**.
+- One daily cron (`/api/drive/sync`); offline capture for booth leads only; the read-only Displays
+  API. No email, no AI, no Google access beyond sign-in.
+
+Size: `src/` went from 2,155 TypeScript files before stage 1 to 935 (the stages deleted 300, 269,
+309 and 420 files in all, and added a few dozen small modules for the helpers that moved). The
+main test harness went from 72,161 lines to 41,513. Ten npm packages are gone, five of them
+Capacitor plugins.
+
+What did not change in any stage: no table was dropped or altered, no migration was added or
+edited, no record was deleted or rewritten, and no stored quote total moved. Every collection of a
+removed feature is still registered and is never emptied by "Clear demo data".
+
+Before this ships (collected from the four stages):
+
+1. Tell the team what is gone, and that estimates are marked sent by hand.
+2. Make sure every phone and tablet has synced, then rebuild both native apps after `npx cap sync`.
+3. Take a backup (`npm run db:export`).
+4. Revoke what is stored and unused: Gmail connections, Krisp keys, the Anthropic key; delete the
+   Vercel variables listed in `DEPLOY.md` §5; remove the Gmail / Calendar / Drive scopes and the
+   `/api/gmail/callback` redirect in Google Cloud.
+5. Open the app in a browser. Nothing in the four stages was looked at in one.

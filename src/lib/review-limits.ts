@@ -15,7 +15,7 @@
  * session (review-limits-server.ts is the server half).
  */
 import { normalizePriceOverride } from "@/lib/price-rounding";
-import { isLaborSku } from "@/lib/design/wire-labor";
+import { isLaborSku } from "@/lib/quote-line-ids";
 import { firstName } from "@/lib/team";
 import { approvalSnapshotMatches } from "@/lib/approval-snapshot";
 import { money } from "@/lib/format";
@@ -39,10 +39,10 @@ export const REVIEW_KINDS = [
 
 export type ReviewKind = (typeof REVIEW_KINDS)[number]["key"];
 
-/** The kinds Settings → Review limits shows: the ones that can still be built. Flame test, repair, inspection and
- *  rental quotes are rows in the Quotes hub only (their builders were removed); their stored limits round-trip
- *  through the card unchanged and still apply to an old quote of that kind. */
-const RETIRED_KIND_GROUPS: ReadonlySet<string> = new Set(["Flame test", "Repair", "Inspection", "Rental"]);
+/** The kinds Settings → Review limits shows: the ones that can still be built. Flame test, repair, inspection,
+ *  rental and consulting quotes are rows in the Quotes hub only (their builders were removed); their stored limits
+ *  round-trip through the card unchanged and still apply to an old quote of that kind. */
+const RETIRED_KIND_GROUPS: ReadonlySet<string> = new Set(["Flame test", "Repair", "Inspection", "Rental", "Consulting"]);
 export const REVIEW_KINDS_SHOWN = REVIEW_KINDS.filter((k) => !RETIRED_KIND_GROUPS.has(k.group));
 export const REVIEW_KIND_KEYS: readonly ReviewKind[] = REVIEW_KINDS.map((k) => k.key);
 

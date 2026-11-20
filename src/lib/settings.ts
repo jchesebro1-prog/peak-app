@@ -42,24 +42,16 @@ export type AppSettingsData = {
   intakeCatalog?: unknown;
   visitReasons?: unknown;
   surveyInternalTags?: unknown;
-  /** Consulting phase-menu overrides (D90) — see DEFAULT_CONSULTING_PHASES
-   *  in stores/engagements.ts; empty/absent means use the defaults. */
-  consultingPhases?: string[];
-  /** #145 D165/D166 — phase weight by phase NAME; absent reads as 1. */
-  consultingPhaseWeights?: Record<string, number>;
-  /** #145 D165 — the discipline vocabulary; whole-list override. */
-  consultingDisciplines?: string[];
-  /** Consulting proposal assumptions library (#35) — see
-   *  DEFAULT_CONSULTING_ASSUMPTIONS in lib/consulting-stages.ts;
-   *  empty/absent means use the (DRAFT-seed) defaults. The estimator's
-   *  shared assumptions model (spec §4, wave ③) will consume this key. */
+  /** Stored settings of the removed Consulting module (phase menu, phase weights, discipline vocabulary, review
+   *  checklists). Nothing reads or edits them any more; the values stay in the settings row. */
+  consultingPhases?: unknown;
+  consultingPhaseWeights?: unknown;
+  consultingDisciplines?: unknown;
+  reviewChecklistTemplates?: unknown;
+  /** The assumptions library the Estimator offers (Settings → Sales → Assumptions library) — see
+   *  DEFAULT_CONSULTING_ASSUMPTIONS in lib/assumptions.ts; empty/absent means use the defaults. The key keeps the
+   *  name it had when the Consulting builder shared it. */
   consultingAssumptions?: string[];
-  /** Peak-standards review checklists (D91), keyed by phase name — see
-   *  DEFAULT_REVIEW_CHECKLISTS in stores/engagements.ts. Kept here beside
-   *  consultingPhases rather than in its own collection: same kind of small
-   *  admin-edited config list. A phase absent from this map falls back to
-   *  the defaults; a phase mapped to [] deliberately has no checklist. */
-  reviewChecklistTemplates?: Record<string, string[]>;
   /** Brand marks (IDEAS #32) — small data-URL images uploaded in Settings →
    *  Branding. `logoLight` sits on the dark nav bar; `logoDark` heads white
    *  documents (letters + reports) in place of the baked-in letterhead. */
@@ -70,12 +62,9 @@ export type AppSettingsData = {
    *  and the plain-name PDFs. Absent = ON; only an explicit false turns it
    *  off. Each document can override it (src/lib/letterhead.ts). */
   peakHeader?: boolean;
-  /** Document-template wording overrides (IDEAS — centralized templates),
-   *  a sparse map { [templateId]: { [fieldId]: string } } over the built-in
-   *  defaults in lib/templates.ts. Edited in the Templates screen. */
-  templates?: import("@/lib/templates").TemplateOverrides;
-  /** Per-template "last edited by/when" stamp (replace-in-place). */
-  templatesMeta?: Record<string, { by: string; at: number }>;
+  /** Stored wording overrides of the removed Templates screen (it held only consulting documents). Unread. */
+  templates?: unknown;
+  templatesMeta?: unknown;
   /** Catalog category → group/trade mapping overrides (punch #39), sparse
    *  patch over DEFAULT_CATEGORY_MAP in lib/catalog-taxonomy.ts, resolved
    *  via resolveCategoryMap. Absent = defaults; a stored entry wins over the
@@ -124,33 +113,13 @@ export type AppSettingsData = {
    *  part's effective date is the LATEST of its own `pricedAt`, its
    *  `priceDate` and this — see effectivePriceDate. Absent = no book dates. */
   priceListEffective?: Record<string, number>;
-  /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
-   *  save (the wireTypes idiom): resolveCategoryShapes in
-   *  lib/design/grid-symbols returns the seed when absent and exactly the
-   *  stored map when present. Edited in Design → Grid Settings
-   *  (/design/grid/settings) — moved off Settings → Admin (D154 shipped
-   *  there; the card was dropped from Settings without a new home until
-   *  this route). */
-  gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
-  /** Stock symbols (spec 2026-09-25) — SPARSE per-category icon overrides
-   *  (category → grid-icons id) MERGED over DEFAULT_CATEGORY_ICONS by
-   *  resolveCategoryIcons; absent/null = the shipped defaults. Edited in
-   *  Design → Grid Settings → Category icons. gridCategoryShapes above is
-   *  now read only as a legacy fallback (symbolLook). */
-  gridCategoryIcons?: Record<string, string> | null;
-  /** Stock symbols — SPARSE colour overrides keyed by catalog group, trade
-   *  or "Other" (SYMBOL_COLOR_KEYS), merged over DEFAULT_SYMBOL_COLORS by
-   *  resolveSymbolColors. Edited in Design → Grid Settings → Symbol colours. */
-  gridSymbolColors?: Record<string, string> | null;
-  /** Drawing set (#209) — the "Standard general notes" printed on every
-   *  set's cover (T-001) unless that set has its own. One note per line;
-   *  null/absent = none. Edited in Design → Grid Settings. */
-  gridStandardNotes?: string | null;
-  /** Device designators (#321): digits an issued number is padded to —
-   *  2 = `CRO-01` (Bray's drawings), 1 = `CRO-1`. Absent = 2. Changing it never
-   *  rewrites a stored designator; Renumber (Devices tab) does. Edited in
-   *  Design → Grid Settings → Designator numbers. */
-  designatorDigits?: 1 | 2;
+  /** Stored Grid Settings of the removed Grid (category symbols and icons, symbol colours, the standard general
+   *  notes, designator digits). Nothing reads or edits them any more; the values stay in the settings row. */
+  gridCategoryShapes?: unknown;
+  gridCategoryIcons?: unknown;
+  gridSymbolColors?: unknown;
+  gridStandardNotes?: unknown;
+  designatorDigits?: unknown;
   /** Pipelines (spec 2026-09-24 §3) — FULL REPLACEMENT lists (the wireTypes
    *  idiom). resolvePipelines in lib/pipelines returns the Daylite seeds when
    *  absent or invalid. Edited in Settings → Pipelines. */
@@ -167,73 +136,6 @@ export type AppSettingsData = {
   dashboardDefaults: DashboardLayout;
 };
 
-
-/** #321: the digits an issued designator number is padded to (default 2). */
-export function designatorDigitsOf(s: { designatorDigits?: 1 | 2 | null } | null | undefined): 1 | 2 {
-  return s?.designatorDigits === 1 ? 1 : 2;
-}
-
-/** #145 — the four disciplines as defaults. */
-export const DEFAULT_CONSULTING_DISCIPLINES = ["rigging", "curtain", "lighting", "av"];
-
-export function mergedConsultingDisciplines(stored?: string[] | null): string[] {
-  const list = (stored || []).map((s) => s.trim()).filter(Boolean);
-  return list.length ? list : DEFAULT_CONSULTING_DISCIPLINES;
-}
-
-/**
- * #155 D231 — the save-side rule for a consulting quote's disciplines.
- *
- * `posted` is untrusted form input (a public server action), so it is
- * allowlisted rather than trusted: a value survives only if it is in the
- * live Settings vocabulary OR already on the quote being edited. The
- * second clause is the fix — a discipline an admin has since deleted from
- * Settings stays on an old quote (and so keeps gating its template tasks)
- * unless the user actually unticks it, which the builder's "(removed)"
- * checkbox says it does. The first clause is the guardrail that was always
- * here: a value in neither list is refused, so a hand-crafted POST still
- * can't stash an arbitrary string onto the quote (and, at spawn, the
- * engagement). `existing` comes from the stored quote, never from the
- * form, so it can't be widened by the caller.
- *
- * Values are trimmed, lowercased (how the vocabulary is stored —
- * saveConsultingDisciplinesAction) and de-duplicated; both allowlists are
- * matched case-insensitively so a legacy mixed-case stored vocabulary
- * still matches. Pass `existing` as empty/null on the create path, where
- * there is no prior quote and the rule is the plain allowlist.
- */
-export function resolveDisciplines(
-  posted: unknown,
-  live: readonly string[] | null | undefined,
-  existing?: readonly string[] | null
-): string[] {
-  const norm = (v: unknown): string => String(v ?? "").trim().toLowerCase();
-  const allowed = new Set(
-    [...(live || []), ...(existing || [])].map(norm).filter(Boolean)
-  );
-  return Array.from(
-    new Set((Array.isArray(posted) ? posted : []).map(norm).filter((d) => d && allowed.has(d)))
-  );
-}
-
-/**
- * #145 — pair each phase NAME with its stored weight (absent/invalid → 1)
- * and a stable id. The id is the phase name slugged, so it survives a
- * settings edit that reorders the list and matches across regenerations.
- */
-export function phaseWeightsFor(
-  stored: Record<string, number> | null | undefined,
-  phaseNames: readonly string[]
-): Array<{ phaseId: string; name: string; weight: number }> {
-  return phaseNames.map((name) => {
-    const w = Number(stored?.[name]);
-    return {
-      phaseId: "ph-" + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
-      name,
-      weight: Number.isFinite(w) && w > 0 ? w : 1,
-    };
-  });
-}
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {
   try {
@@ -505,25 +407,3 @@ export async function setDefaultQuoteOffice(id: string): Promise<boolean> {
   return found;
 }
 
-/** Templates screen (#343): set or clear the wording overrides of the named
- *  templates and stamp each one's "last edited" meta, under the settings row
- *  lock — every other template's overrides and meta are the stored ones, so
- *  two people saving different templates at once both keep their edit. A
- *  non-empty field map replaces that template's overrides; `null` or `{}`
- *  removes them (back to the built-in defaults). Validation is the caller's. */
-export async function writeTemplateOverrides(
-  changes: Record<string, Record<string, string> | null>,
-  stamp: { by: string; at: number }
-): Promise<void> {
-  await updateSettings((cur) => {
-    const s = settingsFrom(cur);
-    const templates: NonNullable<AppSettingsData["templates"]> = { ...(s.templates || {}) };
-    const templatesMeta = { ...(s.templatesMeta || {}) };
-    for (const [id, fields] of Object.entries(changes)) {
-      if (fields && Object.keys(fields).length) templates[id] = fields;
-      else delete templates[id];
-      templatesMeta[id] = { ...stamp };
-    }
-    return { templates, templatesMeta };
-  });
-}

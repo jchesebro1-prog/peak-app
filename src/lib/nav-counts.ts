@@ -1,6 +1,5 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
-import { listDesignRecords } from "@/lib/stores/designs";
 import { getPrefs } from "@/lib/stores/notif-prefs";
 import { displayLeadNumber } from "@/lib/estimate-number";
 import { quoteBuilderHref } from "@/lib/quote-links";
@@ -65,27 +64,17 @@ export async function navData(me: string, canApprove = false): Promise<{
   bell: BellGroup[];
   bellCount: number;
 }> {
-  const [quotes, designs, leadFollowUps, prefs] = await Promise.all([
+  const [quotes, leadFollowUps, prefs] = await Promise.all([
     allQuotes(),
-    // Fix wave 3 (I3): the badge needs review / owner only — a plain record
-    // read, never live Grid pricing (a catalog load per Grid design) on
-    // every page navigation.
-    listDesignRecords(),
     followUps({ unownedOrMine: true, me }),
     getPrefs(me),
   ]);
   const leadCount = leadFollowUps.length;
 
   const approvalBell = quoteApprovalBell(quotes, me, canApprove);
-  const reviewDesigns = designs.filter(
-    (d) =>
-      d.review?.state === "in_review" &&
-      d.review?.reviewer === me &&
-      d.owner !== me
-  );
   const counts: NavCounts = {
     leads: leadCount,
-    reviews: approvalBell.needs.length + reviewDesigns.length,
+    reviews: approvalBell.needs.length,
   };
 
   const groups: BellGroup[] = [];
@@ -95,17 +84,7 @@ export async function navData(me: string, canApprove = false): Promise<{
     groups.push({ key, label, items });
   };
 
-  push("reviews", "Needs your approval", [
-    ...approvalBell.needs,
-    ...reviewDesigns.map((d) => ({
-      id: d.id,
-      title: d.name,
-      sub: `${d.customer || ""} · design`,
-      href: "/design/designs",
-      letter: "D",
-      color: "#3155a8",
-    })),
-  ]);
+  push("reviews", "Needs your approval", approvalBell.needs);
   push("reviewBack", "Back from review", approvalBell.back);
   push(
     "leads",

@@ -18,7 +18,7 @@ import { partSearchHaystack, staffPartLabel, type SearchPartLike } from "@/lib/c
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
- * quotes, designs, surveys, inspections, companies + people
+ * quotes, companies + people
  * (the identity core, D85), and catalog parts. Simple case-insensitive
  * substring match over the fields the prototype searched; small data
  * volumes make this instant.
@@ -63,10 +63,9 @@ export async function globalSearch(rawQ: string): Promise<Group[]> {
   // the doc), then apply the precise per-field filter below. Avoids
   // materializing whole tables — the catalog alone is ~10.7k rows.
   const CANDIDATES = 100;
-  const [quotes, designs, companies, people, parts, partialQuotes] =
+  const [quotes, companies, people, parts, partialQuotes] =
     await Promise.all([
       searchDocs("quotes", q, CANDIDATES),
-      searchDocs("designs", q, CANDIDATES),
       allCompanies(),
       allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
@@ -158,19 +157,6 @@ export async function globalSearch(rawQ: string): Promise<Group[]> {
       letter: "O",
       color: "var(--accent)",
     }))
-  );
-  add(
-    "Designs",
-    designs
-      .filter((d) => matches(q, d.id, d.name, d.customer))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.name || d.id),
-        sub: `${d.id} · ${String(d.customer || "")}`,
-        href: `/design/designs?id=${encodeURIComponent(d.id)}`,
-        letter: "D",
-        color: "#3155a8",
-      }))
   );
   // Companies + People search the identity tables directly (D85); volumes
   // are small, and matching in JS mirrors the per-field precision above.

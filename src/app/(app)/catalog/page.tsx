@@ -27,18 +27,12 @@ import { allSections } from "@/lib/stores/spec-sections";
 import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { buildImageIndex, drawingSlotsFor, imagesFor, partDocsView, type PartDocsView } from "@/lib/part-docs/views";
+import { buildImageIndex, imagesFor, partDocsView, type PartDocsView } from "@/lib/part-docs/views";
 import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
 import FabricRateField from "./fabric-rate-field";
 import RackDataField from "./rack-data-field";
-import TagDefaultsField from "./tag-defaults-field";
-import PartDeviceTypeField, { type PartTypeChoice } from "./part-device-type-field";
-import { getDeviceTypes, getTypeMap } from "@/lib/stores/device-types";
-import { autoTypeEntries, isExcludedCategory, typeLabel, typeOfCategory } from "@/lib/design/device-types";
 import { rackFactsOf } from "@/lib/rack/part-facts";
-import { isPerLengthUnit } from "@/lib/design/grid-bom";
-import { formatCableOd, suggestCableOd } from "@/lib/design/conduit-riser/cable-od";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
 
@@ -222,26 +216,9 @@ export default async function CatalogPage({
         const state = await loadPartDocsState(parts);
         const imageIndex = buildImageIndex(state.documents, state.links);
         const view = partDocsView(state.index, editingPart.sku, (s) => descBySku!.get(s) ?? "", imagesFor(imageIndex, editingPart.sku));
-        // #300: the Symbol / Riser drawing slots, from the same two arrays.
-        return { ...view, drawings: drawingSlotsFor(state.documents, state.links, editingPart.sku) };
+        return view;
       })()
     : null;
-
-  // Grid notes #2: the admin-only Device type control — the active types and
-  // what the part's category maps to on its own. Reads the map WITHOUT
-  // writing (the Grid's own auto-apply, in memory — the riser sheet's rule).
-  const deviceTypeField =
-    isAdmin && editingPart && !isExcludedCategory(editingPart.category)
-      ? await (async () => {
-          const [types, stored] = await Promise.all([getDeviceTypes(), getTypeMap()]);
-          const map = { ...stored, ...autoTypeEntries([editingPart], stored, types, 0) /* in memory only — never written, so no timestamp */ };
-          const catKey = typeOfCategory(editingPart.category || "", map, types);
-          const choices: PartTypeChoice[] = types.filter((t) => !t.archived).map((t) => ({ key: t.key, label: t.label }));
-          const own = editingPart.deviceTypeKey || "";
-          if (own && !choices.some((c) => c.key === own)) choices.push({ key: own, label: `${typeLabel(own, types)} (archived — reads as Auto)` });
-          return { categoryTypeLabel: catKey ? typeLabel(catKey, types) : null, initial: own, types: choices };
-        })()
-      : null;
 
   return (
     <div className="pk-content">
@@ -296,24 +273,6 @@ export default async function CatalogPage({
           >
             Manufacturers
           </Link>
-          {/* #226 — the Grid's device types (admin). */}
-          {isAdmin && (
-            <Link
-              href="/catalog/device-types"
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#16181d",
-                background: "#fff",
-                border: "1px solid #e4e7ec",
-                borderRadius: 9,
-                padding: "10px 15px",
-                textDecoration: "none",
-              }}
-            >
-              Device types
-            </Link>
-          )}
           {/* #304 — order-number SKUs → Brand:Model from a crosswalk sheet (admin). */}
           {isAdmin && (
             <Link
@@ -330,24 +289,6 @@ export default async function CatalogPage({
               }}
             >
               Model numbers
-            </Link>
-          )}
-          {/* #328 — Bray designator codes + riser tag defaults for lighting-control parts (admin). */}
-          {isAdmin && (
-            <Link
-              href="/catalog/riser-data"
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#16181d",
-                background: "#fff",
-                border: "1px solid #e4e7ec",
-                borderRadius: 9,
-                padding: "10px 15px",
-                textDecoration: "none",
-              }}
-            >
-              Riser data
             </Link>
           )}
           <Link
@@ -600,7 +541,7 @@ export default async function CatalogPage({
                         )}
                         {(p.ports?.length ?? 0) > 0 && (
                           <span
-                            title={`${p.ports!.length} port${p.ports!.length === 1 ? "" : "s"} — wireable in The Grid`}
+                            title={`${p.ports!.length} port${p.ports!.length === 1 ? "" : "s"}`}
                             style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#6b7280", marginLeft: 6 }}
                           >
                             {p.ports!.length}⚊
@@ -671,7 +612,6 @@ export default async function CatalogPage({
           specTemplates={specTemplates}
           defaultArticleId={defaultArticleId}
           partDocs={partDocs}
-          deviceTypeField={deviceTypeField}
           error={partError}
         />
       )}
@@ -784,7 +724,6 @@ function PartFormModal({
   specTemplates,
   defaultArticleId,
   partDocs,
-  deviceTypeField,
   error,
 }: {
   part: CatalogPart | null;
@@ -806,7 +745,6 @@ function PartFormModal({
   partDocs: PartDocsView | null;
   /** Grid notes #2: the admin-only Device type control's data; null hides it
    *  (not an admin, a new part, or Fabric/Labor). */
-  deviceTypeField: { categoryTypeLabel: string | null; initial: string; types: PartTypeChoice[] } | null;
   /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
   error: string;
 }) {
@@ -1015,59 +953,6 @@ function PartFormModal({
                   fallbackRate={fabricAreaRateOf({ sku: part.sku, costPerSqft: part.costPerSqft, unit: part.unit, cost: part.cost })}
                   inputStyle={inputStyle}
                 />
-              </div>
-            )}
-            <div style={{ marginTop: 13, marginBottom: 4 }}>
-              {label("Designator code")}
-              {/* key={part?.sku}: the modal is reused across parts without remounting. */}
-              <input
-                key={part?.sku ?? "new"}
-                name="designatorCode"
-                defaultValue={part?.designatorCode ?? ""}
-                placeholder="From device type"
-                maxLength={6}
-                style={{ ...inputStyle, textTransform: "uppercase" }}
-              />
-              <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
-                Letters the Grid puts on this part&apos;s devices (CRO gives CRO-01). Leave blank to use the device type&apos;s code.
-              </div>
-            </div>
-            {part && deviceTypeField && (
-              <div style={{ marginTop: 13, marginBottom: 4 }}>
-                {/* key={part.sku}: the modal is reused across parts without remounting. */}
-                <PartDeviceTypeField
-                  key={part.sku}
-                  sku={part.sku}
-                  category={part.category || ""}
-                  categoryTypeLabel={deviceTypeField.categoryTypeLabel}
-                  initial={deviceTypeField.initial}
-                  types={deviceTypeField.types}
-                  inputStyle={inputStyle}
-                />
-              </div>
-            )}
-            <div style={{ marginTop: 13, marginBottom: 4 }}>
-              <TagDefaultsField key={part?.sku ?? "new"} initial={part?.tagDefaults ?? {}} />
-            </div>
-            {part && isPerLengthUnit(part.unit || "") && (
-              <div style={{ marginTop: 13, marginBottom: 4 }}>
-                {label("Outside diameter (in)")}
-                {/* key={part.sku}: the modal is reused across parts without remounting. */}
-                <input
-                  key={part.sku}
-                  name="cableOdIn"
-                  defaultValue={part.cableOdIn !== undefined ? formatCableOd(part.cableOdIn) : ""}
-                  placeholder="From the cable datasheet"
-                  inputMode="decimal"
-                  style={inputStyle}
-                />
-                <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>
-                  The cable&apos;s overall diameter, up to 3.0 in. The Grid&apos;s conduit-fill check sums these. Leave blank if unknown.
-                  {part.cableOdIn === undefined && (() => {
-                    const s = suggestCableOd({ sku: part.sku, mfr: part.mfr, manufacturerModelNumber: part.manufacturerModelNumber, manufacturerPartNumber: part.manufacturerPartNumber, desc: part.desc });
-                    return s ? <> Researched: {formatCableOd(s.odIn)} in (<a href={s.source} target="_blank" rel="noreferrer" style={{ color: "inherit" }}>datasheet</a>).</> : null;
-                  })()}
-                </div>
               </div>
             )}
             {part && (

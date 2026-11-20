@@ -7,8 +7,6 @@ import type { SessionUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
 import { getAll as getQuotes } from "@/lib/stores/quotes";
 import { all as getCustomers } from "@/lib/stores/customers";
-import { allEngagements } from "@/lib/stores/engagements";
-import { getAllDesigns } from "@/lib/stores/designs";
 import { open as openLeads, followUps } from "@/lib/stores/leads";
 import { list as catalogList } from "@/lib/stores/catalog";
 import { getSettings } from "@/lib/settings";
@@ -20,8 +18,6 @@ export function makeDashboardData(user: SessionUser) {
   return {
     quotes: once(getQuotes),
     customers: once(getCustomers),
-    engagements: once(allEngagements),
-    designs: once(getAllDesigns),
     openLeads: once(openLeads),
     myFollowUps: once(() => followUps({ owner: me })),
     roster: once(activeUsers),

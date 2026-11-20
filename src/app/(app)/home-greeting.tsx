@@ -84,7 +84,7 @@ export default function HomeGreeting({
           </span>
         </Link>
         <Link
-          href="/design/quick"
+          href="/quotes/new"
           className="pkh-accbtn"
           style={{
             display: "flex",

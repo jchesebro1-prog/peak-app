@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { TitleBlock } from "@/components/drawing/title-block";
 import { cutSheetCssVars } from "@/lib/curtain-cut-sheets/model";
-import { titleBlockData } from "@/lib/design/grid-drawing-set";
+import { titleBlockData } from "@/lib/title-block";
 import { emptyRackLayout } from "@/lib/rack/layout";
 import type { LoadedRackSheets } from "@/lib/rack/load";
 import {

@@ -9,7 +9,6 @@ import { shrinkImage } from "@/lib/part-docs/shrink";
 import { fabricPartsByCategory, getMany, getManyBySku, type CatalogPart } from "@/lib/stores/catalog";
 import { listCurtainMounts } from "@/lib/stores/curtain-mounts";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { getProject } from "@/lib/stores/grid-projects";
 import { listManufacturers, manufacturerImageLookup } from "@/lib/stores/manufacturers";
 import { getDocuments } from "@/lib/stores/part-documents";
 import { partsAndImagesBySku } from "@/lib/catalog-rename/live-reads";
@@ -77,21 +76,20 @@ export async function loadCutSheets(quoteId: string, opts: { images: "url" | "da
   if (!isCutSheetQuoteType(quote.quoteType)) return { ok: false, error: CUT_SHEETS_WRONG_TYPE };
   const spec = (quote.spec || {}) as { kind?: unknown; gridProjectId?: unknown; sections?: unknown };
   const isGrid = !(Array.isArray(spec.sections) && spec.sections.length) && spec.kind === "grid";
-  const [trackSeries, mounts, settings, customer, project] = await Promise.all([
+  const [trackSeries, mounts, settings, customer] = await Promise.all([
     listTrackSeries(),
     listCurtainMounts(),
     getSettings(),
     getCustomer(quote.customerId),
-    isGrid && typeof spec.gridProjectId === "string" ? getProject(spec.gridProjectId) : Promise.resolve(null),
   ]);
-  const fabricRows = await cutSheetFabricRows(curtainFabricLookups(quote.spec, project, quote.id));
+  const fabricRows = await cutSheetFabricRows(curtainFabricLookups(quote.spec));
   const base: CollectInput = {
     quote,
     fabrics: fabricRows.map((p) => ({ sku: p.sku, desc: p.desc, oz: p.oz, ozBasis: p.ozBasis, boltWidthIn: p.boltWidthIn, flameRating: p.flameRating })),
     trackSeries,
     mounts,
     partInfo: new Map(),
-    grid: isGrid ? { project } : null,
+    grid: isGrid ? { project: null } : null,
   };
   // Pass 1 names the hardware SKUs; one catalog read gets their live desc/unit; pass 2 prints them.
   // #304: keyed by the SKU the line names — a renamed part's old SKU resolves.

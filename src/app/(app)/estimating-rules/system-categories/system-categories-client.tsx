@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
-import { PartPicker } from "@/app/(app)/design/grid/settings/equipment-map/part-picker";
+import { PartPicker } from "@/components/part-picker";
 import { DISCIPLINES, DISCIPLINE_LABEL } from "@/lib/estimate-output/fields";
 import {
   MAX_CATEGORIES,

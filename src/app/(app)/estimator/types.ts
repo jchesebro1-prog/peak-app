@@ -131,11 +131,8 @@ export type SpecItem = {
   noFreight?: boolean;
   /** #245: customer-requested line still waiting on a Peak price. */
   por?: boolean;
-  /** Spec records design §6 — a system record's match key, set at the
-   *  source (the custom-part form, the curtain add, and the Spec select on a
-   *  custom/curtain line — spec-key-select.tsx) so
-   *  `bomFromQuote`/`record-match.ts` can match this line with no catalog
-   *  part number. */
+  /** A spec-record match key the removed Specs module set on a custom or
+   *  curtain line. Nothing sets or reads it now; a stored one rides along. */
   specKey?: string;
   /** #245 Task 13 — the fixture record this line was configured from, and the
    *  add-on quantities chosen (keyed `slot:sku`, as on a portal cart line).
@@ -700,14 +697,10 @@ export type EstimatorProps = {
   /** #245: the freight-by-distance rule (Estimating Rules), loaded server-side
    *  via loadFreightRule() — plain numbers, client-safe. */
   freightRule: FreightRule;
-  /** Company-managed checked assumptions shared with consulting proposals. */
+  /** Company-managed checked assumptions (Settings → Sales → Assumptions library). */
   assumptionLibrary: string[];
   /** #368 — what the last Revise re-priced to today's catalog (null when nothing / never). Absent = null. */
   repricedOnRevise?: RepricedOnRevise | null;
-  /** Spec records design §6 — the Spec select's options: every non-archived
-   *  system record's match key (`systemMatchKeys`), read on the server so the
-   *  client never imports the records store. */
-  specKeys: string[];
   /** #282 phase 2 — may this user apply Rewards credit (`create`)? */
   canApplyCredit: boolean;
   /** #287 task B — the signed-in user's name (the one Lead estimator they may always pick). */

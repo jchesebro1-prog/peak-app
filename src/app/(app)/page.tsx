@@ -11,7 +11,7 @@ import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
-/** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
+/** Home actions that schedule a quote PDF render in `after()` run inside this budget. */
 export const maxDuration = 120;
 
 /**
@@ -69,14 +69,14 @@ export default async function HomePage({
   const me = user.name;
   const data = makeDashboardData(user);
   const now = Date.now();
-  const [userRecord, appSettings, quotesAll, designsAll] = await Promise.all([
-    getUser(user.id), getSettings(), data.quotes(), data.designs(),
+  const [userRecord, appSettings, quotesAll] = await Promise.all([
+    getUser(user.id), getSettings(), data.quotes(),
   ]);
 
   const pipe = resolvePipe(first(sp.pipe));
   const sheetHref = sheetHrefFor(pipe);
   const s = myQuoteStats(quotesAll, me);
-  const { urgentCount, openReviewCount } = homeAlerts(quotesAll, designsAll, me, now, sheetHref, can("approve", user.roles));
+  const { urgentCount, openReviewCount } = homeAlerts(quotesAll, me, now, sheetHref, can("approve", user.roles));
 
   /* ---- greeting (unchanged) ---- */
   const office = appSettings.offices.find((o) => o.quoteDefault) || appSettings.offices[0];

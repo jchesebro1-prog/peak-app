@@ -60,13 +60,8 @@ export type SettingsData = {
   meId: string;
   meName: string;
   settings: CompanySettingsVM;
-  consultingPhases: string[];
+  /** The Estimator's assumptions library (stored, or the defaults). */
   consultingAssumptions: string[];
-  /** #145 D165/D166 — one weight per CURRENT phase (phaseWeightsFor already
-   *  paired absent weights with the default of 1 server-side). */
-  phaseWeights: Array<{ phaseId: string; name: string; weight: number }>;
-  /** #145 D165 — the discipline vocabulary (mergedConsultingDisciplines). */
-  consultingDisciplines: string[];
   customerFieldDefs: CustomFieldDef[];
   venueTypes: VenueType[];
   /** #218 — Settings → Data & Tools → Document categories (resolved, archived included). */

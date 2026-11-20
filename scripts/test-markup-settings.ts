@@ -15,7 +15,7 @@ type Ok = (cond: boolean, msg: string) => void;
 const RAW: Record<string, Record<string, unknown>> = {
   flametest_rates: { margin: 0.3, laborRate: 80 },
   repair_rates: { margin: 0.3, partsMargin: 0.27 },
-  pricing_rules: { "tiers.base": 30, "tiers.gold": 20, "system.freightPct": 5 },
+  pricing_rules: { "tiers.base": 30, "tiers.gold": 20, "freight.basePct": 5 },
 };
 
 async function rawBlob(id: string): Promise<Record<string, unknown> | null> {
@@ -44,7 +44,7 @@ export async function markupSettingsChecks(ok: Ok): Promise<void> {
   ok(afterRollback?.["tiers.base"] === 30 && !("_pricingBasis" in (afterRollback ?? {})), "markup settings: the rolled-back conversion left the margin-era blob as it was");
 
   // 2. The first read outside a transaction converts every live blob once, stamped, with a backup.
-  ok((await value("tiers.base")) === 43 && (await value("tiers.gold")) === 25 && (await value("system.freightPct")) === 5,
+  ok((await value("tiers.base")) === 43 && (await value("tiers.gold")) === 25 && (await value("freight.basePct")) === 5,
     "markup settings: stored whole-percent tiers convert and round (30 → 43, 20 → 25); freight is untouched");
   ok((await resolveTier(null)).markup === 0.43, "markup settings: the Base tier resolves to 43 % markup");
   const rawRules = await rawBlob("pricing_rules");

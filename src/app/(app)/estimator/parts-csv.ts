@@ -4,7 +4,7 @@ import { computeMob, hasSellOverride, isSystemLine, lineExtSellOf, systemFreight
 import { laborGroupRecord } from "./labor-group";
 import type { SpecItem, SpecSection, VendorQuote } from "./types";
 import { isBonusItem, isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
-import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isPlaceholderSku } from "@/lib/quote-line-ids";
 import { normalCostOf, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 
 /** The Estimator's "Parts list (CSV)" export for the project manager (#262) —

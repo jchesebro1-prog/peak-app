@@ -1,9 +1,8 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { getSettings, mergedConsultingDisciplines, phaseWeightsFor } from "@/lib/settings";
+import { getSettings } from "@/lib/settings";
 import { peakHeaderDefault } from "@/lib/letterhead";
-import { mergedConsultingPhases } from "@/lib/stores/engagements";
-import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
+import { mergedConsultingAssumptions } from "@/lib/assumptions";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { resolveDocumentCategories } from "@/lib/document-categories";
 import { venueTypesFrom } from "@/lib/venue-types";
@@ -129,13 +128,7 @@ export default async function SettingsPage({
             peakHeader: peakHeaderDefault(settings),
             dashboardDefaults: settings.dashboardDefaults,
           }}
-          consultingPhases={mergedConsultingPhases(settings.consultingPhases)}
           consultingAssumptions={mergedConsultingAssumptions(settings.consultingAssumptions)}
-          phaseWeights={phaseWeightsFor(
-            settings.consultingPhaseWeights,
-            mergedConsultingPhases(settings.consultingPhases)
-          )}
-          consultingDisciplines={mergedConsultingDisciplines(settings.consultingDisciplines)}
           customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
           documentCategories={resolveDocumentCategories(settings.documentCategories)}
           venueTypes={venueTypesFrom(settings.venueTypes)}

@@ -52,6 +52,8 @@ you can also just ask Claude Code to run.
    | `DATABASE_URL` | the Neon pooled connection string from step 2 |
    | `AUTH_SECRET` | a fresh random secret — ask Claude Code to generate one, or click “generate” if Vercel offers it |
    | `QUOTE_PDF_ORIGIN` | **required in production** — the app's own public URL, e.g. `https://quartzite-six.vercel.app` (Production scope only; see §7) |
+   | `BLOB_READ_WRITE_TOKEN` | the Vercel Blob store's token (Storage → the Blob store) — datasheets, catalog photos, documents, drawings and quote PDFs live there |
+   | `CRON_SECRET` | any long random string — it lets Vercel run the one daily job (`/api/drive/sync`: venue address stamp + ETC price sync) |
 
    (Google sign-in vars come in step 4 — the app deploys fine without them,
    it just shows “Google sign-in isn't configured yet.”)
@@ -95,11 +97,13 @@ you can also just ask Claude Code to run.
    `jchesebro1@gmail.com`; add teammates' emails (their real sign-in
    addresses) in Settings → Team before inviting them.
 
-## 5) Gmail integration — removed
+## 5) After the 2026-11-20 shrink — clean-up
 
-The Inbox, the Gmail connection, Google Calendar / Tasks / Drive access and the
-Assist (AI) layer were removed on 2026-11-20 (see `docs/removal-log.md`, Stage 2).
-Nothing here needs configuring any more. If this deployment had them on, clean up:
+The app was cut down to CRM, the Estimator, Catalog, Quotes hub, Reports,
+Settings and Import / Export (see `docs/removal-log.md`). The Inbox, the Gmail
+connection, Google Calendar / Tasks / Drive access, the Assist (AI) layer, the
+customer portal and the Design tab are gone. Nothing of theirs needs configuring
+any more. If this deployment had them on, clean up:
 
 - Vercel env: delete `GMAIL_ENABLED`, `GMAIL_REDIRECT_BASE`, `ANTHROPIC_API_KEY`,
   every `ASSIST_*` variable and `INBOX_ORG_DISABLED`. **Keep `CRON_SECRET`** — the
@@ -112,17 +116,29 @@ Nothing here needs configuring any more. If this deployment had them on, clean u
   person's Google connection (Google Account → Security → Third-party access),
   the Krisp API keys, and the Anthropic key.
 
-## 6) Recordings (native build) — removed
+## 6) Native apps after the shrink
 
-In-app recording and the Krisp meeting matcher were removed with the Inbox. The
-recorder, foreground-service and local-notification plugins are gone from
-`package.json`; run `npx cap sync` and rebuild both native apps before the next
-release (the microphone / notification permission strings can then be dropped).
+In-app recording and the Krisp meeting matcher were removed with the Inbox, and
+offline capture now carries trade-show booth captures only. The recorder,
+foreground-service, local-notification, filesystem and preferences plugins are
+gone from `package.json` and from the native plugin lists; run `npx cap sync`
+and rebuild both native apps before the next release (the microphone /
+notification permission strings can then be dropped). Make sure every phone
+and tablet has synced before the release goes out — see `docs/removal-log.md`.
+
+The web app's offline cache was renamed (`quartzite-shell-v3` in
+`public/sw.js`), so a browser drops its cached copies of removed screens the
+first time it loads the new release.
+
+The build no longer seeds the Spec Library: `npm run build` is
+`node scripts/migrate.mjs && next build`.
 
 ## 7) Saved quote PDFs (#222)
 
-Every quote save renders the customer document to a PDF after the response
-(headless Chromium, `@sparticuz/chromium` on Vercel) and keeps it in Blob.
+A saved system estimate renders its customer document to a PDF after the
+response (headless Chromium, `@sparticuz/chromium` on Vercel) and keeps it in
+Blob. A draft that saves itself as you type renders on the way into Customer
+review or Send & track.
 
 - **`QUOTE_PDF_ORIGIN` — required in production.** The address the headless
   browser prints from, e.g. `https://quartzite-six.vercel.app` (scheme + host,
@@ -160,6 +176,11 @@ Every quote save renders the customer document to a PDF after the response
 
 - **Updates:** every `git push` to `main` redeploys automatically
   (migrations run during the build).
+- **Never roll back past the markup change (#367)** — older code would read
+  the converted settings and quotes as margins. Roll forward with a fix. (The
+  2026-11-20 shrink changed no table and converted no data, so rolling back
+  across it is possible; see `docs/removal-log.md` for what a rollback would
+  bring back.)
 - **Never use Vercel's Instant Rollback to a deploy older than migration
   0030 (estimate numbers, #223).** Code from before it writes quote/lead
   documents with no `estNo`, and the next document created after that

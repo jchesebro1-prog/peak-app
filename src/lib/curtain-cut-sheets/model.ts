@@ -7,7 +7,7 @@
  * stand-in text), and a fact that members of a merged type can disagree on
  * (track operation, Grid color) prints only when they all agree.
  */
-import { revLetter, titleBlockData, type RevisionRow, type TitleBlockData, type TitleBlockInput } from "@/lib/design/grid-drawing-set";
+import { revLetter, titleBlockData, type RevisionRow, type TitleBlockData, type TitleBlockInput } from "@/lib/title-block";
 import type { QuoteRevision } from "@/lib/stores/quotes";
 import type { CurtainType } from "./collect";
 import { elevation, ftIn, inchLabel } from "./geometry";

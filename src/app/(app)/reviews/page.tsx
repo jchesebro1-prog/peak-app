@@ -1,13 +1,9 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getAll as getQuotes, timeAgo, type QuoteReview } from "@/lib/stores/quotes";
-import { getAllDesigns } from "@/lib/stores/designs";
-import { allEngagements } from "@/lib/stores/engagements";
 import { allUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import ReviewList, { type ReviewItem } from "./review-list";
-import { designBudgetLabel } from "@/lib/design/scope-targets";
-import { designOpenHref } from "@/lib/design/design-links";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { lapsedApprovalLine, reviewHistoryApprovedLine } from "@/lib/review-line";
 import { approvalHolds, quoteOwnerName, reviewLimitChip } from "@/lib/review-limits";
@@ -51,13 +47,11 @@ const CSS = `
 type RawItem = {
   kind: ReviewKind;
   id: string;
-  /** #223 — what the list shows (a quote's number; a design's id). */
+  /** #223 — what the list shows (the quote's number). */
   displayId: string;
   name: string;
   owner: string;
   value: number;
-  /** Pre-formatted value (#211: a design's "Incomplete"); else shortMoney(value). */
-  valueLabel?: string;
   review: QuoteReview;
   ts: number;
   openHref: string;
@@ -74,13 +68,11 @@ export default async function ReviewsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, quotes, designs, users, engagements, limitCtx] = await Promise.all([
+  const [user, sp, quotes, users, limitCtx] = await Promise.all([
     requireUser(),
     searchParams,
     getQuotes(),
-    getAllDesigns(),
     allUsers(),
-    allEngagements(),
     loadReviewLimitContext(),
   ]);
   const me = user.name;
@@ -90,7 +82,7 @@ export default async function ReviewsPage({
   const colorOf = (n: string) => identity.get(n)?.color || fallbackColor(n || "");
   const initialsOf = (n: string) => identity.get(n)?.initials || deriveInitials(n || "");
 
-  /* ---- unify quotes + designs into review items ---- */
+  /* ---- quotes as review items ---- */
   const NONE: QuoteReview = {
     state: "none",
     reviewer: null,
@@ -123,47 +115,12 @@ export default async function ReviewsPage({
       staleLine: staleLineOf(q),
       asOf: q.updatedAt || 0,
     })),
-    ...designs.map((d) => ({
-      kind: "Design" as const,
-      id: d.id,
-      displayId: d.id,
-      name: d.name,
-      owner: d.owner,
-      value: d.budget || 0,
-      // #211 final review I1/I2: the shared incomplete label, and a Grid
-      // design opens in The Grid rather than as a Quick record.
-      valueLabel: designBudgetLabel(d, shortMoney),
-      review: (d.review as QuoteReview) || NONE,
-      ts: d.updatedAt || 0,
-      openHref: designOpenHref(d),
-    })),
-    /* Consulting phase reviews (D90) — each phase carries its own
-     * QuoteReview; the composite id "<engId>:<phaseId>" routes the
-     * approver actions back to the right phase. */
-    ...engagements.flatMap((e) =>
-      e.phases
-        .filter((ph) => ph.review.state !== "none")
-        .map((ph) => ({
-          kind: "Engagement" as const,
-          id: e.id + ":" + ph.id,
-          displayId: e.id + ":" + ph.id,
-          name: e.name + " — " + ph.name,
-          owner: e.people.find((p) => p.role === "Engagement Lead")?.person || "",
-          value: 0,
-          review: ph.review,
-          ts: e.updatedAt || 0,
-          openHref: "/design/engagements/" + encodeURIComponent(e.id) + "?tab=phases",
-        }))
-    ),
   ];
 
   const inReview = all.filter((x) => x.review.state === "in_review");
   // #284: any approver can decide an in-review quote, so an unassigned quote is in every
-  // approver's queue (their own excepted — they can't approve their own). Designs and
-  // engagement phases keep the claim model: only the ones assigned to you.
-  const myQueue = inReview.filter((x) =>
-    x.kind === "Quote" ? x.review.reviewer === me || (!x.review.reviewer && !sameName(x.owner, me)) : x.review.reviewer === me
-  );
+  // approver's queue (their own excepted — they can't approve their own).
+  const myQueue = inReview.filter((x) => x.review.reviewer === me || (!x.review.reviewer && !sameName(x.owner, me)));
   const unclaimed = inReview.filter((x) => !x.review.reviewer);
   const mySubs = all.filter(
     (x) => x.review.submittedBy === me && x.review.state !== "none"
@@ -218,12 +175,12 @@ export default async function ReviewsPage({
       ownerInitials: initialsOf(x.owner),
       state: x.staleLine ? "none" : r.state,
       metaLine,
-      value: x.valueLabel ?? shortMoney(x.value),
+      value: shortMoney(x.value),
       note: r.note && r.state === "changes" ? r.note : "",
       openHref: x.openHref,
       canDecide: canApprove && tab !== "mine" && r.state === "in_review" && !isMine,
-      // #284: quotes have no Claim — any approver decides them; Designs and Engagements keep it.
-      canClaim: canApprove && tab === "unclaimed" && !r.reviewer && !isMine && x.kind !== "Quote",
+      // #284: quotes have no Claim — any approver decides them.
+      canClaim: false,
       asOf: x.asOf ?? 0,
     };
   });

@@ -4,10 +4,7 @@ import { can } from "@/lib/team";
 import { blobEnabled } from "@/lib/blob";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
-import { listProjects } from "@/lib/stores/grid-projects";
-import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { getSettings } from "@/lib/settings";
 import { ensureFixturesConverted } from "@/lib/fixtures-migrate";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
@@ -40,7 +37,7 @@ const PAGE = 200;
 
 /**
  * Catalog → Datasheets (#207, spec §3): the to-do list. Every part Peak has
- * ever quoted (any quote status, any Grid placement, any bid spec), most
+ * ever quoted (any quote status), most
  * quoted first, with a Datasheet, a Spec sheet and a Manual slot each. One load of
  * every collection per request; everything below is single-pass Maps.
  */
@@ -51,11 +48,9 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   // and it lands before loadPartDocsState reads the graph (whose own
   // first-read step is the legacy datasheet backfill). Never on a Vercel
   // preview, which shares production's database (fix wave 1, C1).
-  const [parts, quotes, gridProjects, generated] = await Promise.all([
+  const [parts, quotes] = await Promise.all([
     listCatalog(),
     allQuotes(),
-    listProjects(),
-    allGeneratedSpecs(),
     ensureFixturesConverted(),
   ]);
   const state = await loadPartDocsState(parts);
@@ -64,7 +59,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   // Labor rows are rates, not products — they never take a datasheet.
   // #332: Grid `asm:` assemblies count their members as quoted (read after the #210 conversion above).
   const fixtureById = new Map((await listFixtures()).map((f) => [f.id, f] as const));
-  const stats = quotedPartStats({ quotes, gridProjects, generated, fixtureOf: (id) => fixtureById.get(id) }, (sku) => {
+  const stats = quotedPartStats({ quotes, fixtureOf: (id) => fixtureById.get(id) }, (sku) => {
     const p = bySku.get(sku);
     return !!p && p.category !== "Labor";
   });
@@ -109,7 +104,6 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           {can("manage_users", user.roles) && <SquarePhotosButton />}
           <Link href="/catalog/documents/photos" className="pk-btn-outline" style={{ textDecoration: "none" }}>Photo sheet</Link>
           <Link href="/catalog/rack-data" className="pk-btn-outline" style={{ textDecoration: "none" }}>Rack data sheet</Link>
-          {can("manage_users", user.roles) && <Link href="/catalog/riser-data" className="pk-btn-outline" style={{ textDecoration: "none" }}>Riser data</Link>}
           <Link href="/catalog/documents/upload" className="pk-btn-accent" style={{ textDecoration: "none" }}>Upload many</Link>
         </div>
       </div>

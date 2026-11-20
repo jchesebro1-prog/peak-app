@@ -5,10 +5,7 @@
  * through ctx.data so a store loads once per request however many widgets
  * share it.
  */
-import { designBudgetLabel, designNeedsPart, designRefreshHint } from "@/lib/design/scope-targets";
-import { designOpenHref } from "@/lib/design/design-links";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
-import { timeAgo as designTimeAgo } from "@/lib/stores/designs";
 import {
   followUpInfo, sla as leadSla, sourceMeta, stageMeta as leadStageMeta, dueLabel, dateLabel,
   timeAgo as leadTimeAgo, type LeadRecord,
@@ -18,8 +15,6 @@ import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor, shortMoney } from "@/lib/dashboard/home-metrics";
 import { tile } from "./tile";
 import HomeMyLeads, { type LeadGroup, type LeadRow } from "../../home-my-leads";
-import HomeMyDesigns, { type DesignCard } from "../../home-my-designs";
-import { estimateLinksForDesigns } from "@/lib/design/estimate-links-server";
 import HomePipeline, { type PipelineRow } from "../../home-pipeline";
 import HomeCatalog from "../../home-catalog";
 import HomeTeamActivity, { type TeamActivityRow } from "../../home-team-activity";
@@ -92,31 +87,6 @@ export const HOME_RENDERERS = {
     return <HomeMyLeads myFollowCount={myFollowUps.length} leadGroups={leadGroups} />;
   },
 
-  /* ---- my designs (page.tsx 427-441) ---- */
-  "my-designs": async (ctx) => {
-    const designsAll = await ctx.data.designs();
-    const mine = designsAll.filter((d) => d.owner === ctx.user.name);
-    // #316: a design that draws an Estimator quote offers "Open estimate →", not Add to Quotes (one batched read).
-    const estimateLinks = await estimateLinksForDesigns(mine);
-    const cards: DesignCard[] = mine.map((d) => ({
-      estimate: estimateLinks[d.id] ? { number: estimateLinks[d.id].number, href: estimateLinks[d.id].href } : undefined,
-      id: d.id, venue: d.venue || "—", name: d.name,
-      tier: (d.tier || "better").replace(/^./, (c) => c.toUpperCase()),
-      // #211 final review I1: the shared label — "Incomplete" while any line
-      // of the saved tier still needs a part, never a partial dollar figure.
-      budget: designBudgetLabel(d, shortMoney),
-      incomplete: designNeedsPart(d) > 0,
-      // #211 wave 2 (M5): an incomplete Quick design's stored price is from
-      // its last save — say how to refresh it once the rows are mapped.
-      hint: designRefreshHint(d) || undefined,
-      meta: `${d.id} · ${d.width || "?"}' × ${d.depth || "?"}' × ${d.grid || "?"}'`,
-      systemsLabel: `${(d.systems || []).length} systems`, edited: designTimeAgo(d.updatedAt),
-      // #211 final review I2: a Grid (manual-layout) design opens in The Grid.
-      openHref: designOpenHref(d),
-    }));
-    return <HomeMyDesigns cards={cards} />;
-  },
-
   /* ---- my pipeline (page.tsx 220-244) — ?pipe stays URL state ---- */
   "my-pipeline": async (ctx) => {
     const s = await stats(ctx);
@@ -138,12 +108,9 @@ export const HOME_RENDERERS = {
   /* ---- team activity (page.tsx 179-181, 443-457) ---- */
   "team-activity": async (ctx) => {
     const me = ctx.user.name;
-    const [quotesAll, designsAll, roster] = await Promise.all([ctx.data.quotes(), ctx.data.designs(), ctx.data.roster()]);
+    const [quotesAll, roster] = await Promise.all([ctx.data.quotes(), ctx.data.roster()]);
     const ident = new Map(roster.map((u) => [u.name, { initials: u.initials, color: u.color }]));
-    const rows: TeamActivityRow[] = [
-      ...quotesAll.filter((q) => q.owner !== me).map((q) => ({ ts: q.updatedAt, who: q.owner, kind: "Quote", verb: "updated", name: q.name })),
-      ...designsAll.filter((d) => d.owner !== me).map((d) => ({ ts: d.updatedAt, who: d.owner, kind: "Design", verb: "designed", name: d.name })),
-    ]
+    const rows: TeamActivityRow[] = quotesAll.filter((q) => q.owner !== me).map((q) => ({ ts: q.updatedAt, who: q.owner, kind: "Quote", verb: "updated", name: q.name }))
       .sort((a, b) => (b.ts || 0) - (a.ts || 0))
       .slice(0, 5)
       .map((t) => ({ ...t, initials: ident.get(t.who)?.initials || deriveInitials(t.who), color: ident.get(t.who)?.color || fallbackColor(t.who) }));
@@ -152,8 +119,8 @@ export const HOME_RENDERERS = {
 
   /* ---- needs attention (page.tsx 246-335) ---- */
   "needs-attention": async (ctx) => {
-    const [quotesAll, designsAll] = await Promise.all([ctx.data.quotes(), ctx.data.designs()]);
-    const { alerts } = homeAlerts(quotesAll, designsAll, ctx.user.name, ctx.now, sheetHrefFor(resolvePipe(ctx.sp.pipe)), can("approve", ctx.user.roles));
+    const quotesAll = await ctx.data.quotes();
+    const { alerts } = homeAlerts(quotesAll, ctx.user.name, ctx.now, sheetHrefFor(resolvePipe(ctx.sp.pipe)), can("approve", ctx.user.roles));
     return <HomeNeedsAttention alerts={alerts} />;
   },
 } satisfies Record<string, WidgetRenderer>;

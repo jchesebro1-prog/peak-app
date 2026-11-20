@@ -19,8 +19,6 @@ import {
   setImageOrder,
 } from "@/lib/stores/part-documents";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
-import { listProjects } from "@/lib/stores/grid-projects";
-import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, catalogFetchTargets, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
@@ -555,7 +553,7 @@ export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: 
 
   const catalogScope = input?.scope === "catalog";
   // The quoted scope's three extra loads still run alongside the catalog list.
-  const quotedLoads = catalogScope ? null : Promise.all([allQuotes(), listProjects(), allGeneratedSpecs(), listFixtures()]);
+  const quotedLoads = catalogScope ? null : Promise.all([allQuotes(), listFixtures()]);
   const parts = await listCatalog();
   const bySku = new Map(parts.map((p) => [p.sku, p]));
   // Labor rows are rates, not products — they never take a datasheet or an
@@ -568,10 +566,10 @@ export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: 
   if (!quotedLoads) {
     skus = parts.filter((p) => p.category !== "Labor").map((p) => p.sku);
   } else {
-    const [quotes, gridProjects, generated, fixtures] = await quotedLoads;
+    const [quotes, fixtures] = await quotedLoads;
     // #332: Grid `asm:` assemblies count their members as quoted.
     const fixtureById = new Map(fixtures.map((f) => [f.id, f] as const));
-    skus = [...quotedPartStats({ quotes, gridProjects, generated, fixtureOf: (id) => fixtureById.get(id) }, eligible).keys()];
+    skus = [...quotedPartStats({ quotes, fixtureOf: (id) => fixtureById.get(id) }, eligible).keys()];
   }
 
   const state = await loadPartDocsState(parts);

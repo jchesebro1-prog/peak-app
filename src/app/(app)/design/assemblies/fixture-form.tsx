@@ -326,7 +326,7 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
             {isSystem
               ? "A bundle of catalog parts under one scope — a mixer, DSP & amps; a video switcher; a distro system."
               : isHardware
-                ? "A bundle of catalog hardware — a chain wrap, a batten or beginning termination. It has no scope of its own: on the plan it follows the Equipment map row it is mapped on (Rigging by default)."
+                ? "A bundle of catalog hardware — a chain wrap, a batten or beginning termination. It has no scope of its own."
                 : isRack
                   ? RACK_HELP
                   : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}

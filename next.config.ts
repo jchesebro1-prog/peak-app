@@ -19,13 +19,11 @@ const nextConfig: NextConfig = {
   // which file tracing can't see — ship it with EVERY route whose server
   // actions can (transitively) reach scheduleQuotePdf/generateQuotePdf
   // (src/lib/quote-pdf/**), and nowhere else (~60 MB each). That's the
-  // Estimator (renders/retries directly); the Quotes hub (status
-  // changes + revision restore schedule a re-render); Home, the Designs
-  // dashboard and Quick Design (promoting a Quick-layout design schedules
-  // one); The Grid's project editor (creating/re-promoting a draft quote
-  // schedules one); plus #296's rack submittal download (renders its three
-  // sheets). (The service quote builders, the Flame Tests / Inspections
-  // dashboards and the portal estimate were removed.)
+  // Estimator (renders/retries directly); the Quotes hub and Home's stage
+  // sheet (status changes + revision restore schedule a re-render); plus
+  // #296's rack submittal download (renders its three sheets). (The service
+  // quote builders, the Flame Tests / Inspections dashboards, the portal
+  // estimate, the Designs dashboard, Quick Design and the Grid were removed.)
   // Routes that only call markQuotePdfStale (the CSV importer) or
   // copySentRevisionPdf (a send stamping a quote sent) never invoke Chrome
   // themselves, so they're deliberately left out.
@@ -34,20 +32,17 @@ const nextConfig: NextConfig = {
     "/estimator": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/quotes": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/design/designs": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/design/quick": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/design/grid/[id]": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/api/racks/[id]/submittal": ["./node_modules/@sparticuz/chromium/bin/**"],
     // Grid notes #9: the baked Peak letterhead (src/lib/letterhead-server.ts)
-    // is read with fs at run time by every document that prints it — specs,
-    // client packages, estimates — which file tracing can't see.
+    // is read with fs at run time by every document that prints it — client
+    // packages, estimates — which file tracing can't see.
     // 120 KB; shipped with every function rather than a list that drifts.
     // Path shared with the reader: src/lib/letterhead-path.ts.
     "/**": [BAKED_LETTERHEAD_TRACE_GLOB],
   },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy
-  // needs to be tuned against Leaflet/Three/inline styles and verified in a
+  // needs to be tuned against Leaflet/inline styles and verified in a
   // real build before it's turned on). HSTS only takes effect over HTTPS, so
   // it is inert on the LAN/localhost dev origins.
   async headers() {

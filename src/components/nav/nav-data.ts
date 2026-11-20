@@ -22,7 +22,7 @@ export type NavEntry =
 
 export const NAV: NavEntry[] = [
   /* Q-6 rebrand (D117): the header reads like the brand lockup —
-   * [Q6 mark = Home] Estimating · Projects · Customers · Design · Knowledge. Home left the tab row (the
+   * [Q6 mark = Home] Estimating · Customers · Knowledge. Home left the tab row (the
    * mark is the link); Quotes/Estimator/Reviews split out of Sales into
    * EST; the rest of Sales became CRM; Operations became PM. Routes are
    * untouched — only group keys/labels moved. */
@@ -58,6 +58,13 @@ export const NAV: NavEntry[] = [
        * Settings → Company "Catalog" link stays as a second door; /catalog
        * gates its own admin parts, so no permission check here. */
       { key: "catalog", label: "Catalog", href: "/catalog" },
+      /* The builders that feed the Estimator. They were the Design group's
+       * last three children; the rest of Design (Overview, Consulting, The
+       * Grid, Specs, Grid Settings) is a separate program now. Routes are
+       * unchanged (/design/assemblies, /design/lineset, /design/motors). */
+      { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
+      { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
+      { key: "motors", label: "Motor Library", href: "/design/motors" },
     ],
   },
   {
@@ -75,30 +82,9 @@ export const NAV: NavEntry[] = [
       { key: "venues", label: "Venues", href: "/venues" },
     ],
   },
-  {
-    kind: "group",
-    key: "design",
-    label: "Design",
-    mobileLabel: "Design",
-    children: [
-      { key: "designoverview", label: "Overview", href: "/design" },
-      { key: "engagements", label: "Consulting", href: "/design/engagements" },
-      /* Rebranded "The Grid" (D-grid-merge): still the budgetary design
-       * sandbox at the same URL, but a design's editor is now either the
-       * Quick Design canvas or The Grid's plan-sheet/catalog-device painter
-       * (D108), chosen at creation. The standalone Grid index is gone — a
-       * Grid project can no longer exist independent of a design record. */
-      { key: "designs", label: "The Grid", href: "/design/designs" },
-      { key: "specs", label: "Specs", href: "/design/specs" },
-      { key: "gridsettings", label: "Grid Settings", href: "/design/grid/settings" },
-      { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
-      { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
-      { key: "motors", label: "Motor Library", href: "/design/motors" },
-    ],
-  },
   /* #136: Knowledge & Information — reference tools and, later (#56), the
    * company doctrine/rules/tiers. Steel Calculator and Fixture Cross-Ref
-   * moved here from DESIGN; their old /design/* routes redirect. */
+   * moved here from the old Design group; their old /design/* routes redirect. */
   {
     kind: "group",
     key: "knowledge",
@@ -119,24 +105,17 @@ export function activeKeyFor(pathname: string): string {
    * CHILD keys: returning "home" (the group's own key) lit nothing, which is
    * why the Home tab looked dead before the entry existed. */
   if (pathname === "/") return "dashboard";
-  // #130: both builders live on /design/assemblies (Subassemblies is a tab;
-  // the old path redirects), so both light the Assembly Builder child.
-  if (pathname.startsWith("/design/assemblies") || pathname.startsWith("/design/subassemblies")) return "assemblies";
-  // Grid settings — like assemblies above, this needs its OWN key before the
-  // generic "/design" → designoverview fallback below, which every other
-  // /design/* route (including /design/grid/<id>, the editor) still uses.
-  if (pathname.startsWith("/design/grid/settings")) return "gridsettings";
-  // Specs (#205): same reason as the two exceptions above — the generic
-  // /design → designoverview fallback below would otherwise light every
-  // /design/specs/* route as the Design overview tab.
-  if (pathname.startsWith("/design/specs")) return "specs";
+  // The three kept builders light their own Estimating child; any other
+  // /design/* path (a redirect stub) lights the Assembly Builder.
+  if (pathname.startsWith("/design/lineset")) return "lineset";
+  if (pathname.startsWith("/design/motors")) return "motors";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/leads": "leads",
     "/opportunities": "opportunities",
     "/quotes": "quotes",
     "/estimator": "estimator",
-    "/design": "designoverview",
+    "/design": "assemblies",
     "/knowledge": "knowledgeoverview", // #136 — every /knowledge/* route lights the KNOWLEDGE pill
     "/reviews": "reviews",
     "/companies": "companies",
@@ -146,7 +125,6 @@ export function activeKeyFor(pathname: string): string {
     "/customers": "companies", // legacy route redirects to /companies (D85)
     "/catalog": "catalog", // #213 — lights the Catalog child of Estimating
     "/reports": "reports",
-    "/templates": "settings",
     "/estimating-rules": "settings",
     "/import": "settings",
     "/settings": "settings",

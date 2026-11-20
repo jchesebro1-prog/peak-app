@@ -49,7 +49,6 @@ import { customersSeed } from "../src/db/seeds/customers";
 import { quotesSeed } from "../src/db/seeds/quotes";
 import { catalogSeed } from "../src/db/seeds/catalog";
 import { leadsSeed } from "../src/db/seeds/leads";
-import { designsSeed } from "../src/db/seeds/designs";
 
 function pad(s: string, n: number) {
   return s.length >= n ? s : s + " ".repeat(n - s.length);

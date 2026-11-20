@@ -9,7 +9,6 @@ import {
   type TrackRole,
   type TrackSeries,
 } from "@/lib/track-series";
-import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { cleanPath, pathLengthFt, resolvePath } from "@/lib/track-path";
 import { round2 } from "./pricing";
 import { catalogAddPrice, seedMarkupOf } from "./tier-reprice";
@@ -231,9 +230,9 @@ export function replaceCurtainLine(sec: SpecSection, lineId: number, item: SpecI
     if (old[k]) next[k] = old[k];
     else delete next[k];
   }
-  const oldName = old.curtainInputs?.name ?? (old.desc || "").split(" — ")[0].trim();
-  if (old.specKey && old.specKey !== curtainSpecKey(undefined, oldName)) next.specKey = old.specKey;
-  else if (!item.specKey) delete next.specKey;
+  // A stored spec key (the removed Specs module's match key) rides along untouched.
+  if (old.specKey) next.specKey = old.specKey;
+  else delete next.specKey;
   for (const k of ["option", "por", "portalConfirm"] as const) {
     if (old[k]) next[k] = true;
     else delete next[k];

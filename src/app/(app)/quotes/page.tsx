@@ -12,9 +12,8 @@ import {
 } from "@/lib/stores/quotes";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { quoteStagePillLabel } from "@/lib/pipelines";
-import { getEngagementForQuoteRef, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
 import { allUsers } from "@/lib/users";
-import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
+import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
@@ -72,10 +71,7 @@ const TYPE_BADGE: Record<
 /** Each service quote type edits in its own builder; system quotes in the Estimator. */
 function editHrefFor(q: Quote): { href: string; label: string } {
   const href = quoteBuilderHref(q);
-  const label =
-    q.quoteType === "consulting" ? "Open consulting quote →"
-    : "Open in Estimator →";
-  return { href, label };
+  return { href, label: "Open in Estimator →" };
 }
 
 /** Prototype shortMoney: $48.0k / $313k / $860. */
@@ -177,9 +173,6 @@ export default async function QuotesPage({
   // #282 phase 3: a Recall that reduced or removed the revision's Rewards credit.
   // #355 review M8: …or a status move that reopened a won estimate at the version that won (same notice line).
   const creditNotice = one(sp.creditNotice) || one(sp.statusNotice) || null;
-  // #35 one-click both ways: the engagement referencing the selected quote
-  // (as its source proposal OR as Peak's install bid). Selected row only.
-  const selEng = selectedId ? await getEngagementForQuoteRef(selectedId) : null;
 
   const hrefFor = (over: {
     who?: string;
@@ -470,7 +463,6 @@ export default async function QuotesPage({
           [
             ["all", "All types", null],
             ["system", "System", null],
-            ["consulting", "Consulting", TYPE_BADGE.consulting],
           ] as Array<[string, string, { ink: string } | null]>
         ).map(([key, label, badge]) => {
           const active = typeFilter === key;
@@ -840,16 +832,10 @@ export default async function QuotesPage({
               {selected && (
                 <SelectedPanel
                   q={q}
-                  engagement={
-                    selEng
-                      ? { id: selEng.id, stage: ENGAGEMENT_STATUS_LABEL[selEng.status] }
-                      : null
-                  }
                   backHref={hrefFor({ id: q.id, page: paged.page })}
                   statusError={statusError}
                   packageError={packageError}
                   creditNotice={creditNotice}
-                  canCreate={can("create", user.roles)}
                   next={nextStep}
                 />
               )}
@@ -900,16 +886,13 @@ export default async function QuotesPage({
  */
 function SelectedPanel({
   q,
-  engagement,
   backHref,
   statusError,
   packageError,
   creditNotice,
-  canCreate,
   next,
 }: {
   q: Quote;
-  engagement: { id: string; stage: string } | null;
   /** Current list URL (filters + this row selected) — round-tripped through
    *  setQuoteStatus's hidden "back" field so a gate refusal redirects to
    *  exactly this view instead of a bare "/quotes". */
@@ -920,8 +903,6 @@ function SelectedPanel({
   packageError: string | null;
   /** #282 phase 3: the Recall's Rewards credit notice (reduced / removed). */
   creditNotice: string | null;
-  /** #205 — "Spec from this quote" opens a create form; only creators see it. */
-  canCreate: boolean;
   /** #284 — the one next-step view (pill, primary action, ⋯ menu) for this quote and viewer. */
   next: QuoteNextStepView | null;
 }) {
@@ -1015,32 +996,6 @@ function SelectedPanel({
           lockedStatus={q.status === "lost" ? "lost" : "won"}
           back={backHref}
         />
-        {engagement && (
-          <Link
-            href={`/design/engagements/${encodeURIComponent(engagement.id)}`}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: ".03em",
-              color: "#6b4fa1",
-              background: "#f0ebf9",
-              border: "1px solid #ddd2f0",
-              padding: "3px 9px",
-              borderRadius: 20,
-              textDecoration: "none",
-            }}
-          >
-            Engagement {engagement.id} · {engagement.stage}
-          </Link>
-        )}
-        {canCreate && (!q.quoteType || q.quoteType === "system") && (
-          <Link href={`/design/specs/new?quote=${encodeURIComponent(q.id)}`} className="pk-btn-outline">
-            Spec from this quote →
-          </Link>
-        )}
         {(!q.quoteType || q.quoteType === "system") && (
           <Link href={`/estimator/cut-sheets?id=${encodeURIComponent(q.id)}`} className="pk-btn-outline">
             Cut sheets →

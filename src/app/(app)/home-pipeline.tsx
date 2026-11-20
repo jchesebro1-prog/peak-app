@@ -209,17 +209,17 @@ export default function HomePipeline({
           No quotes in this stage.
           <br />
           <Link
-            href="/design/quick"
+            href="/quotes/new"
             style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}
           >
-            Start a rough estimate →
+            Start an estimate →
           </Link>
         </div>
       )}
 
       <div style={{ padding: "13px 18px" }}>
         <Link
-          href="/design/quick"
+          href="/quotes/new"
           style={{
             fontSize: 13,
             fontWeight: 600,
@@ -227,7 +227,7 @@ export default function HomePipeline({
             textDecoration: "none",
           }}
         >
-          + New rough estimate
+          + New estimate
         </Link>
       </div>
     </div>

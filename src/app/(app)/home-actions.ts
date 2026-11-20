@@ -12,11 +12,10 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { REOPENED_AT_WON_NOTICE, reopenedAtWonVersion } from "@/lib/quote-won-version";
-import { promoteDesignAction as promoteFromDesigns } from "./design/designs/actions";
 
 /**
  * Home dashboard mutations — port of Home.dc.html's Component methods
- * (setStatus / removeQuote / promoteDesign) onto server actions.
+ * (setStatus / removeQuote) onto server actions.
  */
 
 /** What the stage sheet gets back (#174) — see `setQuoteStatusAction`. */
@@ -67,22 +66,4 @@ export async function removeQuoteAction(id: string) {
   const user = await requireUser();
   await removeQuote(id, user.name);
   revalidatePath("/", "layout");
-}
-
-/**
- * The bridge: promote a budgetary sandbox design into the formal pipeline.
- * Port of Home.dc.html promoteDesign(). #211 final review I2: delegates to
- * the Designs dashboard's promoteDesignAction — the one path that branches
- * Grid/manual designs to The Grid's own quote builder and re-prices Quick
- * designs on the server against the Equipment map (D319) — so Home can
- * never promote a Grid design as if it were Quick, or an incomplete one.
- */
-export async function promoteDesignAction(
-  designId: string
-): Promise<{ ok: true; id: string; number: string } | { ok: false; error: string; needsPart?: number }> {
-  const res = await promoteFromDesigns(designId);
-  if (!res.ok) return res;
-  revalidatePath("/", "layout");
-  // #223 — the estimate number for the toast; the link keeps the id.
-  return { ok: true, id: res.quoteId, number: res.quoteNumber ?? res.quoteId };
 }

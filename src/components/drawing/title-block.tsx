@@ -1,4 +1,4 @@
-import type { TitleBlockData } from "@/lib/design/grid-drawing-set";
+import type { TitleBlockData } from "@/lib/title-block";
 import { DEFAULT_TZ } from "@/lib/venue-availability";
 
 /**

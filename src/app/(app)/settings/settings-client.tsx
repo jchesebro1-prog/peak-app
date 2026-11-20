@@ -14,7 +14,6 @@ import type { SettingsData } from "./groups/types";
 import { CompanyGroup } from "./groups/company";
 import { SalesGroup } from "./groups/sales";
 import { FieldGroup } from "./groups/field";
-import { ConsultingGroup } from "./groups/consulting";
 import { TeamGroup } from "./groups/team";
 import { DataGroup } from "./groups/data";
 
@@ -73,22 +72,14 @@ export default function SettingsClient({
             pipelines={data.pipelines}
             pipelineUsage={data.pipelineUsage}
             customerFieldDefs={data.customerFieldDefs}
+            assumptions={data.consultingAssumptions}
+            run={run}
           />
         );
       case "field":
         return (
           <FieldGroup
             venueTypes={data.venueTypes}
-          />
-        );
-      case "consulting":
-        return (
-          <ConsultingGroup
-            consultingPhases={data.consultingPhases}
-            consultingAssumptions={data.consultingAssumptions}
-            phaseWeights={data.phaseWeights}
-            consultingDisciplines={data.consultingDisciplines}
-            run={run}
           />
         );
       case "team":

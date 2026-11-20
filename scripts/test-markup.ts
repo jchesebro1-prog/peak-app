@@ -12,7 +12,6 @@ import { typedPriceWarning } from "../src/lib/price-rounding";
 import { salesMetrics } from "../src/lib/dashboard/metrics";
 import { sameWonContent } from "../src/lib/quote-won-version";
 import { systemSellWarning } from "../src/app/(app)/estimator/pricing";
-import { sellFromCost } from "../src/lib/design/equipment-map";
 import { curtainPrice } from "../src/lib/design/curtain-pricing";
 import { convertProjectDoc, convertQuoteDoc, hydrateDoc } from "../src/lib/markup/doc-basis";
 import { markupSettingsPatch, withoutBasisKeys } from "../src/lib/markup/settings";
@@ -101,9 +100,6 @@ export async function markupPureChecks(ok: Ok) {
   ok(copied.tierRepriced === 0 && copied.handPriced === 0 && cm?.price === 142.86, "markup: copying from a converted stamp to its rounded tier moves no tier and keeps every price");
   ok(typedPriceWarning(1090, 1000, 0.09)?.kind === "low-markup" && typedPriceWarning(1200, 1000, 0.2) === null,
     "markup: a typed service total under 11 % markup warns");
-  // Task 5 — curtains, the Grid / Equipment map and the portal.
-  ok(sellFromCost(100, 0.43) === 143 && sellFromCost(100, 25) === 143 && curtainPrice(100, 0.25) === 125,
-    "markup: sellFromCost guard falls back to 43 %; curtains price at their markup");
   // Task 7 — doc conversion
   const legacy = {
     id: "Q-1", margin: 0.3, tierMargin: 0.2, value: 1000,
@@ -337,7 +333,6 @@ export async function markupParityChecks(ok: Ok) {
   same("catalogAddPrice", grid((c, k) => catalogAddPrice(c, 0, k)), B.catalogAddPrice, gridRaw(1, 0.01));
   // customPartSell is not asserted: it now prices at the fixed 43 % default (153.85 → 154 at $100), listed below as an expected move.
   same("repriceAt", grid((c, k) => repriceAtMarkup(c, k).price), B.repriceAt, gridRaw(1, 0.01));
-  same("sellFromCost", grid((c, k) => sellFromCost(c, k)), B.sellFromCost, gridRaw(1, 0.01));
   same("curtainPrice", grid((c, k) => curtainPrice(c, k)), B.curtainPrice, gridRaw(1, 0.01));
   const curtainGot = CURTAIN_CASES.map((k) => ({ id: k.id, cost: curtainCost(k.spec as never, k.rates, mk(k.margin)), perSqft: fabricSellPerSqft(k.rates, mk(k.margin)) }));
   same("curtains", curtainGot, B.curtains, (p) => {

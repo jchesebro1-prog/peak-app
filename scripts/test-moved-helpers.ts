@@ -21,6 +21,7 @@ import { SYNCABLE_COLLECTIONS, DOC_TABLES } from "../src/db/doc-tables";
 import { FIELD_COLLECTIONS } from "../src/lib/sync/engine";
 import { CONFIG_COLLECTIONS, DEMO_COLLECTIONS } from "../src/db/seed-data";
 import { NAV, activeKeyFor } from "../src/components/nav/nav-data";
+import { designRedirect } from "../src/lib/design-routes";
 import { optionalPartFields } from "../src/app/(app)/catalog/part-form";
 import { sanitizeFixtureInput } from "../src/lib/fixture-assemblies";
 import type { SpecItem, SpecSection } from "../src/app/(app)/estimator/types";
@@ -79,12 +80,12 @@ export async function movedHelperChecks(ok: Ok) {
   ok(clearPricedPor([untouched]).sections[0] === untouched && clearPricedPor([untouched]).anyPor === false, "portal legacy: a section with no por line passes through object-identical");
 
   // old service quotes are rows only
-  ok(["flame_test", "inspection", "repair", "rental"].every((t) => hasNoBuilder(t) && quoteBuilderHref({ id: "Q-1", quoteType: t }) === "/quotes?id=Q-1" && estimatorShouldRedirect({ id: "Q-1", quoteType: t })), "quote links: a flame / inspection / repair / rental quote opens its Quotes-hub row");
-  ok(!hasNoBuilder("system") && !hasNoBuilder(null) && !hasNoBuilder("consulting") && quoteBuilderHref({ id: "Q 1" }) === "/estimator?id=Q%201" && quoteBuilderHref({ id: "Q-1", quoteType: "consulting" }) === "/design/engagements/quote?id=Q-1", "quote links: system and consulting quotes keep their builders");
+  ok(["flame_test", "inspection", "repair", "rental", "consulting"].every((t) => hasNoBuilder(t) && quoteBuilderHref({ id: "Q-1", quoteType: t }) === "/quotes?id=Q-1" && estimatorShouldRedirect({ id: "Q-1", quoteType: t })), "quote links: a flame / inspection / repair / rental / consulting quote opens its Quotes-hub row");
+  ok(!hasNoBuilder("system") && !hasNoBuilder(null) && !hasNoBuilder("custom") && quoteBuilderHref({ id: "Q 1" }) === "/estimator?id=Q%201" && !estimatorShouldRedirect({ id: "Q-1", quoteType: "system" }) && !estimatorShouldRedirect({ id: "Q-1" }), "quote links: a system quote keeps the Estimator");
   ok(pdfKindForQuoteType("system") === "quote" && pdfKindForQuoteType(null) === "quote" && pdfKindForQuoteType("flame_test") === null && pdfKindForQuoteType("inspection") === null && !canHavePdf("flame_test") && canHavePdf(undefined), "quote pdf: only a system estimate has a saved PDF");
-  ok(reviewKindOf({ quoteType: "flame_test", flameTest: { priceOverride: 900 } }) === "flame_typed" && reviewKindOf({ quoteType: "inspection" }) === "inspection_auto" && REVIEW_KINDS.length === 10 && REVIEW_KINDS_SHOWN.map((k) => k.key).join() === "system_plain,system_labor,consulting", "review limits: old quote kinds still resolve; Settings shows only the kinds that can be built");
+  ok(reviewKindOf({ quoteType: "flame_test", flameTest: { priceOverride: 900 } }) === "flame_typed" && reviewKindOf({ quoteType: "inspection" }) === "inspection_auto" && REVIEW_KINDS.length === 10 && REVIEW_KINDS_SHOWN.map((k) => k.key).join() === "system_plain,system_labor" && reviewKindOf({ quoteType: "consulting" }) === "consulting", "review limits: old quote kinds still resolve; Settings shows only the kinds that can be built");
   const hub = rd("src/app/(app)/quotes/page.tsx"), ctl = rd("src/app/(app)/quotes/controls.tsx");
-  ok(hub.includes("{!hasNoBuilder(q.quoteType) && (") && !ctl.includes("type=flame_test") && !ctl.includes("type=inspection") && ctl.includes("type=consulting"), "quotes hub (source): no builder button for a removed type, and + New quote lists neither flame test nor inspection");
+  ok(hub.includes("{!hasNoBuilder(q.quoteType) && (") && !ctl.includes("type=flame_test") && !ctl.includes("type=inspection") && !ctl.includes("type=consulting") && ctl.includes("type=box_sale") && !hub.includes("/design/specs") && !hub.includes("/design/engagements"), "quotes hub (source): no builder button for a removed type; + New quote lists no flame test, inspection or consulting quote; no Spec or engagement link");
 
   // controls that left with the portal and site visits — stored values are left alone
   const fd = new FormData();
@@ -109,12 +110,35 @@ export async function movedHelperChecks(ok: Ok) {
   const gone = ["surveys", "site_visits", "flame_jobs", "inspections", "assessments", "findings", "venue_profiles", "portal_carts", "projects", "repair_jobs", "tasks", "comms", "meetings", "recordings", "assist_runs"] as const;
   ok(gone.every((c) => c in DOC_TABLES && CONFIG_COLLECTIONS.includes(c) && !DEMO_COLLECTIONS.includes(c)), "go-live wipe: every removed feature's collection stays registered and is on the keep-list");
   ok(DEMO_COLLECTIONS.includes("quotes") && DEMO_COLLECTIONS.includes("leads") && DEMO_COLLECTIONS.includes("booth_captures"), "go-live wipe: live business collections are still cleared");
+  // Stage 4 (Design tab): the Grid, designs, specs and consulting collections stay registered and are never wiped;
+  // the three spec collections the catalog part's Spec panel still reads are kept too (their editor is gone).
+  const gone4 = ["designs", "grid_projects", "grid_sheets", "grid_catalog", "consulting_engagements", "review_snapshots", "generated_specs", "spec_documents", "spec_curtain_templates", "spec_records", "spec_record_revisions", "spec_sections", "spec_articles", "spec_templates"] as const;
+  ok(gone4.every((c) => c in DOC_TABLES && CONFIG_COLLECTIONS.includes(c) && !DEMO_COLLECTIONS.includes(c)) && CONFIG_COLLECTIONS.includes("subassemblies"), "go-live wipe (stage 4): the Design tab's collections stay registered and are on the keep-list; assemblies stay kept");
 
   // nav + public routes
   const keys = NAV.flatMap((e) => (e.kind === "group" ? e.children.map((c) => c.key) : [e.key]));
   const hrefs = NAV.flatMap((e) => (e.kind === "group" ? e.children.map((c) => c.href) : [e.href]));
   ok(!NAV.some((e) => e.key === "pm") && ["flametests", "inspections", "field", "assessments", "portal-quotes"].every((k) => !keys.includes(k)) && !hrefs.some((h) => /^\/(flame-tests|inspections|venue-assessments|assessments|portal)|\/quotes\/portal/.test(h)), "nav: no Service group and no flame test, inspection, assessment or portal entry");
   ok(activeKeyFor("/quotes/portal") === "quotes" && activeKeyFor("/flame-tests") === "" && activeKeyFor("/leads/booth") === "leads" && activeKeyFor("/catalog/manufacturers") === "catalog", "nav: removed routes light nothing of their own; kept routes are unchanged");
+  // Stage 4: the Design group is gone; its three kept builders sit under Estimating at their old routes.
+  const est = NAV.find((e) => e.key === "est");
+  ok(!NAV.some((e) => e.key === "design") && ["designoverview", "engagements", "designs", "specs", "gridsettings"].every((k) => !keys.includes(k)) && !hrefs.some((h) => /^\/design\/(grid|specs|engagements|designs|quick)|^\/design$|^\/consulting|^\/templates/.test(h)), "nav (stage 4): no Design group and no Overview, Consulting, Grid, Specs or Grid Settings entry");
+  ok(!!est && est.kind === "group" && est.children.map((c) => c.key).join() === "quotes,myquotes,estimator,reviews,catalog,assemblies,lineset,motors" && hrefs.includes("/design/assemblies") && hrefs.includes("/design/lineset") && hrefs.includes("/design/motors"), "nav (stage 4): Assembly Builder, Lineset Builder and Motor Library are Estimating children at their old routes");
+  ok(activeKeyFor("/design/assemblies/rack/SA-1") === "assemblies" && activeKeyFor("/design/lineset") === "lineset" && activeKeyFor("/design/motors") === "motors" && activeKeyFor("/design") === "assemblies" && activeKeyFor("/templates") === "", "nav (stage 4): each kept builder lights its own child; /design lights the Assembly Builder");
+  ok(designRedirect("/design", {}) === "/design/assemblies" && designRedirect("/design-studio", {}) === "/design/assemblies" && designRedirect("/design/steel", {}) === "/knowledge/steel" && designRedirect("/design/subassemblies", {}) === "/design/assemblies" && designRedirect("/consulting", {}) === null && designRedirect("/quick-design", {}) === null && designRedirect("/design/lineset", {}) === null, "design routes (stage 4): /design lands on the Assembly Builder; the consulting and Quick Design redirects are gone");
+  // Stage 4: Grid-only catalog fields are not posted, so a save keeps whatever is stored.
+  const fd4 = new FormData();
+  for (const [k, v] of [["designatorCode", "CRO"], ["tag_box", "B1"], ["cableOdIn", "0.25"], ["mapPrice", "7"]]) fd4.set(k, v);
+  const opt4 = optionalPartFields(fd4) as Record<string, unknown>;
+  ok(!("designatorCode" in opt4) && !("tagDefaults" in opt4) && !("cableOdIn" in opt4) && opt4.mapPrice === 7, "catalog part form (stage 4): posted designator code, riser tag defaults and cable diameter are ignored — stored values stay");
+  ok(!catalogPage.includes("/catalog/device-types") && !catalogPage.includes("/catalog/riser-data") && !catalogPage.includes('name="designatorCode"') && !catalogPage.includes('name="cableOdIn"') && catalogPage.includes("<SpecPanel") && catalogPage.includes("NarrativeParagraphPanel"), "catalog (source, stage 4): no Device types / Riser data links and no Grid-only fields; the Spec panel and the narrative paragraph stay");
+  // Stage 4: the Estimator has no Grid or Spec hooks; manual drawing upload stays.
+  const staffPanel = rd("src/app/(app)/estimator/package-staff-panel.tsx"), pkgActs = rd("src/app/(app)/estimator/package-actions.ts"), sidebar = rd("src/app/(app)/estimator/steps/review-sidebar.tsx");
+  ok(!staffPanel.includes("Generate from Grid") && !staffPanel.includes("/design/grid") && staffPanel.includes("Upload…") && pkgActs.includes("export async function addPackageFileAction(") && !pkgActs.includes("generateGridDrawingsAction") && !sidebar.includes("SpecKeySelect"), "estimator (source, stage 4): no Design in the Grid, Generate from Grid or Spec select; Plans & risers upload stays");
+  // Stage 4: client packages carry no specification file.
+  const cps = rd("src/lib/client-package-server.ts"), zipSrv = rd("src/lib/estimate-output/package-zip-server.ts"), pkgJson = rd("package.json");
+  ok(!cps.includes("specification.docx") && !cps.includes("buildSpecDocx") && !zipSrv.includes("Specifications.docx\"") && !zipSrv.includes("buildSpecDocx") && !/"docx"\s*:/.test(pkgJson), "client packages (source, stage 4): no specification.docx / Specifications.docx is built and the docx dependency is gone");
+  ok(/"build": "node scripts\/migrate\.mjs && next build"/.test(pkgJson) && !pkgJson.includes("seed-specs-once") && !pkgJson.includes("specs:seed"), "build (stage 4): the production build no longer runs the one-time spec seed");
   const mw = rd("src/middleware.ts");
   const matcher = /matcher:\s*\[\s*"([^"]+)"/.exec(mw)?.[1] ?? "";
   ok(!/\|portal\|/.test(matcher) && /\|share\/\|/.test(matcher) && /\|d\/ds\/\|/.test(matcher) && /\|print\/\|/.test(matcher) && /api\/booth\/share-back/.test(matcher) && /\|c\/\|/.test(matcher), "middleware: /portal is no longer public; the share page, datasheet links, print routes and the booth card stay public");

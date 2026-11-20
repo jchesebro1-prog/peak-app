@@ -411,7 +411,7 @@ async function finalReviewChecks(ok: Ok) {
 
   // Minor: the Change type hint.
   ok(boxSwitchHint("box_sale", "system") === "Use the Box goods sale switch in the Estimator's Quote details." && boxSwitchHint("system", "box_sale") === boxSwitchHint("box_sale", "system") &&
-     boxSwitchHint("system", "system") === null && boxSwitchHint("box_sale", "box_sale") === null && boxSwitchHint("consulting", "system") === null && boxSwitchHint("box_sale", "consulting") === null,
+     boxSwitchHint("system", "system") === null && boxSwitchHint("box_sale", "box_sale") === null && boxSwitchHint("custom", "system") === null && boxSwitchHint("box_sale", "custom") === null,
     "box sale final minor: Change type between System and Box goods sale hints at the Estimator's switch");
   ok(rd("src/app/(app)/quotes/new/intake-form.tsx").includes("boxSwitchHint("), "box sale final minor (source): the intake shows the hint");
 

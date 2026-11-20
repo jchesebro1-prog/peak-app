@@ -452,13 +452,7 @@ function rerenderChecks(ok: Ok) {
   // Final review I1: the Grid drawing set can use 105 s of the request's 120 s — the PDF never renders in that request.
   const grid = pa.slice(pa.indexOf("export async function generateGridDrawingsAction("));
   const gridBody = grid.slice(0, grid.indexOf("\n}\n") + 3);
-  ok(gridBody.length > 100 && !gridBody.includes("rerenderIfAppendixMoved(") && !gridBody.includes("scheduleQuotePdf(") && gridBody.includes("markStaleIfAppendixMoved(") &&
-     gridBody.includes("appendixMoved: true") && /if \(!q \|\| pdfAppendixKey\(q\) === beforeKey\) return \{ moved: false \};\s*return \{ moved: true, pdf: \(await markQuotePdfStale\(q\.id\)\)/.test(pa),
-    "rerender (Grid): Generate from Grid only marks the PDF out of date when the drawings moved, and says so (appendixMoved) — no after() render inherits what the drawing set left of the budget");
   const gen = panel.slice(panel.indexOf("const generate = () =>"), panel.indexOf("const saveBeforeGrid"));
-  ok(/if \(r\.ok && r\.appendixMoved\) \{\s*const next = await retryQuotePdfAction\(quoteId\)\.catch\(\(\) => null\);\s*if \(next\) onPdf\?\.\(next\);/.test(gen) &&
-     gen.indexOf("generateGridDrawingsAction(quoteId)") < gen.indexOf("retryQuotePdfAction(quoteId)") && panel.includes('import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";'),
-    "rerender (Grid): the panel then starts the render in a new request through the PDF's own Retry, and shows its state");
   const stale = stalePdf({ status: "ready", at: 10, savedAt: 10, blobPath: "q/x.pdf" }, 2_000, 2_000);
   const plan = pdfRetryPlan({ pdf: stale, contentChangedAt: 10 }, 2_001);
   ok(pdfView(stale, 2_001)?.outOfDate === true && pdfView(stale, 2_001)?.status === "failed" && "savedAt" in plan && plan.savedAt === 2_000,

@@ -24,7 +24,7 @@ const revalidateConsumers = () => {
   // grid-intake.tsx's AState.fixtureAssemblies id map is stored but never
   // read back against the live fixtures store within any Grid route. Add the
   // Grid route(s) here once that wiring lands (roadmap phase 10).
-  for (const path of ["/design/assemblies", "/estimator", "/design/quick", "/catalog/documents"]) revalidatePath(path);
+  for (const path of ["/design/assemblies", "/estimator", "/catalog/documents"]) revalidatePath(path);
 };
 
 /**

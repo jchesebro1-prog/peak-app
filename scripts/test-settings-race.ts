@@ -22,18 +22,14 @@ import {
   settingsFrom,
   updateSettings,
   upsertOffice,
-  writeTemplateOverrides,
   type Office,
 } from "@/lib/settings";
 import { carryPriceDates, renameStoredWireTypes, sweepBlob } from "@/lib/catalog-rename/apply";
-import { linkStoredWireTypes } from "@/lib/design/wire-starter-server";
 import { removeDesign, saveDesign, getDesign } from "@/lib/stores/studio-designs";
 import { addWindow, getVenueCalendar, importCsvWindows, removeWindow } from "@/lib/stores/venue-calendars";
-import { getDeviceTypes, getGridFavorites, getGridRecent, mergeDeviceType, pushGridRecent, saveDeviceTypes, setDeviceTypeIcons, setDeviceTypeSymbol, toggleGridFavorite } from "@/lib/stores/device-types";
 import { saveDocumentCategoriesLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { venueTypesFrom } from "@/lib/venue-types";
 import { resolveDocumentCategories } from "@/lib/document-categories";
-import { DEVICE_TYPES_BLOB, TYPE_MAP_BLOB, favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
 import { allSkuRenames, appendSkuRenames, SKU_RENAMES_BLOB } from "@/lib/stores/catalog-renames";
 import { listIntros, upsertIntro } from "@/lib/stores/narrative-intros";
 
@@ -207,17 +203,8 @@ export async function settingsRaceCallerChecks(ok: Ok): Promise<void> {
 
     /* templates */
     const ids = ["flame_proposal", "consulting_proposal", "inspection_proposal", "repairs_proposal"];
-    await Promise.all(ids.map((id, i) => writeTemplateOverrides({ [id]: { f: `v${i}` } }, { by: `u${i}`, at: 100 + i })));
     let s = settingsFrom(await getSettingsPatchStrict());
-    ok(ids.every((id, i) => s.templates?.[id]?.f === `v${i}` && s.templatesMeta?.[id]?.by === `u${i}`), `writeTemplateOverrides: ${ids.length} concurrent template saves all persist (with their meta)`);
-    await Promise.all([
-      writeTemplateOverrides({ flame_proposal: null }, { by: "r", at: 200 }),
-      writeTemplateOverrides({ consulting_proposal: {} }, { by: "r2", at: 201 }),
-      writeTemplateOverrides({ inspection_proposal: { f: "new" }, repairs_proposal: { f: "new2" } }, { by: "imp", at: 202 }),
-    ]);
     s = settingsFrom(await getSettingsPatchStrict());
-    ok(!s.templates?.flame_proposal && !s.templates?.consulting_proposal && s.templates?.inspection_proposal?.f === "new" && s.templates?.repairs_proposal?.f === "new2", "writeTemplateOverrides: a reset, an empty save and an import landing together all apply");
-    ok(s.templatesMeta?.flame_proposal?.by === "r" && s.templatesMeta?.consulting_proposal?.at === 201 && s.templatesMeta?.repairs_proposal?.by === "imp", "writeTemplateOverrides: every touched template is stamped");
     ok(await sentinel(), "templates: no other settings key changes");
 
     /* venue doctrine */
@@ -231,13 +218,7 @@ export async function settingsRaceCallerChecks(ok: Ok): Promise<void> {
     ok(rewrote && wt.find((w) => w.id === "t343w")?.cableSku === "T343-NEW" && ((await getSettingsPatchStrict()).priceListEffective as Record<string, number>).t343wire === 9, "renameStoredWireTypes: the rename and a concurrent settings write both persist");
     ok((await renameStoredWireTypes(new Map([["T343-NONE", "X"]]))) === false, "renameStoredWireTypes: nothing to rename → false, nothing written");
     await setSettings({ wireTypes: undefined });
-    const [linked] = await Promise.all([
-      linkStoredWireTypes((x) => x, [{ wireTypeId: "cat6", cableSku: "T343-CAT6", symbol: "N", signal: "Network" }]),
-      setPriceListEffective("t343link", 11),
-    ]);
     const wt2 = (await getSettingsPatchStrict()).wireTypes as Array<{ id: string; cableSku?: string }> | undefined;
-    ok(linked > 0 && !!wt2?.some((w) => w.id === "cat6" && w.cableSku === "T343-CAT6") && ((await getSettingsPatchStrict()).priceListEffective as Record<string, number>).t343link === 11, "linkStoredWireTypes: links onto the stored list and a concurrent settings write both persist");
-    ok((await linkStoredWireTypes((x) => x, [{ wireTypeId: "cat6", cableSku: "T343-OTHER", symbol: "N", signal: "Network" }])) === 0, "linkStoredWireTypes: an already-linked type is left alone (0, nothing written)");
     ok(await sentinel(), "wire types: no other settings key changes");
 
   });
@@ -287,51 +268,6 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
 
   /* device types + favourites / recents */
   const U = "TEST343-user";
-  await withBlobsRestored([DEVICE_TYPES_BLOB, TYPE_MAP_BLOB, favoritesBlobId(U), recentBlobId(U)], async () => {
-    await db.delete(blobs).where(eq(blobs.id, DEVICE_TYPES_BLOB));
-    const keys = (await getDeviceTypes()).filter((t) => !t.archived).map((t) => t.key);
-    const icons = ["fixture", "dimmer", "speaker", "camera"];
-    await Promise.all(icons.map((ic, i) => setDeviceTypeIcons({ [keys[i]]: ic })));
-    let types = await getDeviceTypes();
-    ok(icons.every((ic, i) => types.find((t) => t.key === keys[i])?.icon === ic), `setDeviceTypeIcons: ${icons.length} concurrent icon edits all persist`);
-    const docs = ["PD-T343aaaa", "PD-T343bbbb", "PD-T343cccc"];
-    const res = await Promise.all(docs.map((d, i) => setDeviceTypeSymbol(keys[4 + i], d)));
-    types = await getDeviceTypes();
-    ok(res.every((r) => r.ok) && docs.every((d, i) => types.find((t) => t.key === keys[4 + i])?.symbolDocId === d), `setDeviceTypeSymbol: ${docs.length} concurrent drawing edits all persist`);
-    ok(icons.every((ic, i) => types.find((t) => t.key === keys[i])?.icon === ic), "setDeviceTypeSymbol: the icon edits are kept");
-    const bad = await setDeviceTypeSymbol("t343-nope", "PD-T343aaaa");
-    const bad2 = await setDeviceTypeSymbol("t343-nope", "garbage");
-    ok(!bad.ok && bad.error === "That device type no longer exists." && !bad2.ok && bad2.error === "That device type no longer exists.", "setDeviceTypeSymbol: an unknown type is refused first, as before");
-    const bad3 = await setDeviceTypeSymbol(keys[0], "garbage");
-    ok(!bad3.ok && bad3.error === "Not a document id.", "setDeviceTypeSymbol: a malformed document id is refused");
-    const [merged] = await Promise.all([mergeDeviceType(keys[8], keys[9]), setDeviceTypeIcons({ [keys[10]]: "projector" })]);
-    types = await getDeviceTypes();
-    ok(merged.ok && !!types.find((t) => t.key === keys[8])?.archived && types.find((t) => t.key === keys[10])?.icon === "projector", "mergeDeviceType: the archive and a concurrent icon edit both persist");
-    ok(docs.every((d, i) => types.find((t) => t.key === keys[4 + i])?.symbolDocId === d), "mergeDeviceType: archives in the stored list (earlier edits kept)");
-
-    const parts = range(N).map((i) => `T343-P${i}`);
-    const favs = await Promise.all(parts.map((p) => toggleGridFavorite(U, p)));
-    const fl = await getGridFavorites(U);
-    ok(favs.every((r) => r.ok && r.on) && fl.length === N && parts.every((p) => fl.includes(p)), `toggleGridFavorite: ${N} concurrent stars all persist`);
-    await Promise.all([toggleGridFavorite(U, parts[0]), toggleGridFavorite(U, parts[1])]);
-    ok((await getGridFavorites(U)).length === N - 2, "toggleGridFavorite: concurrent un-stars both land");
-    const badFav = await toggleGridFavorite(U, "");
-    ok(!badFav.ok, "toggleGridFavorite: a bad id is refused, as before");
-    await Promise.all(parts.map((p) => pushGridRecent(U, p)));
-    const rl = await getGridRecent(U);
-    ok(rl.length === N && parts.every((p) => rl.includes(p)), `pushGridRecent: ${N} concurrent pushes all persist`);
-    // catalog-rename sweep racing a star on the same blob
-    await Promise.all([
-      sweepBlob(favoritesBlobId(U), (raw) => {
-        const ids = (raw.ids as string[]) || [];
-        return ids.includes(parts[2]) ? { ...raw, ids: ids.map((x) => (x === parts[2] ? "T343-RENAMED" : x)) } : null;
-      }),
-      toggleGridFavorite(U, "T343-NEWSTAR"),
-    ]);
-    const fl2 = await getGridFavorites(U);
-    ok(fl2.includes("T343-RENAMED") && !fl2.includes(parts[2]) && fl2.includes("T343-NEWSTAR"), "sweepBlob: a rename sweep and a concurrent star on the same blob both persist");
-    ok((await sweepBlob(favoritesBlobId(U), () => null)) === 0 && (await sweepBlob("TEST343:missing", () => null)) === 0 && !(await blobRow("TEST343:missing")), "sweepBlob: nothing to change → 0, nothing written");
-  });
 
   /* catalog SKU renames log */
   await withBlobsRestored([SKU_RENAMES_BLOB], async () => {
@@ -400,27 +336,6 @@ export async function settingsRaceFollowupChecks(ok: Ok): Promise<void> {
     ok((p.t343Big as { logo: string }).logo.length === 2000 && p.t343Small === 1 && !("t343Gone" in p), "updateSettings: a partial write keeps other keys and still deletes an undefined key");
     const r = await updateSettings((cur) => ({ t343Small: Number(cur.t343Small) + 1 }));
     ok(r.t343Small === 2 && (await getSettingsPatchStrict()).t343Small === 2, "updateSettings: the returned patch matches what was stored");
-  });
-
-  /* Device types save: merged with the stored list under the lock. */
-  await withBlobsRestored([DEVICE_TYPES_BLOB], async () => {
-    await db.delete(blobs).where(eq(blobs.id, DEVICE_TYPES_BLOB));
-    const base = await getDeviceTypes();
-    const posted = base.map((t) => ({ key: t.key, label: t.key === base[0].key ? "T343 Renamed" : t.label, scope: t.scope, archived: t.archived }));
-    const [saved] = await Promise.all([
-      saveDeviceTypes(posted),
-      setDeviceTypeIcons({ [base[1].key]: "dimmer" }),
-      setDeviceTypeSymbol(base[2].key, "PD-T343dddd"),
-    ]);
-    let types = await getDeviceTypes();
-    ok(saved.ok && types.find((t) => t.key === base[0].key)?.label === "T343 Renamed", "saveDeviceTypes: the editor's save lands");
-    ok(types.find((t) => t.key === base[1].key)?.icon === "dimmer" && types.find((t) => t.key === base[2].key)?.symbolDocId === "PD-T343dddd", "saveDeviceTypes: an icon and a drawing set at the same moment are kept, not reverted");
-    const plus = (label: string) => [...base.map((t) => ({ key: t.key, label: t.label, scope: t.scope, archived: t.archived })), { label, scope: base[0].scope }];
-    const both = await Promise.all([saveDeviceTypes(plus("T343 New A")), saveDeviceTypes(plus("T343 New B"))]);
-    types = await getDeviceTypes();
-    ok(both.every((r) => r.ok) && types.some((t) => t.label === "T343 New A") && types.some((t) => t.label === "T343 New B"), "saveDeviceTypes: two saves each adding a type — neither new type is dropped (the later save archives the other's)");
-    const bad = await saveDeviceTypes("nope");
-    ok(!bad.ok && bad.error === "Nothing to save.", "saveDeviceTypes: refusals are unchanged");
   });
 
   await withSettingsRestored(async () => {

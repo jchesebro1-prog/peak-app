@@ -7,8 +7,6 @@ import { customersSeed } from "./seeds/customers";
 import { quotesSeed } from "./seeds/quotes";
 import { catalogSeed } from "./seeds/catalog";
 import { leadsSeed } from "./seeds/leads";
-import { designsSeed } from "./seeds/designs";
-import { gridProjectsSeed } from "./seeds/grid-projects";
 import { vendorProfilesSeed } from "./seeds/vendors";
 import { defaultDashboardLayout } from "@/lib/dashboard-layout";
 import { assignEstimateNumbers } from "@/lib/stores/estimate-numbers";
@@ -100,8 +98,6 @@ const DEMO_SEEDS: Array<[CollectionName, () => Doc[]]> = [
   ["catalog_parts", catalogSeed as unknown as () => Doc[]],
   ["quotes", quotesSeed as unknown as () => Doc[]],
   ["leads", leadsSeed as unknown as () => Doc[]],
-  ["designs", designsSeed as unknown as () => Doc[]],
-  ["grid_projects", gridProjectsSeed as unknown as () => Doc[]],
   ["vendor_profiles", vendorProfilesSeed as unknown as () => Doc[]],
 ];
 
@@ -176,6 +172,21 @@ export const CONFIG_COLLECTIONS: readonly CollectionName[] = [
   "reward_ledger",
   "triage_snapshots",
   "triage_marks",
+  // Stage 4 (the Grid, Quick Design / Designs, the Specs builder and library, Consulting).
+  "designs",
+  "grid_projects",
+  "grid_sheets",
+  "grid_catalog",
+  "consulting_engagements",
+  "review_snapshots",
+  "generated_specs",
+  "spec_documents",
+  "spec_curtain_templates",
+  // Spec sections / articles / templates still back the catalog part's Spec panel, and their only editor (the Specs
+  // library) is gone — a wipe would leave nothing to pick from.
+  "spec_sections",
+  "spec_articles",
+  "spec_templates",
 ];
 
 export const DEMO_COLLECTIONS: CollectionName[] = (Object.keys(
@@ -253,9 +264,7 @@ export async function seedIfEmpty(db: Db) {
   // Object.keys(DOC_TABLES), so the go-live reset wipes spec_templates too.
   // Both seeds are idempotent by key, so this is safe on every open.
   const { seedStarterTemplates } = await import("@/lib/stores/spec-templates");
-  const { seedStarterCurtainTemplates } = await import("@/lib/stores/spec-curtain-templates");
   await seedStarterTemplates();
-  await seedStarterCurtainTemplates();
   // Identity core (D85): bootstrap companies/sites/contacts from the customer
   // directory when the identity tables are empty. The converter no-ops
   // otherwise, so this is safe on every startup.

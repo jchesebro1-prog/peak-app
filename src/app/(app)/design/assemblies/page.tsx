@@ -63,7 +63,7 @@ export default async function AssemblyBuilderPage({
 
   return (
     <div className="pk-content" style={{ maxWidth: 1080 }}>
-      <Link href="/design" style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>← Design</Link>
+      <Link href="/estimator" style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>← Estimator</Link>
       <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em", margin: "7px 0 4px" }}>Assembly Builder</h1>
       <p style={{ color: "#8c919c", fontSize: 13, margin: "0 0 16px", maxWidth: 700 }}>
         Fixtures, systems, hardware and racks in one list. Everything prices from the live catalog — a price-list import re-prices them at once.

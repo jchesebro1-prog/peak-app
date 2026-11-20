@@ -7,10 +7,9 @@
 export type ServiceType =
   | "system"
   | "box_sale"
-  | "consulting"
   | "custom";
 
-/** Same six entries as the "+ New quote" split menu (quotes/controls.tsx) —
+/** The same entries as the "+ New quote" split menu (quotes/controls.tsx) —
  *  label/sub-label/badge content ported verbatim so the picker on this
  *  screen reads identically to the menu that links here — plus a trailing
  *  "custom" card (#110): a user-named category for a system quote that
@@ -45,15 +44,6 @@ export const SERVICE_TYPES: Array<{
     badgeBd: "",
   },
   {
-    key: "consulting",
-    label: "Consulting quote",
-    sub: "Fee-based design & advisory work",
-    badge: "Fee",
-    badgeInk: "#6b4fa1",
-    badgeSoft: "#f0ebf9",
-    badgeBd: "#ddd2f0",
-  },
-  {
     key: "custom",
     label: "Custom category",
     sub: "Name your own — builds in the Estimator",
@@ -68,13 +58,12 @@ export function isServiceType(v: string | null | undefined): v is ServiceType {
   return !!v && SERVICE_TYPES.some((s) => s.key === v);
 }
 
-/** Where each service type's builder lives, matching NewQuoteMenu's six hrefs
+/** Where each service type's builder lives, matching NewQuoteMenu's hrefs
  *  ("custom" is a system quote with a user-named category, #110). */
 export const BUILDER_BASE: Record<ServiceType, string> = {
   system: "/estimator",
   box_sale: "/estimator",
   custom: "/estimator",
-  consulting: "/design/engagements/quote",
 };
 
 export type BuilderPathOpts = {

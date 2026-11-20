@@ -13,7 +13,6 @@ const LABELS: Record<DashboardWidgetKey, string> = {
   stats: "Stat tiles",
   pipeline: "Pipeline",
   leads: "My leads",
-  designs: "My designs",
   teamActivity: "Team activity",
   needsAttention: "Needs attention",
   catalog: "Catalog",

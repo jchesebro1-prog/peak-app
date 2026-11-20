@@ -3,8 +3,6 @@ import ExcelJS from "exceljs";
 import { parseCsv } from "@/app/(app)/import/parse";
 import { cellText } from "@/lib/import/xlsx-to-csv";
 import { list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
-import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
-import { listProjects } from "@/lib/stores/grid-projects";
 import { allDocumentLinks, allDocuments, detachedDocumentLinks } from "@/lib/stores/part-documents";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { listFixtures } from "@/lib/stores/fixtures";
@@ -135,11 +133,11 @@ export async function loadPhotoSheetContext(listDrive: ListDrive = listDrivePhot
 
 /** Export rows: every part quoted anywhere. */
 export async function buildPhotoSheetExport(listDrive: ListDrive = listDrivePhotosForSheet): Promise<PhotoSheetRow[]> {
-  const [ctx, quotes, gridProjects, generated, fixtures] = await Promise.all([loadPhotoSheetContext(listDrive), allQuotes(), listProjects(), allGeneratedSpecs(), listFixtures()]);
+  const [ctx, quotes, fixtures] = await Promise.all([loadPhotoSheetContext(listDrive), allQuotes(), listFixtures()]);
   const bySku = new Map(ctx.parts.map((p) => [p.sku, p] as const));
   // #332: Grid `asm:` assemblies count their members as quoted.
   const fixtureById = new Map(fixtures.map((f) => [f.id, f] as const));
-  const stats = quotedPartStats({ quotes, gridProjects, generated, fixtureOf: (id) => fixtureById.get(id) }, (sku) => {
+  const stats = quotedPartStats({ quotes, fixtureOf: (id) => fixtureById.get(id) }, (sku) => {
     const p = bySku.get(sku);
     return !!p && p.category !== "Labor";
   });

@@ -1,15 +1,11 @@
 import { createHash } from "node:crypto";
-import { blobEnabled, deleteBlob, getBlobHead, getBlobStream, putBlob } from "@/lib/blob";
-import { GRID_SET_COPY, GRID_SET_DEADLINE_MS, GRID_SET_STEP_MS, gridSetFileName } from "@/lib/design/grid-set-print";
-import { renderGridSetPdf, type GridSetRenderFn } from "@/lib/design/grid-set-render";
+import { deleteBlob, getBlobHead, getBlobStream } from "@/lib/blob";
 import { cleanText, displayFileName, isUploadKey } from "@/lib/document-files";
-import { renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { pdfKindForQuoteType } from "@/lib/quote-pdf/state";
 import { ONLINE_COPY } from "@/lib/quote-share/view";
-import { gridProjectForQuote, type GridProject } from "@/lib/stores/grid-projects";
 import { addPackageFile, get as getQuote, removePackageFile, type QuoteRevision } from "@/lib/stores/quotes";
 import {
-  cleanPackageFiles, gridSetBlobPath, isPackageFileId, isPackageFileKind, MAX_PACKAGE_FILE_BYTES, MAX_PACKAGE_FILES, newPackageFileId, PACKAGE_FILE_SNIFF_BYTES, PACKAGE_FILE_TYPES, PACKAGE_FILES_COPY,
+  isPackageFileId, isPackageFileKind, MAX_PACKAGE_FILE_BYTES, newPackageFileId, PACKAGE_FILE_SNIFF_BYTES, PACKAGE_FILE_TYPES, PACKAGE_FILES_COPY,
   packageBlobReferenced, packageFileName, packageFilePathInScope, revisionShownPackageFiles, sniffPackageFile, type PackageFile,
 } from "./package-files";
 
@@ -145,103 +141,4 @@ export async function servePackageFile(req: Request, file: PackageFile, deps: Pa
       "content-security-policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; frame-ancestors 'self'",
     },
   });
-}
-
-type GridDeps = {
-  secret: string;
-  blobOn: boolean;
-  now: () => number;
-  newId: () => string;
-  find: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
-  render: GridSetRenderFn;
-  signal: (ms: number) => AbortSignal;
-  put: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ url: string; pathname: string }>;
-  remove: (pathname: string) => Promise<void>;
-};
-
-/**
- * #301 slice C (D-j, R8) — "Generate from Grid": render the linked design's
- * drawing set (cover, plans, riser, schedules at 11×17) through the signed
- * print route to ONE PDF (adaptation 5) and store it as a `drawing`, source
- * `grid`. An earlier Grid set is replaced. The token is signed right before
- * the render (120 s life) inside renderGridSetPdf — the one render the client
- * packages share (Grid notes #7). `origin` is the request's own (printOriginFor).
- */
-export async function generateGridDrawingSet(quoteId: string, by: string, origin: string, deps: Partial<GridDeps> = {}): Promise<Result<{ file: PackageFile }>> {
-  const d: GridDeps = {
-    secret: process.env.AUTH_SECRET || "",
-    blobOn: blobEnabled(),
-    now: Date.now,
-    newId: newPackageFileId,
-    find: gridProjectForQuote,
-    render: renderPrintRouteToPdf,
-    signal: (ms) => AbortSignal.timeout(ms),
-    put: putBlob,
-    remove: deleteBlob,
-    ...deps,
-  };
-  if (!d.secret) return { ok: false, error: GRID_SET_COPY.noSecret };
-  if (!d.blobOn) return { ok: false, error: PACKAGE_FILES_COPY.noStorage };
-  const q = await getQuote(String(quoteId || ""));
-  if (!q || pdfKindForQuoteType(q.quoteType) !== "quote") return { ok: false, error: ONLINE_COPY.gone };
-  const hit = await d.find(q.id);
-  if (!hit) return { ok: false, error: GRID_SET_COPY.noGrid };
-  const current = cleanPackageFiles(q.packageFiles);
-  // The new record is added BEFORE the old Grid set goes, so a full list refuses up front (nothing rendered, the old set kept).
-  if (current.length >= MAX_PACKAGE_FILES) return { ok: false, error: PACKAGE_FILES_COPY.full };
-  // Dev compiles /print on first hit (renderPrintRouteToPdf's own 90 s default); production keeps the 25 s steps.
-  const dev = process.env.NODE_ENV === "development";
-  const rendered = await renderGridSetPdf({
-    projectId: hit.project.id,
-    optionId: hit.optionId,
-    origin,
-    secret: d.secret,
-    now: d.now,
-    render: d.render,
-    timeoutMs: dev ? undefined : GRID_SET_STEP_MS,
-    // Bounds the queue wait too (a render queued behind others can't outrun the step budget).
-    signal: d.signal(dev ? 360_000 : GRID_SET_DEADLINE_MS),
-  });
-  if (!rendered.ok) return { ok: false, error: rendered.error };
-  const pdf = rendered.pdf;
-  if (pdf.length > MAX_PACKAGE_FILE_BYTES) return { ok: false, error: GRID_SET_COPY.tooBig };
-  let stored: { url: string; pathname: string };
-  try {
-    stored = await d.put(gridSetBlobPath(q.id), pdf, "application/pdf");
-  } catch (e) {
-    console.error("[package] grid drawing set store failed", e);
-    return { ok: false, error: GRID_SET_COPY.storeFailed };
-  }
-  const file: PackageFile = {
-    id: d.newId(),
-    kind: "drawing",
-    name: gridSetFileName(hit.project.name),
-    blobPath: stored.pathname,
-    contentType: "application/pdf",
-    size: pdf.length,
-    source: "grid",
-    addedAt: d.now(),
-    addedBy: cleanText(by, 120),
-  };
-  let res: Awaited<ReturnType<typeof addPackageFile>>;
-  try {
-    res = await addPackageFile(q.id, file);
-  } catch (e) {
-    console.error("[package] grid drawing set record failed", e);
-    res = { ok: false, reason: "gone" };
-  }
-  if (!res.ok) {
-    // Only the NEW blob goes; the earlier Grid set (record and blob) is untouched.
-    try {
-      await d.remove(stored.pathname);
-    } catch {
-      /* best effort */
-    }
-    return { ok: false, error: res.reason === "full" ? PACKAGE_FILES_COPY.full : ONLINE_COPY.gone };
-  }
-  // Only now do the older Grid records go (a blob a revision still lists is kept). The list comes from the quote the
-  // add returned (row-locked), not a pre-add snapshot, so two concurrent generates can't each keep the other's set.
-  const old = cleanPackageFiles(res.quote.packageFiles).filter((f) => f.source === "grid" && f.id !== file.id);
-  for (const f of old) await removePackageFileAndBlob(q.id, f.id, { remove: d.remove });
-  return { ok: true, file };
 }

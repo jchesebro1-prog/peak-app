@@ -16,11 +16,10 @@ export type SettingsPerm = "manage_users";
 
 export const SETTINGS_SECTIONS = [
   { key: "company", label: "Company", desc: "Branding, locations, holidays and dashboard defaults.", perm: "manage_users" },
-  { key: "sales", label: "Sales", desc: "Review limits, pipelines and customer fields.", perm: "manage_users" },
+  { key: "sales", label: "Sales", desc: "Review limits, pipelines, customer fields and the assumptions library.", perm: "manage_users" },
   { key: "field", label: "Field & Venues", desc: "Venue types.", perm: "manage_users" },
-  { key: "consulting", label: "Consulting", desc: "Phases, disciplines and the assumptions library.", perm: "manage_users" },
   { key: "team", label: "Team & Access", desc: "Team members, roles and permissions.", perm: "manage_users" },
-  { key: "data", label: "Data & Tools", desc: "Import, templates, document categories and go-live tools.", perm: "manage_users" },
+  { key: "data", label: "Data & Tools", desc: "Import, document categories and go-live tools.", perm: "manage_users" },
 ] as const satisfies ReadonlyArray<{ key: string; label: string; desc: string; perm: SettingsPerm }>;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["key"];
@@ -33,33 +32,32 @@ export const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
   admin: "team",
   // The Integrations group (mailboxes, recordings) was removed with the Inbox.
   integrations: "company",
+  // The Consulting group went with the Consulting module; its assumptions library moved to Sales.
+  consulting: "sales",
 };
 
 /** A Settings link tile — a screen that keeps its own route. */
 export type SettingsScreen = { label: string; href: string; desc: string; mark?: string };
 
 /**
- * Every screen Settings links to, once. These were ADMIN_SCREENS (Templates,
- * Estimating Rules, Import / Export, Grid Settings)
- * and COMPANY_SCREENS (Catalog); GROUP_LINKS hands them out per group.
+ * Every screen Settings links to, once. These were ADMIN_SCREENS (Estimating
+ * Rules, Import / Export) and COMPANY_SCREENS (Catalog); GROUP_LINKS hands
+ * them out per group.
  */
 export const SETTINGS_SCREENS = {
   catalog: { label: "Catalog", href: "/catalog", desc: "Company price books, parts, and manufacturers." },
   estimatingRules: { label: "Estimating Rules", href: "/estimating-rules", desc: "Rates and formulas the estimator uses." },
-  templates: { label: "Templates", href: "/templates", desc: "Document and message wording." },
   importExport: { label: "Import / Export", href: "/import", desc: "Move records in and out of Peak." },
-  gridSettings: { label: "Grid Settings", href: "/design/grid/settings", desc: "Symbol shapes, port rules, wire types, and install labor for The Grid." },
 } as const satisfies Record<string, SettingsScreen>;
 
 /** The link-tile row at the top of each group (empty = no row). Catalog sits
  *  on both Company and Sales (Jeff, Oct 1). */
 export const GROUP_LINKS: Readonly<Record<SettingsSection, readonly SettingsScreen[]>> = {
   company: [SETTINGS_SCREENS.catalog],
-  sales: [SETTINGS_SCREENS.catalog, SETTINGS_SCREENS.estimatingRules, SETTINGS_SCREENS.templates],
+  sales: [SETTINGS_SCREENS.catalog, SETTINGS_SCREENS.estimatingRules],
   field: [],
-  consulting: [],
   team: [],
-  data: [SETTINGS_SCREENS.importExport, SETTINGS_SCREENS.gridSettings],
+  data: [SETTINGS_SCREENS.importExport],
 };
 
 /**
@@ -76,10 +74,8 @@ export const SETTINGS_CARDS = [
   { key: "pipelines", label: "Pipelines", group: "sales" },
   { key: "customerFields", label: "Customer fields", group: "sales" },
   { key: "estimateOutput", label: "Estimate output", group: "sales" },
+  { key: "consultingAssumptions", label: "Assumptions library", group: "sales" },
   { key: "venueTypes", label: "Venue types", group: "field" },
-  { key: "consultingPhases", label: "Consulting — phase menu (+ phase weights)", group: "consulting" },
-  { key: "consultingDisciplines", label: "Consulting — disciplines", group: "consulting" },
-  { key: "consultingAssumptions", label: "Consulting — assumptions library", group: "consulting" },
   { key: "team", label: "Team & Roles", group: "team" },
   { key: "documentCategories", label: "Document categories", group: "data" },
   { key: "beta", label: "Beta & go-live tools", group: "data" },

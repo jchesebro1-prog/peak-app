@@ -33,13 +33,30 @@ programs plus written specs the long-term coding team can fold into their own ap
 
 | # | Item | Output | Status |
 | --- | --- | --- | --- |
-| 1 | Client Portal | `client-portal-spec.md` | Spec written; code not yet removed |
-| 2 | Flame Tests + Rigging Inspections | `programs/peak-service.html` + `flame-inspections-spec.md` | Program and spec written; code not yet removed |
-| 3 | Project Management (incl. Repairs, Rentals, tasks, calendar, triage) | `project-management-spec.md` + `removal-map-project-management.md` | Spec and removal map written; code not yet removed |
-| 4 | Inbox, Krisp, AI | `inbox-krisp-ai-spec.md` + `removal-map-inbox-krisp-ai.md` | Spec and removal map written; code not yet removed |
-| 4b | Venue Assessments | `venue-assessments-spec.md`, `venue-assessment-form.json`, tab in `programs/peak-service.html` | Spec written; form, photos, recap and field sheet in the program; sketch pads and 3D preview not ported |
-| 5 | Design tab (Grid, Quick Design, Specs, Consulting) | `programs/peak-design.html`, `design-spec.md`, `design-data.json`, `removal-map-design.md` | Program, spec and removal map written; code not yet removed |
-| 6 | Estimator revisions | in-app change | Not started |
+| 1 | Client Portal | `client-portal-spec.md` | Spec written; code removed 2026-11-20 (stage 3) |
+| 2 | Flame Tests + Rigging Inspections | `programs/peak-service.html` + `flame-inspections-spec.md` | Program and spec written; code removed 2026-11-20 (stage 3) |
+| 3 | Project Management (incl. Repairs, Rentals, tasks, calendar, triage) | `project-management-spec.md` + `removal-map-project-management.md` | Spec and removal map written; code removed 2026-11-20 (stage 1) |
+| 4 | Inbox, Krisp, AI | `inbox-krisp-ai-spec.md` + `removal-map-inbox-krisp-ai.md` | Spec and removal map written; code removed 2026-11-20 (stage 2) |
+| 4b | Venue Assessments | `venue-assessments-spec.md`, `venue-assessment-form.json`, tab in `programs/peak-service.html` | Spec written; form, photos, recap and field sheet in the program; sketch pads and 3D preview not ported; app code removed 2026-11-20 (stage 3) |
+| 5 | Design tab (Grid, Quick Design, Specs, Consulting) | `programs/peak-design.html`, `design-spec.md`, `design-data.json`, `removal-map-design.md` | Program, spec and removal map written; code removed 2026-11-20 (stage 4); the three builders stay under Estimating |
+| 6 | Estimator revisions | in-app change | On hold (Jeff) |
+
+## Removal result (2026-11-20)
+
+Four stages, one commit each, on `claude/bold-hamilton-solaz1`. `src/` went from 2,155 to 935
+TypeScript files. No table, migration or stored record was changed. Type-check, lint, all test
+scripts and `npm run build` pass. Not checked in a browser or against the hosted database.
+What went, what moved and the loose ends: `../removal-log.md`. Old phase notes: `../phase-history.md`.
+
+Before deploying: sync every field device (unsent surveys, inspections, flame jobs and
+assessments are no longer accepted); take a `db:export`; afterwards revoke the Google mail
+connections, Krisp keys and Anthropic key at their source and rebuild both native apps.
+
+Open with Jeff: keep or strip the "Credit applied" line on old Rewards-era estimates; the new
+estimate acceptance sentence ("To proceed, sign and return this quote."); whether "Replace"
+replacing "Failed" in flame results is what he meant.
+
+Source: the four stage reports in this session and `../removal-log.md`.
 
 ## Peak Service program vs. the app
 

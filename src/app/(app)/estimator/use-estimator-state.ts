@@ -43,7 +43,6 @@ import { useKeyProductLibrary } from "./use-key-product-library";
 import { memberAliases } from "@/lib/quote-line-members";
 import { fillEmptyKeyProductText, isKeyProductEligible, isLineToken, keyProductSkuOf, remapKeyProducts, toggleKeyProduct, withKeyProducts } from "./narrative";
 import { loadNotice, placeLoadedSection, type LoadedLibrarySystem } from "@/lib/narrative/system-library";
-import { curtainSpecKey } from "@/lib/specs/record-keys";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
 import { partsListSkus, reviewSheetModel, type PartInfo } from "./parts-csv";
 import { downloadReviewSheet } from "./review-sheet-xlsx";
@@ -230,7 +229,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, pipeTypes, linesetTypes, riggingParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, people,
-    assumptionLibrary, freightRule, specKeys, canApplyCredit,
+    assumptionLibrary, freightRule, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
     repricedOnRevise = null,
   } = props;
@@ -2042,8 +2041,6 @@ export function useEstimatorState(props: EstimatorProps) {
     if (!Number.isFinite(price) || price < 0) return;
     patchItem(id, (it) => ({ ...it, ...priceFromUnitSellEdit(price) }));
   };
-  const setItemSpecKey = (id: number, value: string) =>
-    patchItem(id, (it) => ({ ...it, specKey: value || undefined }));
   const setItemExtSell = (id: number, value: string) => {
     const ext = Number(value.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(ext) || ext < 0) return;
@@ -3250,7 +3247,6 @@ export function useEstimatorState(props: EstimatorProps) {
       {
         ...curtainItem(d, c, { id: idN, sku: "CRT-" + skuN, trackKey: key }),
         curtain: true,
-        specKey: curtainSpecKey(undefined, name) || undefined,
       },
       ...(track ? [track] : []),
       ...(pipe ? [pipe] : []),
@@ -3711,7 +3707,6 @@ export function useEstimatorState(props: EstimatorProps) {
     setIntros,
     setItemExtSell,
     setItemPrice,
-    setItemSpecKey,
     setLabor,
     setLibraryOpen,
     setMarkupAll,
@@ -3750,7 +3745,6 @@ export function useEstimatorState(props: EstimatorProps) {
     showStageBar,
     showVenuePick,
     sideOpen,
-    specKeys,
     stageBarCurIdx,
     stageBarLostLabel,
     stageBarPipeline,

@@ -1,6 +1,6 @@
 import type { KeyProduct, SpecItem, SpecSection } from "./types";
 import { systemPrintsInBody } from "./quote-document-view";
-import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isPlaceholderSku } from "@/lib/quote-line-ids";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { lineOwnModel, type ModelPartLike } from "@/lib/catalog-rename/sku";
 /**

@@ -5,25 +5,6 @@ import { blobs } from "@/db/doc-tables";
 import { PRICING_BASIS } from "@/lib/markup";
 import { BASIS_STAMP, markupSettingsPatch, withoutBasisKeys } from "@/lib/markup/settings";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
-import {
-  CABLE_PER_FIXTURE_MAX,
-  DEFAULT_CABLE_PER_FIXTURE,
-  DEFAULT_LABOR_PCT,
-  DEFAULT_RUNS,
-  DEFAULT_TIER_MULTS,
-  LABOR_PCT_MAX,
-  LABOR_SYSTEMS,
-  LABOR_SYSTEM_LABEL,
-  MULT_MAX,
-  RUNS_MAX,
-  WIRE_SYSTEMS,
-  cableRateId,
-  laborPctDefault,
-  laborRateId,
-  wireLaborRulesFrom,
-  wireRateId,
-  type WireLaborRules,
-} from "@/lib/design/wire-labor";
 import { DEFAULT_SEWING_PCT, SEWING_PCT_ID, SEWING_PCT_MAX, sewingPctFrom } from "@/lib/design/curtain-pricing";
 import { BONUS_ESTIMATOR_PCT, BONUS_ESTIMATOR_RATE_ID, BONUS_PACKAGE_PCT, BONUS_PACKAGE_RATE_ID, BONUS_RATE_MAX_PCT, bonusRatesFrom, type BonusRates } from "@/lib/estimate-bonus/flags";
 import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS } from "@/lib/freight-rule";
@@ -46,9 +27,9 @@ import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS } from "@/lib/freight-rule";
  *     `inspection_rates` blobs of the removed service engines stay stored;
  *     nothing reads, converts or resets them.)
  *   • All other editable rates persist to blob `pricing_rules`
- *     (rss_pricing_rules_v1) and are the canonical defaults. Quick Design
- *     reads its freight / contingency defaults from here (see num()) and
- *     its wire / labor rules through loadWireLaborRules().
+ *     (rss_pricing_rules_v1) and are the canonical defaults. (The removed
+ *     Quick Design / Grid rows — freight, contingency, wire pull, Cable
+ *     Package, system labor — keep their stored values; nothing reads them.)
  *
  * Server deltas: the `rss-pricing` window event and the DOM download() helper
  * are dropped (screens re-read per request; a route can serve exportCSV /
@@ -285,22 +266,12 @@ export function formula(
 
 /* ---------- the master registry (ported verbatim from pricing.js) ---------- */
 
-/** #231/#232: one system's Good / Better / Best multiplier rates. */
-function tierMultRates(idOf: (t: "good" | "better" | "best") => string, label: string): RateEntry[] {
-  const name = { good: "Good", better: "Better", best: "Best" } as const;
-  return (["good", "better", "best"] as const).map((t) =>
-    rate(idOf(t), `${label} — ${name[t]} ×`, DEFAULT_TIER_MULTS[t], "×", { min: 0, max: MULT_MAX, step: 0.05 })
-  );
-}
-
 export const GROUPS: PricingGroup[] = [
   {
     key: "system", label: "System design", live: true,
-    sub: "Quick Design budgetary roll-up + Estimator defaults",
-    note: "Freight / contingency below drive the Quick Design estimate live; labor is per system (see System labor). Tier multipliers, base markup and the fabric rate are the documented reference the estimators are built on.",
+    sub: "Estimator defaults",
+    note: "Tier multipliers, base markup and the fabric rate are the documented reference the estimators are built on.",
     items: [
-      rate("system.freightPct", "Freight & delivery", 5, "%", { min: 0, max: 20, step: 0.5, help: "freight = materials × this" }),
-      rate("system.contingencyPct", "Default contingency", 10, "%", { min: 0, max: 25, step: 1, help: "Applied to materials + labor + freight. New designs start at this value." }),
       rate("system.baseMargin", "Base markup", 43, "%", { min: 0, max: 150, step: 1, ref: true, help: "Baseline markup baked into catalog list vs cost.  sell = cost × (1 + markup)" }),
       rate("system.tierGoodCost", "Good tier — cost ×", 0.80, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true, help: "Good multiplies each line’s cost by this." }),
       rate("system.tierGoodPrice", "Good tier — price ×", 0.84, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true }),
@@ -319,7 +290,7 @@ export const GROUPS: PricingGroup[] = [
   {
     key: "tiers", label: "Customer tiers", live: true,
     sub: "Per-customer markup — punch item 11 (D87; markup since #367). Tier lives on the PERSON, company is fallback.",
-    note: "The resolved tier's markup SEEDS pricing everywhere (estimator labor & curtains, Quick Design promotion) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
+    note: "The resolved tier's markup SEEDS pricing everywhere (estimator labor & curtains) and is stamped onto each quote at creation — estimators can still override per quote. Not visible to customers. Resolution: quote's attn contact → their company → Base.",
     items: [
       rate("tiers.base", "Base markup", 43, "%", { min: 0, max: 150, step: 1, help: "The default tier — every customer without an assigned tier prices here.  sell = cost × (1 + markup)" }),
       rate("tiers.copper", "Copper markup", 37, "%", { min: 0, max: 150, step: 1 }),
@@ -329,24 +300,6 @@ export const GROUPS: PricingGroup[] = [
       rate("tiers.reseller", "Reseller markup", 11, "%", { min: 0, max: 150, step: 1 }),
       rate("tiers.employee", "Employee markup", 5, "%", { min: 0, max: 150, step: 1 }),
       formula("tiers.resolution", "Tier resolution (design §4.7)", "quote's designated contact's tier  →  else their company's tier  →  else Base   ·   stamped on the quote at creation; each revision re-stamps at cut time"),
-    ],
-  },
-  {
-    key: "sizing", label: "Auto BOM & sizing", live: false,
-    sub: "How Quick Design turns venue size into quantities — the equations built into the estimator",
-    note: "Read-only reference (these live in the estimating code, not wired to the fields above). W = stage width, D = depth, G = grid height, PH = proscenium height (ft). clamp(x, lo, hi) keeps x within range.",
-    items: [
-      formula("size.mul", "Size preset → dimensions", "each dimension × size multiplier:   Small ×0.78   ·   Medium ×1.0   ·   Large ×1.28"),
-      formula("size.linesets", "Line sets (battens)", "lineSets = clamp( round(D × 1.5), 12, 72 )"),
-      formula("size.electrics", "Lighting electrics (pipes)", "electrics = clamp( round(D ÷ 12), 2, 5 )"),
-      formula("size.drape", "Drape area", "drapeArea = W × G"),
-      formula("size.dimmers", "Dimmer racks", "dimmerRacks = max( 1, ceil( conventional fixtures ÷ 48 ) )"),
-      formula("size.array", "Line-array boxes & subwoofers", "boxes = clamp( round(W ÷ 3), 6, 24 )   ·   subs = clamp( round(W ÷ 12), 2, 8 )"),
-      formula("rig.cw", "Rigging — counterweight, per line set", "headblock · footblock · arbor · T-bar track · lock rail = 1 each   ·   handline = 2 × G   ·   batten pipe = W   ·   loftblocks = floor(W ÷ 10)   ·   cable = loftblocks × (2G + W)"),
-      formula("rig.motor", "Rigging — motorized", "electric hoists = tier mix × max( 2, floor(D ÷ 30) )"),
-      formula("rig.dead", "Rigging — dead-hung", "sets = (5–7 by tier) × depth factor   ·   rigging points = sets × floor(W ÷ 10)"),
-      formula("curtain.cost", "Curtains — cost", "cost = sewn area × fabric $/ft² × (1 + sewing %)   ·   Draw area = (2W + 2) × PH   ·   Legs = 2 × (6 × PH)"),
-      formula("light.fix", "Lighting — fixtures per position", "count = round( electrics × width unit × tier factor )"),
     ],
   },
   {
@@ -363,9 +316,7 @@ export const GROUPS: PricingGroup[] = [
   {
     key: "catalog", label: "Catalog markup", live: true,
     sub: "Parts & price books",
-    // Live (#367): the Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table
-    // read this as the markup for a part with no list price (cost × (1 + markup)).
-    note: "Live — the default markup for a part with no list price. The Equipment map, Grid swap search, virtual parts and the Quick Design / Grid price table price it as cost × (1 + markup). Per-part list vs. cost is maintained in the Catalog.",
+    note: "The default markup for a part with no list price (cost × (1 + markup)). Per-part list vs. cost is maintained in the Catalog.",
     items: [
       rate("catalog.defaultMargin", "Default part markup", 43, "%", { min: 0, max: 150, step: 1, store: "catalog", key: "defaultMargin", pctStored: true }),
       formula("catalog.list", "List price from cost", "list = cost × (1 + markup)"),
@@ -400,43 +351,9 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
-    key: "wire", label: "Wire pull", live: true,
-    sub: "Per-system wire-pull footage by venue size × tier (#231)",
-    note: "Live — Quick Design and Grid Auto estimates read these. 0 runs (the default) adds no Wire pull line. The footage is a quantity: each system's “Wire pull” row in Grid Settings → Equipment map prices it.",
-    items: [
-      ...WIRE_SYSTEMS.flatMap((sys) => [
-        rate(wireRateId(sys, "runs"), `${LABOR_SYSTEM_LABEL[sys]} — runs`, DEFAULT_RUNS, "runs", { min: 0, max: RUNS_MAX, step: 1, help: "feet = (stage width + stage depth + house depth) × runs × tier ×. 0 = no wire pull for this system." }),
-        ...tierMultRates((t) => wireRateId(sys, t), LABOR_SYSTEM_LABEL[sys]),
-      ]),
-      formula("wire.feet", "Wire pull footage", "feet = ⌈(stage width + stage depth + house depth) × runs × tier ×⌉ — a missing dimension counts 0 and the line says so"),
-    ],
-  },
-  {
-    key: "cable", label: "Cable package", live: true,
-    sub: "Lighting Cable Package quantity by fixture count × tier (#233)",
-    note: "Live — Quick Design and Grid Auto estimates read these. Fixtures = the Par, Front, Cyc, Side light and Automated quantities the design selected; no fixtures adds no Cable Package line. The tier is the design's (Quick Design) or the Lighting scope's Auto choice (the Grid); none chosen → ×1.0. The quantity is priced by the “Cable Package” row in Grid Settings → Equipment map.",
-    items: [
-      rate(cableRateId("perFixture"), "Lighting — Cable Packages per fixture", DEFAULT_CABLE_PER_FIXTURE, "per fixture", { min: 0, max: CABLE_PER_FIXTURE_MAX, step: 0.05, help: "Cable Packages = ⌈fixtures × this × tier ×⌉. 0 = no Cable Package line." }),
-      ...tierMultRates(cableRateId, "Lighting Cable Package"),
-      formula("cable.qty", "Cable Package quantity", "qty = ⌈fixtures × per fixture × tier ×⌉  (fixtures = Par + Front + Cyc + Side light + Automated; Good / Better / Best; none chosen → ×1.0)"),
-    ],
-  },
-  {
-    key: "labor", label: "System labor", live: true,
-    sub: "Per-system labor as a % of that system's material × tier (#232)",
-    note: "Live — replaces the flat install % and the Grid's hours-per-device suggestion. Material = the system's priced equipment and wire pull. The tier is the design's (Quick Design) or the scope's Auto choice (the Grid); none chosen → ×1.0. General = Grid lines with no system. A labor % with no value of its own defaults to the former install % (18 unless it was changed) — export CSV before changing.",
-    items: [
-      ...LABOR_SYSTEMS.flatMap((sys) => [
-        rate(laborRateId(sys, "pct"), `${LABOR_SYSTEM_LABEL[sys]} — labor %`, DEFAULT_LABOR_PCT, "%", { min: 0, max: LABOR_PCT_MAX, step: 0.5, help: "labor = system material × this % × tier ×" }),
-        ...tierMultRates((t) => laborRateId(sys, t), LABOR_SYSTEM_LABEL[sys]),
-      ]),
-      formula("labor.amount", "System labor", "labor = system material × labor % × tier ×  (Good / Better / Best; none chosen → ×1.0)"),
-    ],
-  },
-  {
     key: "curtains", label: "Curtain sewing", live: true,
     sub: "Sewing labor on every curtain estimate (#227)",
-    note: "Live — a fabric's catalog $/sq ft is fabric cost only; every curtain estimate (Estimator, Quick Design, Grid) adds this sewing labor on top. A typed Rose Brand / vendor cost is the full cost and gets no adder.",
+    note: "Live — a fabric's catalog $/sq ft is fabric cost only; every curtain estimate adds this sewing labor on top. A typed Rose Brand / vendor cost is the full cost and gets no adder.",
     items: [
       rate(SEWING_PCT_ID, "Sewing labor adder", DEFAULT_SEWING_PCT, "%", { min: 0, max: SEWING_PCT_MAX, step: 0.5, help: "cost = sewn area × fabric $/sq ft × (1 + this %)" }),
       formula("curtains.cost", "Curtain cost", "cost = sewn area × fabric $/sq ft × (1 + sewing %)   ·   sewn area = finished width × (1 + fullness) × height   ·   sell = cost × (1 + markup)"),
@@ -463,11 +380,6 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
 ];
-
-/** #232: the per-system labor % ids — unset, they read the stored install % (laborPctDefault), not their registry def.
- *  That install % has no registry row any more (retired, #232), but its stored value stays in the blob and is
- *  read straight from it (loadWireLaborRules, value, defaultOf). */
-const LABOR_PCT_IDS: ReadonlySet<string> = new Set(LABOR_SYSTEMS.map((sys) => laborRateId(sys, "pct")));
 
 let BY_ID: Record<string, PricingEntry> = {};
 function reindex(): void {
@@ -517,40 +429,21 @@ export async function value(
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   const gv = g[it.id];
   if (gv != null) return gv;
-  return generalDefault(it, g);
+  return it.def;
 }
 
-/** A general rate's EFFECTIVE default: a labor % follows the stored install % (#232); every other rate is its registry def. */
-function generalDefault(it: RateEntry, g: Record<string, number | null>): number {
-  return LABOR_PCT_IDS.has(it.id) ? laborPctDefault((id) => g[id]) : it.def;
-}
-
-/**
- * The value a rate falls back to when it has none of its own — what the
- * Estimating Rules row shows as its default and resets to. A labor % row's is
- * the stored (retired) install %, so with install % ≠ 18 an untouched row
- * isn't "modified" (#232); every other rate's is its registry def.
- */
+/** The value a rate falls back to when it has none of its own — its registry def (what the Estimating Rules row shows as its default and resets to). */
 export async function defaultOf(item: PricingEntry | string): Promise<number | null> {
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return null;
-  if (it.store !== "general" || !LABOR_PCT_IDS.has(it.id)) return it.def;
-  return generalDefault(it, await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {}));
+  return it.def;
 }
 
-/**
- * Reset one rate (Estimating Rules' per-row ↺). A labor % is cleared to null,
- * so it follows the install % again rather than pinning a literal 18 (#232);
- * every other rate is written back to its registry def (prototype: setValue(id, def)).
- */
+/** Reset one rate (Estimating Rules' per-row ↺) to its registry def. */
 export async function resetValue(item: PricingEntry | string): Promise<void> {
   await ensureMarkupSettings();
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return;
-  if (it.store === "general" && LABOR_PCT_IDS.has(it.id)) {
-    await setBlob(PRICING_RULES_BLOB, { [it.id]: null });
-    return;
-  }
   await setValue(it, it.def);
 }
 
@@ -594,7 +487,7 @@ export async function resetAll(): Promise<void> {
   await setBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS });
 }
 
-/** Read a general rate by id with fallback (Quick Design freight/contingency). */
+/** Read a general rate by id with fallback. */
 export async function num(id: string, fb: number): Promise<number> {
   const it = BY_ID[id];
   if (!it) return fb;
@@ -605,13 +498,6 @@ export async function num(id: string, fb: number): Promise<number> {
 /** num() as a fraction: frac('system.freightPct', 0.05) → 0.05 when default. */
 export async function frac(id: string, fb?: number): Promise<number> {
   return (await num(id, fb != null ? fb * 100 : 0)) / 100;
-}
-
-/** #231/#232/#233 late: the wire-pull, Cable Package and system-labor rules, in ONE read of the general blob. */
-export async function loadWireLaborRules(): Promise<WireLaborRules> {
-  await ensureMarkupSettings();
-  const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
-  return wireLaborRulesFrom((id) => g[id]);
 }
 
 /** #227 late: the curtain sewing % (a percent number, 10 = 10 %) — one read of the general blob. */

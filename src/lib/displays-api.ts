@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { requireUser } from "@/lib/session";
 import type { CatalogPart } from "@/lib/stores/catalog";
-import type { PartSpecFields } from "@/lib/bid-spec";
+import type { PartSpecFields } from "@/lib/specs/part-spec";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { hasPrintableSpec, type SpecCategoryArticle } from "@/lib/specs/articles";
 import type { SpecSection } from "@/lib/specs/sections";

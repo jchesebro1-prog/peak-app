@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { partSearchHaystack } from "@/lib/catalog-rename/sku";
 import { apiEnvelope, authorizeDisplaysRequest, catalogEtag, decodeDisplaysCursor, displayTimestamp, displaysRateHeaders, displaysRateLimit, encodeDisplaysCursor, isAfterDisplaysCursor, publicCatalogPart, unauthorizedMessage } from "@/lib/displays-api";
-import type { SpecCatalogPart } from "@/lib/bid-spec";
+import type { SpecCatalogPart } from "@/lib/specs/part-spec";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { loadPartDocsState } from "@/lib/part-docs/load";

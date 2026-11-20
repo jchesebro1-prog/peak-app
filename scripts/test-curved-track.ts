@@ -8,7 +8,7 @@ import { sanitizeTrackSeries, TRACK_ROLE_NAMES, type TrackSeries } from "../src/
 import { trackQuantities, type TrackConfig } from "../src/lib/track-engine";
 import { collectCurtainTypes } from "../src/lib/curtain-cut-sheets/collect";
 import { CLIENT_ELEV_BOX, CUT_SHEET_STAMP, cutSheetModel, cutSheetPageCount, SUBMITTAL_ELEV_BOX, submittalSheetIndexes, type CutSheetContext } from "../src/lib/curtain-cut-sheets/model";
-import { titleBlockData } from "../src/lib/design/grid-drawing-set";
+import { titleBlockData } from "../src/lib/title-block";
 import { cleanTrackConfig, freshTrackDraft, trackConfigFromDraft, trackDraftFromConfig, trackLineDesc } from "../src/app/(app)/estimator/track-bom";
 import { angleAfterArcLengthEdit, angleFromArcLength, arcLengthText, blankSegment, pathToSegments, presetSegments, segmentsToPath, totalRunText, TRACK_PRESETS } from "../src/app/(app)/estimator/track-segment-draft";
 import {

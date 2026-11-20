@@ -41,9 +41,6 @@ import {
 import type { CollectionName } from "@/db/doc-tables";
 import { mfrKey } from "@/lib/catalog-books";
 import { CURTAIN_MOUNTS_BLOB } from "@/lib/curtain-mounts";
-import { CONDUIT_SIZES_BLOB } from "@/lib/conduit-sizes";
-import { favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
-import { EQUIPMENT_MAP_BLOB } from "@/lib/design/equipment-map";
 /** The removed Drive photo sync's stored state blob — still rewritten so its SKUs follow a rename. */
 const DRIVE_PHOTO_SYNC_BLOB = "drive_photo_sync";
 import type { PartAccessoryLink, PartDocumentLink } from "@/lib/part-docs/types";
@@ -61,6 +58,12 @@ import { LINESET_TYPES_BLOB, PIPE_TYPES_BLOB } from "@/lib/rigging-config/types"
 import { CROSSWALK_MAX_ROWS, planRenames, type CrosswalkRow, type PlanPart } from "./plan";
 import * as RW from "./rewrite";
 import { cleanCrosswalkRows, REF_STEPS, type RefStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
+
+/** Blobs of the removed Grid — nothing reads them, but a stored one still follows a rename (ids as the removed modules had them). */
+const CONDUIT_SIZES_BLOB = "conduit_sizes";
+const EQUIPMENT_MAP_BLOB = "grid_equipment_map";
+const favoritesBlobId = (userId: string) => `gridFavorites:${userId}`;
+const recentBlobId = (userId: string) => `gridRecent:${userId}`;
 
 export { REF_STEPS, type RefStep, type RenameStep, type RenameBatchInput, type RenameBatchResult } from "./steps";
 

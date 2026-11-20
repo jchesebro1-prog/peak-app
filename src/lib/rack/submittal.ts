@@ -9,7 +9,7 @@
  * an unknown number is `null` here (printed "—") and a total that has
  * unknowns reads "at least …".
  */
-import { parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
+import { parseVirtualPartId } from "@/lib/quote-line-ids";
 import type { FixtureRecord } from "@/lib/fixture-assemblies";
 import { emptyRackLayout, placementFacts, ruRangeLabel } from "./layout";
 import { RACK_FACT_LABEL, rackFactsOf, rackModelOf } from "./part-facts";

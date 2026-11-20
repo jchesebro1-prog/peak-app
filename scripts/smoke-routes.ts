@@ -52,9 +52,6 @@ const ROUTES = [
   "/quotes",
   "/estimator",
   "/design/lineset",
-  /* No "/design/grid": the standalone Grid index was removed when The Grid
-   * became a layout mode of Designs (D-grid-merge). Its editor route is still
-   * covered below as a dynamic route. */
   "/import",
   // #137 — the three people/venue importers + every CSV the hub serves.
   "/import?type=customers",
@@ -77,9 +74,6 @@ const ROUTES = [
   "/catalog/documents/photos/export", // photo sheet — the .xlsx download
   "/catalog/rack-data", // #296 — rack data sheet: download, upload, preview, import
   "/catalog/rack-data/export", // #296 — the rack data CSV download
-  "/catalog/riser-data", // #328 A2 — riser data sheet: download, upload, preview, apply (admin)
-  "/catalog/riser-data/export", // #328 A2 — the riser data .xlsx download
-  "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
   "/catalog/manufacturers", // Manufacturer section Part 1
   "/catalog/manufacturers/rosebrand", // Manufacturer section Part 2 — one manufacturer's page
   "/catalog/model-numbers", // #304 — crosswalk upload → preview → apply (admin)
@@ -106,31 +100,17 @@ const ROUTES = [
   "/settings?section=company", // settings cleanup — one route per left-menu group
   "/settings?section=sales",
   "/settings?section=field",
-  "/settings?section=consulting",
   "/settings?section=team",
   "/settings?section=data",
-  "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
-  "/design/grid/settings/equipment-map", // #211 Equipment map tab (admin; read-only on load)
-  "/design/specs/new", // #205 spec builder (T5) — the New spec form
-  "/design/specs/library", // Spec records (Task 10) — the records view (default)
-  "/design/specs/library?view=sections", // Specs module (#205) — sections / articles / coverage, moved under ?view=sections
-  "/design/specs/library/records/new", // Spec records (Task 10) — the new-record editor
-  "/design/specs/templates", // Specs module (#205) — the template list
-  "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
-  "/templates",
-  "/consulting",
   "/design-studio/lineset",
   "/design-studio/motors",
   "/design-studio/steel",
   "/design-studio/weights",
-  "/design/designs",
-  "/design/engagements",
   "/design/fixtures", // #136 redirect stub → /knowledge/fixtures (the harness follows it)
   "/design/assemblies",
   "/design/assemblies?tab=subassemblies", // #210 — the retired tab link redirects to the one list
   "/design/subassemblies", // #130/#210 — redirect to /design/assemblies; must stay 3xx
   "/design/motors",
-  "/design/quick",
   "/design/steel", // #136 redirect stub → /knowledge/steel
   /* #136 Knowledge & Information tab — landing page + the two moved tools. */
   "/knowledge",
@@ -143,7 +123,6 @@ const ROUTES = [
   /* Legacy redirect stubs: these assert the hop still resolves, same as the
    * /customers/lakefront entry below. */
   "/design-studio",
-  "/consulting/quote",
   // #293 slice 3 — the signed share page: a well-formed token that passes the
   // shape check and reaches the DB read + HMAC verify (and fails it), and a
   // malformed one refused before any read — both the one 200 "isn't active" card.
@@ -217,50 +196,27 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&thread=C-1032" },
   { route: "/estimator?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+estimate" },
   { route: "/estimator?customer=lakefront&category=Acoustics&replaces=Q-2041" },
-  { route: "/design/engagements/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+consulting" },
-  { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // #207: the part editor with its Documents section (a seeded fabric SKU).
   { route: "/catalog?edit=RB-MV-MN" },
   // Specs module (#205): /design/specs is the saved-spec list (Phase B T5 —
   // it used to redirect to the library); an empty list renders its empty
   // state, so it needs no reject.
-  { route: "/design/specs" },
   // New spec from a quote: the seeded draft Q-2041 resolves as the source.
-  { route: "/design/specs/new?quote=Q-2041", reject: "was not found" },
-  { route: "/design/specs/templates/fixtures" }, // the starter formula's slug
-  { route: "/design/specs/templates/curtain-Leg" }, // the starter curtain template
   // CE-1001 is not seeded directly: it is lazily minted by
   // syncEngagementsFromQuotes() from the seeded won consulting quote Q-2045.
   // The [id] page's own loader (loadConsultingData(), in
   // design/engagements/data.ts) awaits that sync before reading engagements,
   // so this route mints CE-1001 on its own — there is no ordering dependency
   // on the static /design/engagements entry above.
-  { route: "/design/engagements/CE-1001" },
-  { route: "/design/engagements/CE-1001?tab=activity" },
   // #323 — the Oversight tab mounts the Meetings card beside the Recordings card.
-  { route: "/design/engagements/CE-1001?tab=oversight" },
   // #323 — the lead drawer's detail mode mounts the Meetings card slot.
   { route: "/leads?lead=L-1061" },
   /* The Grid's derived drawings (D112 riser, device schedule). */
-  { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/conduit-riser", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/schedule", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/lineset", reject: "no longer exists" },
-  { route: "/api/grid/GRD-5001/package-manifest" },
   { route: "/api/v1/displays/catalog" },
   { route: "/api/v1/displays/manufacturers" },
   { route: "/api/v1/displays/specs" },
-  { route: "/design/grid/GRD-5001?option=opt-base", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001?option=opt-does-not-exist", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/riser?option=opt-base", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&detail=dt-main", reject: "no longer exists" },
   /* #328 C3: the A/V conduit riser — the same page with ?system=av. */
-  { route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&system=av", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/schedule?option=opt-does-not-exist", reject: "no longer exists" },
   /* The drawing set (#209) at both sheet sizes, and an unknown option. */
-  { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/set?size=d", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/set?option=opt-does-not-exist&size=b", reject: "no longer exists" },
   // #292 — curtain cut sheets (both styles; an unknown id renders "Quote not found." with a 200).
   { route: "/estimator/cut-sheets?id=Q-2041" },
   { route: "/estimator/cut-sheets?id=Q-2041&style=client" },
@@ -284,9 +240,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },
   // #321 — the lighting control riser DXF: the seeded design has no conduit run
   // (a clean 404 after the loader path compiles); an unknown design is a 404 too.
-  { route: "/api/grid/GRD-5001/conduit-riser/dxf", expectNotFound: true },
-  { route: "/api/grid/GRD-NOPE/conduit-riser/dxf?option=opt-base&size=d&page=1", expectNotFound: true },
-  { route: "/api/grid/GRD-5001/conduit-riser/dxf?option=opt-base&size=d&page=1&system=av", expectNotFound: true },
   // #301 slice B — the share photo route with a v2 token that fails the verify: a clean 404.
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/photo/PD-1", expectNotFound: true },
   // #301 slice C — the package datasheet route with a v2 token that fails the verify: a clean 404.
@@ -307,9 +260,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/print/quote/Q-2041?view=bom", expectNotFound: true },
   { route: "/print/quote/Q-2041?view=bom&part=main", expectNotFound: true },
   // #301 slice C — the signed Grid set print and its two asset routes without a token: clean 404s before any read.
-  { route: "/print/grid-set/GRD-5001~opt-base", expectNotFound: true },
-  { route: "/print/grid-set/GRD-5001~opt-base/asset/sheet/gs-1", expectNotFound: true },
-  { route: "/print/grid-set/GRD-5001~opt-base/asset/doc/PD-1", expectNotFound: true },
 ];
 
 let fail = 0;
