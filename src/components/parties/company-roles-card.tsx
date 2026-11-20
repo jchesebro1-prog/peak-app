@@ -26,9 +26,6 @@ export async function CompanyRolesCard({ companyId, style, headStyle }: { compan
     } else if (g.recordType === "lead") {
       const l = g.record;
       rows.push({ key, kind: KIND.lead, number: displayLeadNumber(l), name: l.org + (l.interest ? ` — ${l.interest}` : ""), roles, href: `/leads?lead=${encodeURIComponent(l.id)}`, sort: l.updatedAt || 0 });
-    } else {
-      const pr = g.record;
-      rows.push({ key, kind: KIND.project, number: pr.id, name: pr.name, roles, href: `/projects/${encodeURIComponent(pr.id)}`, sort: pr.updatedAt || 0 });
     }
   }
   if (!rows.length) return null;

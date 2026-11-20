@@ -7,11 +7,10 @@ import { rateLimit } from "@/lib/rate-limit";
 import { logActivity } from "@/lib/stores/leads";
 import { addNoteRecord } from "@/lib/stores/notes";
 import { appendClientResponse, type Quote } from "@/lib/stores/quotes";
-import { createTask } from "@/lib/stores/tasks";
 import { allUsers } from "@/lib/users";
 import {
-  chicagoDayEnd, cleanBidderName, CLIENT_ACTION_COPY, CLIENT_LINK_ACTOR, confirmationText, leadEstimator, newResponseId, PEAK_NAME, RESPONSE_IP_LIMIT,
-  RESPONSE_IP_WINDOW_MS, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS, responseAssignees, responseQuoteBucket, responseNoteText, responseScopes, responseTaskTitle,
+  cleanBidderName, CLIENT_ACTION_COPY, CLIENT_LINK_ACTOR, confirmationText, leadEstimator, newResponseId, PEAK_NAME, RESPONSE_IP_LIMIT,
+  RESPONSE_IP_WINDOW_MS, RESPONSE_QUOTE_LIMIT, RESPONSE_QUOTE_WINDOW_MS, responseAssignees, responseQuoteBucket, responseNoteText, responseScopes,
   sanitizeClientResponse, type ClientActionResult, type ClientResponse, type ClientResponseKind, type RosterUser,
 } from "./responses";
 
@@ -75,41 +74,25 @@ export async function submitClientResponse(kind: ClientResponseKind, id: string,
 type NotifyDeps = {
   addNote: (input: Parameters<typeof addNoteRecord>[0], me: string) => Promise<unknown>;
   logActivity: (leadId: string, a: { type?: string; by?: string; at?: number; note?: string }, me: string) => Promise<unknown>;
-  createTask: (input: Parameters<typeof createTask>[0], me: { id: string; name: string }) => Promise<unknown>;
 };
 
-const liveNotify: NotifyDeps = { addNote: addNoteRecord, logActivity, createTask };
+const liveNotify: NotifyDeps = { addNote: addNoteRecord, logActivity };
 
-/** R15 + R16: a system note on the quote (customer timeline), a system
- *  activity on the lead (never `note` — that stamps firstContactAt), one
- *  task per assignee. Each step on its own: one failing never stops the rest. */
+/** R15 + R16: a system note on the quote (customer timeline) and a system
+ *  activity on the lead (never `note` — that stamps firstContactAt). No task
+ *  is created (Tasks were removed). Each step on its own: one failing never
+ *  stops the rest. */
 export async function notifyClientResponse(q: Quote, r: ClientResponse, users: RosterUser[], now: number, deps: Partial<NotifyDeps> = {}, bidderName = ""): Promise<void> {
   const d: NotifyDeps = { ...liveNotify, ...deps };
   const number = displayQuoteNumber(q);
   const rev = (q.revisions || []).find((x) => x.rev === r.rev);
   const revNo = rev ? sentDocumentStamp(q, rev).revNo : r.rev;
-  // #348 2b-ii: a bidder's response names the bidder (cleaned: one line, ≤ 120 chars) in the note and task title.
+  // #348 2b-ii: a bidder's response names the bidder (cleaned: one line, ≤ 120 chars) in the note.
   const bidder = cleanBidderName(bidderName);
   const text = responseNoteText(r, number, revNo, bidder);
   const steps: Array<() => Promise<unknown>> = [
     () => d.addNote({ parentKind: "quote", parentId: q.id, customerId: q.customerId ?? null, text, system: true }, CLIENT_LINK_ACTOR),
     ...(q.leadId ? [() => d.logActivity(q.leadId as string, { type: "system", by: CLIENT_LINK_ACTOR, at: now, note: text }, CLIENT_LINK_ACTOR)] : []),
-    ...responseAssignees(q.owner, q.preparedBy, users).map((u) => () =>
-      d.createTask(
-        {
-          title: responseTaskTitle(r, number, revNo, bidder),
-          section: "Review",
-          quoteId: q.id,
-          assigneeUserId: u.id,
-          assigneeName: u.name,
-          dueAt: chicagoDayEnd(now),
-          notes: text,
-          ...(q.customerId ? { customerId: q.customerId } : {}),
-          ...(q.leadId ? { leadId: q.leadId } : {}),
-        },
-        { id: "system", name: CLIENT_LINK_ACTOR }
-      )
-    ),
   ];
   for (const step of steps) {
     try {

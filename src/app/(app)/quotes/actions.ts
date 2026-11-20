@@ -105,26 +105,17 @@ export async function saveQuoteRevisionAction(formData: FormData): Promise<void>
 /**
  * Recall an earlier revision. The store snapshots the current state before
  * applying, so this never discards work; it refuses outright on won quotes,
- * whose numbers are already baked into a project, and on lost quotes (#282:
- * out of the Rewards program).
+ * and on lost quotes.
  */
 export async function restoreQuoteRevisionAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") || "");
   const rev = Number(formData.get("rev") || 0);
   if (!id || !Number.isFinite(rev) || rev < 1) return;
-  // #282 phase 3: the recalled Rewards credit is re-clamped like a save —
-  // `create` is needed to grow it.
-  const res = await restoreQuoteRevision(id, rev, user.name, { mayApplyCredit: can("create", user.roles) });
+  const res = await restoreQuoteRevision(id, rev, user.name);
   // #222 fix wave 1: a recall puts an earlier document back on the quote.
   if (res.ok) await scheduleQuotePdf(id);
   revalidatePath("/", "layout");
-  // #282 phase 3: say so when the recalled credit was reduced or removed.
-  if (res.ok && res.creditNotice) {
-    const back = String(formData.get("back") || "/quotes");
-    const safe = back.startsWith("/quotes") ? back : "/quotes";
-    redirect(safe + (safe.includes("?") ? "&" : "?") + "creditNotice=" + encodeURIComponent(res.creditNotice));
-  }
 }
 
 /**

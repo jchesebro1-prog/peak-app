@@ -441,7 +441,7 @@ export default async function FieldSurveyPage({
       })()}
 
       {/* #34 — open-visit queue, ABOVE the survey cards */}
-      <VisitRequests rows={visitRows} team={team} me={me} />
+      <VisitRequests rows={visitRows} />
 
       {/* empty state */}
       {list.length === 0 && (

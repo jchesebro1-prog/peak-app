@@ -10,7 +10,6 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 import { canSeeThread, setLink, type CommThread, type MailboxViewer } from "@/lib/stores/comms";
 import { canSeeThreadCond } from "@/lib/stores/comms-visibility";
 import { addParty, listFor } from "@/lib/stores/parties";
-import { getProject } from "@/lib/stores/projects";
 import { get as getQuote } from "@/lib/stores/quotes";
 import {
   VENDOR_COPY, asVendorQuotes, filingLinkLabel, isListedVendorThread, isVendorPickerType, vendorCompanyIdsOf, vendorThreadRow,
@@ -33,9 +32,8 @@ export async function fileThreadTo(
     if (!q) return notFound;
     label = filingLinkLabel({ type: "quote", number: displayQuoteNumber(q), name: q.name });
   } else {
-    const p = await getProject(target.id);
-    if (!p) return notFound;
-    label = filingLinkLabel({ type: "project", id: p.id, name: p.name });
+    // Projects were removed: only an estimate can be filed to.
+    return notFound;
   }
   if (vendorCompanyId) {
     const c = (await getCompanies([vendorCompanyId])).get(vendorCompanyId);

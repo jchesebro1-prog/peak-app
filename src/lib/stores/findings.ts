@@ -460,9 +460,7 @@ async function voidOne(key: string, reason: string, user: { id: string }, merged
 export async function voidFinding(key: string, reason: string, user: { id: string }): Promise<void> {
   const problem = voidReasonProblem(reason);
   if (problem) throw new Error(problem);
-  const f = await voidOne(key, reason.trim().slice(0, 500), user);
-  // #353 review M3 — a voided finding has no date any more: its open reminder closes.
-  await closeFindingReminders(key, f.nextDue, undefined);
+  await voidOne(key, reason.trim().slice(0, 500), user);
 }
 
 /**

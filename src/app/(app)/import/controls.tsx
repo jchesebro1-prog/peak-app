@@ -112,20 +112,6 @@ export function PastePreview({
     mappedFields.length ? mappedFields : visibleColumns(fields).slice(0, 3)
   ).slice(0, 4);
   const previewRows = (prep?.rows || []).slice(0, 5);
-  const templateWarnings = typeKey === "task_templates" && prep && validationOptions
-    ? prep.rows.flatMap((row) => {
-        const warnings: string[] = [];
-        const phase = String(row.values.phase || "").trim();
-        const discipline = String(row.values.discipline || "").trim();
-        if (phase && !validationOptions.phases.some((v) => v.trim().toLowerCase() === phase.toLowerCase())) {
-          warnings.push(`unknown phase "${phase}"`);
-        }
-        if (discipline && !validationOptions.disciplines.some((v) => v.trim().toLowerCase() === discipline.toLowerCase())) {
-          warnings.push(`unknown discipline "${discipline}"`);
-        }
-        return warnings.length ? [{ row: row.i + 2, warnings }] : [];
-      })
-    : [];
 
   // #137 — link-back preview for contacts / venues, resolved over the WHOLE
   // table (a create on row 40 still belongs in the "will create" list) even
@@ -463,29 +449,6 @@ export function PastePreview({
             </div>
           )}
         </>
-      )}
-
-      {templateWarnings.length > 0 && (
-        <div
-          style={{
-            marginTop: 12,
-            background: "#fff8e8",
-            border: "1px solid #f0e2bd",
-            borderRadius: 9,
-            padding: "10px 12px",
-            fontSize: 12,
-            color: "#80651d",
-            lineHeight: 1.5,
-          }}
-        >
-          <b>Review before importing:</b> {templateWarnings.length} task-template row{templateWarnings.length === 1 ? "" : "s"} use a phase or discipline that is not in the current settings vocabulary.
-          <div style={{ marginTop: 4, display: "grid", gap: 2 }}>
-            {templateWarnings.slice(0, 8).map((item) => (
-              <div key={item.row}>Row {item.row}: {item.warnings.join("; ")}</div>
-            ))}
-            {templateWarnings.length > 8 && <div>+ {templateWarnings.length - 8} more rows</div>}
-          </div>
-        </div>
       )}
 
       {/* preview */}
