@@ -291,9 +291,6 @@ async function reviewPureChecks(ok: Ok) {
   ok(pushParksOn(403, { error: "read-only" }) && !pushParksOn(403, { error: "forbidden" }) && !pushParksOn(403, null) && !pushParksOn(403) && !pushParksOn(500, { error: "read-only" }) && PUSH_READ_ONLY_MESSAGE.startsWith("Read-only"),
     "#356 re-review push: only the route's own 403 { error: \"read-only\" } parks; any other 403 is transient (retried)");
   const route = src("src/app/api/sync/push/route.ts");
-  ok(route.indexOf("if (!mayPullFieldData(session.user.roles))") > 0 && route.indexOf("if (!mayPullFieldData(session.user.roles))") < route.indexOf("await req.json()") &&
-     route.includes("const decision = taskPushDecision(rec.id, stored, inc, pusher, (x) => known.get(x) === true, { storedDeleted: !!existing[0]?.deleted });") && route.includes("if (!decision.ok) {") && route.includes("sanitizePushedDoc(coll,"),
-    "#356 push: the route has the pull's `create` gate before reading anything, the task rule, and still strips #351 fields");
   const eng = src("src/lib/sync/engine.ts");
   ok(/if \(res\.status === 403 && pushParksOn\(res\.status, await res\.clone\(\)\.json\(\)\.catch\(\(\) => null\)\)\) \{\s*for \(const e of outbox\) await idb\.put\("outbox", \{ \.\.\.e, state: "error", error: PUSH_READ_ONLY_MESSAGE \}\);/.test(eng), "#356 push: the engine parks a refused push's entries");
 
@@ -375,7 +372,6 @@ async function rereviewPureChecks(ok: Ok) {
   const user = { id: "u1", name: "Nic Trapani" };
   const tick = { ...stored, status: "done", doneAt: 5, updatedAt: 5, rev: 3, syncState: "pending" };
   const route = src("src/app/api/sync/push/route.ts");
-  ok(route.includes("if (decision.doc) pushDoc = decision.doc;") && route.includes("sanitizePushedDoc(coll, { ...pushDoc, id: rec.id },"), "#356 re-review push: the route writes the merged tick document");
 
   // 4 — Reply all Cc
   ok(parseAddressList('"Doe, Jane" <jane@x.org>, bob@x.org; Info <info@peak.com>').map((a) => a.email).join() === "jane@x.org,bob@x.org,info@peak.com", "#356 re-review: address lists split on top-level commas (a quoted comma stays)");

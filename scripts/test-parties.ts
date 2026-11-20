@@ -54,9 +54,7 @@ export async function partyChecks(ok: Ok) {
 
   ok(!carriesTo("lead", "quote", { role: "gc" }) && !carriesTo("lead", "quote", { role: "ec" }), "parties: lead→quote skips GC/EC");
   ok(["owner", "architect", "consultant", "vendor", "other"].every((r) => carriesTo("lead", "quote", { role: r as never })), "parties: lead→quote carries the rest");
-  ok(PARTY_ROLES.every((r) => carriesTo("quote", "project", { role: r })), "parties: quote→project carries every role");
   const bs = (result: "pending" | "awarded" | "lost" | "withdrew" | "no_bid") => ({ result, submitVia: "email" as const });
-  ok(carriesTo("quote", "project", { role: "gc", bid: bs("awarded") }) && carriesTo("quote", "project", { role: "ec", bid: bs("pending") }) && carriesTo("quote", "project", { role: "gc", bid: null }), "parties: quote→project carries awarded, pending and non-bidder rows");
   ok((["lost", "withdrew", "no_bid"] as const).every((r) => !carriesTo("quote", "project", { role: "gc", bid: bs(r) })), "parties: quote→project leaves losing bidders (lost / withdrew / no bid) on the estimate");
   ok(!carriesTo("project", "quote", { role: "owner" }), "parties: no other direction carries");
   ok(["owner", "architect", "consultant", "vendor", "other", "gc", "ec"].every((r) => carriesTo("quote", "quote", { role: r as never, bid: null })), "parties: quote→quote carries every role without a bid state");

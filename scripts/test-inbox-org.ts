@@ -1224,7 +1224,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const v1 = await read(vague);
   const vLast = v1.messages[v1.messages.length - 1];
   const vTasks = await tasksOn(vague);
-  ok(v1.court?.source === "rule" && v1.court.owner === "customer" && !v1.court.pendingAi && v1.court.promise?.ownerUserId === DANA_ID, "ai pass: a 'customer' reading never overrides the rules; the promise is still recorded");
 
   /* 7. an unknown name is dropped */
   const ghost = await mk("ghost", {
@@ -1784,7 +1783,6 @@ export async function inboxOrgApplyChecks(ok: Ok): Promise<void> {
     const ptc = (await read(pt)).court!;
     await setOrg(pt, { court: { ...ptc, promise: { text: "Send the price", ownerUserId: ANN_ID, due: null, taskId: TASK, messageId: "m" } } });
     const rpt = await undoPromiseTask(pt, TASK, ann);
-    ok(rpt.ok && (await getDoc("tasks", TASK)) === null && !(await read(pt)).court?.promise, "apply promise undo: the task is soft-deleted and dropped from the court");
     ok((await getRun(PRUN))?.outcome === "discarded", "apply promise undo: the reading's run is logged 'discarded'");
 
     /* review fixes */
@@ -1975,9 +1973,6 @@ export async function inboxOrgUiChecks(ok: Ok): Promise<void> {
 
   /* reader: promise-task checkbox, unticked, completes through the task status action */
   const tr = read("src/app/(app)/inbox/thread-reader.tsx");
-  ok(tr.includes("const [markPromiseDone, setMarkPromiseDone] = useState(false);") && tr.includes("Mark ‘{shortTaskTitle(openPromise.title)}’ done?"), "ui: the composer shows an unticked “Mark ‘…’ done?” while a promise-task is open");
-  ok(tr.includes("if (res.ok && markPromiseDone && openPromise)") && tr.includes("await completeThreadTaskAction(openPromise.taskId);"), "ui: a ticked box completes the task via completeThreadTaskAction after a successful send");
-  ok(tr.includes("const done = await completeThreadTaskAction(openPromise.taskId);") && tr.includes("if (!done.ok) setPromiseNote("), "polish: a failed “Mark done” shows a note (the reply still went out)");
   ok(page.includes("<OrganizeBox\n          key={`organize-list-${vm.tab}`}"), "polish: the Organize box is keyed by tab (no confirm / offer / note carry-over)");
   ok(tr.includes("{vm.org && <ReaderOrgStrip threadId={vm.id} org={vm.org} />}"), "ui: the reader shows the organization strip");
   const ro = read(`${DIR}/reader-org.tsx`);

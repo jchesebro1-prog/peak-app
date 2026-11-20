@@ -79,16 +79,6 @@ export async function markupPureChecks(ok: Ok) {
     const kept = fr(keepSavedMarkup(0.3 / 0.7, 0.43)), marginEra = 1234.56 / 0.7;
     ok(Math.abs(kept.partsSell - marginEra) < 1e-9 && Math.abs(fr(0.43).partsSell - marginEra) > 1,
       "markup: a converted repair quote's parts sell stays at its margin-era $1,763.66 on re-save (the rounded 43 % would move it)");
-    const { readFileSync } = await import("node:fs");
-    const R = "src/app/(app)/repairs/quote/";
-    const act = readFileSync(R + "actions.ts", "utf8"), ctl = readFileSync(R + "controls.tsx", "utf8"), pg = readFileSync(R + "page.tsx", "utf8");
-    const iExisting = act.indexOf("const existingForMarker = editingId ? await getQuote(editingId) : null;");
-    const iRates = act.indexOf("partsMargin: keepSavedMarkup(savedPartsMarkup, baseRates.partsMargin) };");
-    ok(iExisting > 0 && iRates > iExisting && act.split("const existingForMarker").length === 2 && /savedPartsMarkup = \(existingForMarker\?\.repair[^;]*\?\.rates\?\.partsMargin;/.test(act),
-      "markup: the repair save prices parts at keepSavedMarkup(the saved quote's rates.partsMargin, today's global)");
-    ok(ctl.includes("const partsMarkup = keepSavedMarkup(initial.savedPartsMarkup, baseRates.partsMargin);") && /margin: markupPts \/ 100,[\s\S]{0,300}partsMargin: partsMarkup,/.test(ctl)
-      && ctl.includes("Math.round(partsMarkup * 100)") && !ctl.includes("baseRates.partsMargin * 100") && pg.includes("savedPartsMarkup: rp?.rates?.partsMargin ?? null,"),
-      "markup: the repair builder preview uses the same rule (and shows the kept parts markup)");
   }
 
   // Task 3 — legacy twin keeps old lines at the seed after the 43 % rounding.
@@ -126,7 +116,7 @@ export async function markupPureChecks(ok: Ok) {
   // Task 7 — review carry-over: a service save with no `markup` field falls back to the service markup, never the 5 % clamp.
   {
     const { readFileSync } = await import("node:fs");
-    const files = ["flame-tests", "repairs", "inspections"].map((d) => readFileSync(`src/app/(app)/${d}/quote/actions.ts`, "utf8"));
+    const files = ["flame-tests", "inspections"].map((d) => readFileSync(`src/app/(app)/${d}/quote/actions.ts`, "utf8"));
     ok(files.every((f) => /const rawMarkup = formData\.get\("markup"\);\s*const markupPts = rawMarkup == null \|\| rawMarkup === "" \? NaN : Number\(rawMarkup\);/.test(f)
       && !f.includes('Number(formData.get("markup"))')), "markup: a missing markup field on a service save is NaN (falls back), not 0 (5 %)");
   }
@@ -174,7 +164,7 @@ export async function markupPureChecks(ok: Ok) {
       "markup copy: a $0-cost line, custom part or catalog hit shows — instead of a 0 %");
     const lm = rd(E + "labor-modal.tsx");
     ok(lm.includes("Markup (%)") && lm.includes('placeholder="43"') && !/Margin \(%\)/.test(lm), "markup copy: the labor modal asks for Markup (%), placeholder 43");
-    ok(["flame-tests", "repairs", "inspections"].every((d) => {
+    ok(["flame-tests", "inspections"].every((d) => {
       const c = rd(`src/app/(app)/${d}/quote/controls.tsx`);
       return /Markup · \{r\?\.overridden \? fmtPct\(r\.\w+\) : fmtPct\(markupPts \/ 100\)\}%/.test(c) && !/\} pts/.test(c) && !/Margin ·/.test(c);
     }), "markup copy: the three service builders read \"Markup · 42.9%\" (formatted), never raw points");

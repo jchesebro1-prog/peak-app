@@ -175,7 +175,7 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(/if \(q && !live\) \{\s*const decision = resolveSaveStatusChange/.test(saveSrc), "action: a live save never acts on status");
   ok(saveSrc.includes("lastSavedBy"), "action: a save stamps who saved");
   ok(saveSrc.includes("{ ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy"), "action: vendorQuotes and lastSavedBy are re-added after the live patch is limited");
-  ok(/live && prior \? prior\.customerId \|\| null : payload\.customerId \|\| null, loadedId/.test(saveSrc), "action: rewards credit reads the stored customer on a live save");
+  ok(/live && prior \? prior\.customerId \|\| null : payload\.customerId \|\| null\)/.test(saveSrc), "action: a stored credit reads the stored customer on a live save");
   ok(/live && prior\s*\? await resolveTier\(prior\.customerId/.test(saveSrc), "action: a live save's tier reads the stored customer");
   ok(/live && loadedId \? \(limitToLivePatch\(patch\)/.test(saveSrc), "action: the patch is limited on live && loadedId");
   ok(/if \(live && loadedId && !prior\) return refusedSave\(null, LIVE_MISSING\)/.test(saveSrc), "action: a live save on a missing quote is refused with a reason");

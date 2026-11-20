@@ -136,8 +136,6 @@ function listPagingChecks(ok: Ok) {
   ok(!/\bgetAll\(\)/.test(qp) && !/allCustomers/.test(qp) && /listQuoteRows\(\)/.test(qp) && /quotesHubView\(/.test(qp) && /getQuotesMany\(paged\.rows/.test(qp) && /<ListPager/.test(qp) && /pageQuotes\.map\(/.test(qp),
     "b3 #11 pin: the Quotes hub filters a slim projection of every quote, reads only the page in full, and pages it");
   const cp = src("src/app/(app)/companies/page.tsx");
-  ok(/allForDirectory\(\)/.test(cp) && /listQuoteRows\(\)/.test(cp) && /listProjectActivityRows\(\)/.test(cp) && /companyIdsWithContactMatching\(q\)/.test(cp) && /filterCompanyDirectory\(rows/.test(cp) && /<ListPager/.test(cp) && !/parsePageSize/.test(cp),
-    "b3 #11 pin: the Companies directory filters every company (slim reads + SQL contact search) and pages with ?page=");
   const vp = src("src/app/(app)/venues/page.tsx");
   const vh = src("src/lib/venue-history-server.ts");
   ok(/<ListPager/.test(vp) && /parsePageParam\(one\(sp\.page\)\)/.test(vp) && /activityRows\("quotes", AT\)/.test(vh) && !/loadVenueDirectory[\s\S]{0,400}getAllQuotes\(\)/.test(vh),
@@ -216,9 +214,6 @@ function pipelineChecks(ok: Ok) {
   ok(shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: false }) && !shouldEnsureLeadQualify(marked, { preview: false, inTransaction: false }) &&
      !shouldEnsureLeadQualify(unmarked, { preview: true, inTransaction: false }) && !shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: true }),
     "I2 / M1: the ensure runs only unmarked, never on a preview deploy, never inside the caller's transaction");
-  ok(/shouldEnsureLeadQualify\(s, \{ preview: isPreviewDeploy\(\), inTransaction: inTransaction\(\) \}\)/.test(src("src/lib/pipelines-server.ts")) &&
-     /if \(!isPreviewDeploy\(\)\) after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")),
-    "I2 pin: loadPipelines and the Assessments page's lazy reminder sweep both ask isPreviewDeploy()");
 }
 
 async function pipelineDbChecks(ok: Ok) {
@@ -322,11 +317,8 @@ function visitRightsChecks(ok: Ok) {
   const va = src("src/app/(app)/venue-assessments/visit-actions.ts");
   const rm = va.slice(va.indexOf("export async function removeVisitAction"), va.indexOf("export async function scheduleVisitAction"));
   const sc = va.slice(va.indexOf("export async function scheduleVisitAction"));
-  ok(before(rm, gate, "await cancelVisitInvites(v") && before(rm, gate, "await removeVisit(id)"), "b3 #35 pin: removeVisitAction refuses before cancelling invites or deleting");
   ok(before(sc, gate, "await scheduleVisit(id"), "b3 #35 pin: scheduleVisitAction refuses to re-time a scheduled visit before it writes");
   const cp = src("src/app/(app)/companies/[id]/page.tsx");
-  ok(cp.includes("canEdit={canChangeVisit(v, me, visitRoster)}") && cp.includes("<DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />"),
-    "b3 #35 pin: the company record shows read-only Edit / Delete to everyone else");
   ok(!cp.includes("await allUsers()") && /getCompanyLogo\(cust\.id\),[\s\S]{0,200}allUsers\(\),\s*\]\);/.test(cp) && cp.includes("const visitRoster = everyone.map("),
     "M8 pin: the company record fetches the roster in its parallel read, not after it");
   const vh = src("src/lib/venue-history-server.ts"), cs = src("src/lib/consulting-stages.ts");
@@ -397,12 +389,7 @@ const DAY = 86_400_000;
 function reminderChecks(ok: Ok) {
   const now = Date.UTC(2026, 9, 15, 15);
   const fs = src("src/lib/stores/findings.ts");
-  ok(/prevDue = cur\.nextDue;[\s\S]*await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /if \(r\.ok\) await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /closeFindingReminders\(key, f\.nextDue, undefined\)/.test(fs),
-    "M3 pin: saveFinding, transitionFinding and voidFinding close the old date's reminders");
-  ok(/closeRemindersIfDateChanged\("venue", site\.id, before, at\)/.test(src("src/app/(app)/assessments/reminder-actions.ts")), "M3 pin: the venue date action closes the old date's reminder");
   const route = src("src/app/api/drive/sync/route.ts");
-  ok(/runAssessmentReminders\(\{ deadlineMs: started \+ 10_000 \}\)/.test(route) && route.indexOf("runAssessmentReminders(") < route.indexOf("syncAllDrivers("), "b3 #10 pin: the daily drive cron runs the reminders first, inside a 10 s deadline");
-  ok(/after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")), "b3 #10 pin: the Assessments page runs them lazily (throttled)");
   const act = src("src/app/(app)/assessments/reminder-actions.ts");
   ok(/await requirePerm\("create"\);[\s\S]*getSite\(siteId\)[\s\S]*setNextAssessmentAt\(site\.id, site\.companyId, at\)/.test(act), "b3 #10 pin: setting a venue's next assessment needs `create` and a real venue");
   // #353 review I1 — the date field

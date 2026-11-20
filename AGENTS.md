@@ -94,6 +94,13 @@ See `.env.example`.
 
 ## Phase status
 
+> **Shrink in progress (2026-11-20).** Stage 1 of four removed Project Management (Projects,
+> Schedule, Field Work, Repairs, Rentals, consulting scheduling, task templates, Tasks / Queue,
+> the task calendar, `/calendar`, site-visit booking and invites, drive time, Morning triage),
+> Rewards and the Daylite import. A won quote is now only a status change, and nothing creates
+> tasks. The phase notes below still describe those features as built — read
+> `docs/removal-log.md` first; it says what is gone and what replaced the shared helpers.
+
 1. ✅ Scaffold, DB, Google SSO + invite list, team/roles port, nav shell,
    Settings (branding/team/roles), deploy-ready config (DEPLOY.md)
 2. ✅ Core data stores + seed fixtures (all 11 collections + pricing/rates/
