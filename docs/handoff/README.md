@@ -50,6 +50,7 @@ The offline program follows `flame-inspections-spec.md` except where a single of
 - Rates are edited only on the Rates tab, never from inside a quote.
 - Renewal emails are text to copy; nothing is sent.
 - Venue Assessments are drawn from `venue-assessment-form.json`, embedded in the file. Sketch pads are replaced by a photo upload per pad; the 3D preview, travel auto-fill from routing, the optional findings merge/split tools and Fill down / Mark range spare on the line set schedule are not ported.
+- The Assessments module (`AS-####`, findings register, venue profiles) is included: all 9 scopes, 55 sections, 284 questions and 51 gate rules are embedded as data and read by a port of the evaluator. Not ported: offline sync, Blob photo storage, the "Quote these findings" hand-off, emailing reports, admin-added pick-list values, assessment reminders.
 - Not included: the dashboard map, calendar holds, the customer portal, repairs flagged from inspections, the three report layout variants (one layout each), rewards credit.
 - Flame results are counted as Passed, IFR and Replace (Jeff, 2026-11-20). They are stored in the app's fields `passed`, `retreated` (IFR) and `failed` (Replace).
 
