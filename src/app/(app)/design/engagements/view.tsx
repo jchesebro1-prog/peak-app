@@ -9,10 +9,6 @@ import type {
   EngagementMilestone,
   EngagementPhase,
 } from "@/lib/stores/engagements";
-import type { NoteRecord } from "@/lib/stores/notes";
-import type { TaskRecord } from "@/lib/stores/tasks";
-import type { PhaseWindow } from "@/lib/consulting-schedule";
-import type { MeetingSource } from "@/lib/engagement-activity";
 import type { ConsultingData, VisitLite } from "./data";
 import { isOpenEngagement } from "@/lib/consulting-review";
 import {
@@ -54,8 +50,6 @@ import { Card, EmptyState, KpiTile, Mono, PageHeader, Pill, StatusPill } from "@
 import { ConfirmButton } from "@/components/confirm-button";
 import { money } from "@/lib/format";
 import { NewEngagementModal } from "./new-engagement-modal";
-import { ActivityTab, type ActivityPerson } from "./activity-tab";
-import { ScheduleTab, type TemplateSetLite } from "./schedule-tab";
 
 /**
  * Consulting module view (D90) — list + detail-with-tabs, the Projects-module
@@ -67,11 +61,9 @@ import { TABS, type TabKey } from "./tabs";
 
 const TAB_LABEL: Record<TabKey, string> = {
   overview: "Overview",
-  schedule: "Schedule",
   phases: "Phases & Reviews",
   milestones: "Milestones & Billing",
   meetings: "Meetings & Decisions",
-  activity: "Activity",
   oversight: "Oversight",
   documents: "Documents",
 };
@@ -172,13 +164,6 @@ export function ConsultingView({
   sel,
   tab,
   oversightExtra,
-  notes,
-  tasks,
-  people,
-  templateSets,
-  phaseBands,
-  prefillId,
-  recordingSource,
   earlierSpecCount,
   canDelete = false,
 }: {
@@ -189,32 +174,6 @@ export function ConsultingView({
    *  <RecordingsCard parentKind="engagement">) — a server component can't be
    *  imported into this client view, so the [id] page passes it in. */
   oversightExtra?: ReactNode;
-  /** #145 D170 — the Activity tab's feed inputs. Per-engagement (not part
-   *  of ConsultingData), fetched by the [id] page detail-route-only; absent
-   *  on the list route, where the Activity tab never mounts. */
-  notes?: NoteRecord[];
-  /** #145 — also the Schedule tab's task rows (only fetched by the [id]
-   *  page when tab is "activity" or "schedule"). */
-  tasks?: TaskRecord[];
-  people?: ActivityPerson[];
-  /** #145 — Consulting-applicable task template sets, for the Schedule
-   *  tab's unscheduled-engagement template picker. Fetched only for
-   *  tab === "schedule", same precedent as tasks/people above. */
-  templateSets?: TemplateSetLite[];
-  /** #145 spec ruling — each phase's actual proportional window
-   *  (phaseWindows), computed server-side (phaseWeightsFor/getSettings
-   *  live in a DB-touching module) so the Schedule tab's Gantt can render
-   *  a real band per phase instead of just a text group header. Fetched
-   *  only for tab === "schedule". */
-  phaseBands?: PhaseWindow[];
-  /** #145 D170 (Task 8) — the `?prefill=<id>` the [id] page read off the
-   *  URL server-side; absent on the list route. */
-  prefillId?: string | null;
-  /** #145 D170 (Task 8) — a Krisp recording linked to this engagement,
-   *  projected into the same shape as an `eng.meetings[]` entry, fetched by
-   *  the [id] page ONLY when `prefillId` doesn't already match a logged
-   *  meeting. Never a store import here — see activity-tab.tsx. */
-  recordingSource?: MeetingSource | null;
   /** #205 spec builder final fix 2 — how many D94 bid specs this engagement
    *  saved before the spec builder replaced that generator; > 0 shows an
    *  "Earlier bid specs" link to where they are still viewable. */
@@ -229,13 +188,6 @@ export function ConsultingView({
       eng={sel}
       tab={tab}
       oversightExtra={oversightExtra}
-      notes={notes || []}
-      tasks={tasks || []}
-      people={people || []}
-      templateSets={templateSets || []}
-      phaseBands={phaseBands || []}
-      prefillId={prefillId ?? null}
-      recordingSource={recordingSource ?? null}
       earlierSpecCount={earlierSpecCount ?? 0}
       canDelete={canDelete}
     />
@@ -329,7 +281,7 @@ function ConsultingList({ data, canDelete }: { data: ConsultingData; canDelete: 
                     <ConfirmButton
                       label="Delete"
                       confirmLabel="Confirm delete"
-                      title="Delete this consulting project (its open tasks go too)"
+                      title="Delete this consulting project"
                       ariaLabel={`Delete ${e.name}`}
                       onConfirm={async () => {
                         const res = await removeEngagementAction(e.id);
@@ -406,13 +358,6 @@ function EngagementDetail({
   eng,
   tab,
   oversightExtra,
-  notes,
-  tasks,
-  people,
-  templateSets,
-  phaseBands,
-  prefillId,
-  recordingSource,
   earlierSpecCount,
   canDelete,
 }: {
@@ -420,13 +365,6 @@ function EngagementDetail({
   eng: ConsultingEngagement;
   tab: TabKey;
   oversightExtra?: ReactNode;
-  notes: NoteRecord[];
-  tasks: TaskRecord[];
-  people: ActivityPerson[];
-  templateSets: TemplateSetLite[];
-  phaseBands: PhaseWindow[];
-  prefillId: string | null;
-  recordingSource: MeetingSource | null;
   earlierSpecCount: number;
   canDelete: boolean;
 }) {
@@ -437,7 +375,6 @@ function EngagementDetail({
     phases: eng.phases.length,
     milestones: eng.milestones.length,
     meetings: eng.meetings.length + eng.decisions.length,
-    activity: notes.length,
     oversight: eng.submittals.length + data.visits.filter((v) => v.engagementId === eng.id).length,
     documents: eng.documents.length,
   };
@@ -521,20 +458,9 @@ function EngagementDetail({
       </div>
 
       {tab === "overview" && <OverviewTab data={data} eng={eng} />}
-      {tab === "schedule" && <ScheduleTab eng={eng} tasks={tasks} templateSets={templateSets} phaseBands={phaseBands} />}
       {tab === "phases" && <PhasesTab data={data} eng={eng} />}
       {tab === "milestones" && <MilestonesTab eng={eng} quoteValue={q?.value || 0} />}
       {tab === "meetings" && <MeetingsTab eng={eng} />}
-      {tab === "activity" && (
-        <ActivityTab
-          eng={eng}
-          notes={notes}
-          tasks={tasks}
-          people={people}
-          prefillId={prefillId}
-          recordingSource={recordingSource}
-        />
-      )}
       {tab === "oversight" && <OversightTab data={data} eng={eng} extra={oversightExtra} />}
       {tab === "documents" && <DocumentsTab eng={eng} />}
     </div>
@@ -1405,12 +1331,6 @@ function MeetingsTab({ eng }: { eng: ConsultingEngagement }) {
                     ▶ Watch recording
                   </a>
                 )}
-                <Link
-                  href={`/design/engagements/${encodeURIComponent(eng.id)}?tab=activity&prefill=${encodeURIComponent(m.id)}`}
-                  style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none" }}
-                >
-                  Capture to Activity
-                </Link>
                 <button
                   style={{ ...SMALL_BTN, padding: "2px 7px", fontSize: 11, color: "#a0442b" }}
                   onClick={async () => { await deleteMeetingAction(eng.id, m.id); router.refresh(); }}

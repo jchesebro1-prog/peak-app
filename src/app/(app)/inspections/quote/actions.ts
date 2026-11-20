@@ -26,9 +26,7 @@ import { getTravelRates } from "@/lib/stores/pricing";
 import { driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizeLift, normalizePriceOverride, savedLift } from "@/lib/service-pricing";
-import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
-import { grossQuoteValue } from "@/lib/credit-line";
-import { netServiceTotal } from "@/lib/rewards/service-credit";
+import { grossQuoteValue, netServiceTotal, serviceRewardCredit } from "@/lib/credit-line";
 import { getLiftRate, inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
 import { approveKeepsAcceptedPrice, sourceForSave } from "@/lib/portal-quote-mode";
 
@@ -157,19 +155,15 @@ async function persist(formData: FormData, out?: { creditNote?: string }): Promi
     travelRates
   );
 
-  // #282 phase 3 (spec §5): the Rewards credit applies AFTER the engine's
-  // final total (the $25 rounding, a typed total and the lift are all in
-  // r.total). Re-checked here against the company's available credit right
-  // now — the posted amount is only ever clamped down; `create` is needed to
-  // grow it; a won/lost quote keeps its own; a customer change drops it.
-  const credit = await settleServiceCreditFor({
-    posted: formData.get("rewardCredit"),
-    total: Math.round(r.total),
-    customerId: customerId || null,
-    source: sourceForSave(existingForMarker?.source, "inspection"),
-    mayApply: can("create", user.roles),
-    prior: existingForMarker,
-  });
+  // The Rewards program is gone: nothing applies a new credit. A quote saved
+  // while it existed keeps the credit it has for the same customer, never
+  // more than the total.
+  const credit: { credit: number; notice?: string } = {
+    credit:
+      existingForMarker && (existingForMarker.customerId || null) === (customerId || null)
+        ? Math.min(serviceRewardCredit(existingForMarker), Math.round(r.total))
+        : 0,
+  };
   if (out && credit.notice) out.creditNote = credit.notice;
 
   const custName = (await nameFor(customerId)) || cust?.name || "";

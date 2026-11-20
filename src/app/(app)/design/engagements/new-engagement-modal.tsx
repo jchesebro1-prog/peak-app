@@ -6,7 +6,7 @@ import { CustomerCombobox } from "@/components/customer-combobox";
 import EntityQuickAdd, { INPUT, LABEL, type QuickAddValues } from "@/components/entity-quick-add";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 import type { ManualFee } from "@/lib/consulting-stages";
-import { validateSpan } from "@/lib/consulting-schedule";
+import { validateSpan } from "@/lib/consulting-stages";
 import type { CustomerLite } from "./data";
 import { createManualEngagementAction } from "./actions";
 

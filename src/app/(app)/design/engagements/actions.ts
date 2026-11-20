@@ -34,8 +34,7 @@ import {
   submitPhaseReview,
   updateMeeting,
 } from "@/lib/stores/engagements";
-import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee, pickManualPhases } from "@/lib/consulting-stages";
-import { validateSpan } from "@/lib/consulting-schedule";
+import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee, pickManualPhases, validateSpan } from "@/lib/consulting-stages";
 import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";

@@ -285,3 +285,12 @@ export function mergedConsultingAssumptions(
   const list = (stored || []).map((s) => s.trim()).filter(Boolean);
   return list.length ? list : DEFAULT_CONSULTING_ASSUMPTIONS;
 }
+
+/** The creation-step gate for an engagement's dates. Returns null when the
+ *  span is usable, or a message naming the field at fault. */
+export function validateSpan(startAt: number, endAt: number): string | null {
+  if (!Number.isFinite(startAt) || startAt <= 0) return "Pick a start date for this engagement.";
+  if (!Number.isFinite(endAt) || endAt <= 0) return "Pick an end date for this engagement.";
+  if (endAt <= startAt) return "The end date must be after the start date.";
+  return null;
+}

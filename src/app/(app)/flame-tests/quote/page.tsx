@@ -1,7 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { grossQuoteValue } from "@/lib/credit-line";
-import { serviceRewardCredit } from "@/lib/rewards/service-credit";
+import { grossQuoteValue, serviceRewardCredit } from "@/lib/credit-line";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfView } from "@/lib/quote-pdf/state";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
@@ -19,7 +18,6 @@ import { builderTiers } from "@/lib/pricing-tiers";
 import { knobPctFrom } from "@/lib/tier-seed";
 import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
-import { RewardCreditNotice } from "@/components/rewards/credit-notice";
 import { reviewLimitChipFor } from "@/lib/review-limits-server";
 import { ReviewLimitChip } from "@/components/review-limit-chip";
 
@@ -272,7 +270,6 @@ export default async function FlameTestQuotePage({
   return (
     <>
       <ActionError message={one(sp.err)} />
-      <RewardCreditNotice message={one(sp.credit)} />
       <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
         customers={customers}

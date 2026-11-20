@@ -14,8 +14,6 @@ import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 import { TravelModePanel } from "@/components/travel-mode-panel";
 import { LiftRentalPanel } from "@/components/lift-rental-panel";
-import { ServiceRewardCreditPanel } from "@/components/rewards/service-credit-panel";
-import { ServicePurchasePerksBanner } from "@/components/rewards/purchase-perks-banner";
 import {
   FLY_CREW_DEFAULTS,
   draftFromOverride,
@@ -709,8 +707,6 @@ export function QuoteBuilder({
                 placeholder="Search customer or venue…"
                 inputStyle={{ ...FIELD, fontWeight: 600 }}
               />
-              {/* #282 perks+points — standing purchase perks (informational). */}
-              <ServicePurchasePerksBanner customerId={customerId} />
             </div>
             <div>
               <label style={LABEL}>Quote name</label>
@@ -1151,19 +1147,6 @@ export function QuoteBuilder({
                   onReset={resetToAuto}
                   disabled={!r}
                   accent={accent}
-                />
-                <ServiceRewardCreditPanel
-                  customerId={customerId}
-                  quoteId={editingId}
-                  status={initial.status}
-                  portal={!!initial.portal}
-                  canApply={canApplyCredit}
-                  total={r ? total : 0}
-                  credit={rewardCredit}
-                  onCredit={(c) => {
-                    setRewardCredit(c);
-                    dirty();
-                  }}
                 />
               </div>
 

@@ -3,8 +3,6 @@ import { can } from "@/lib/team";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { allEngagements } from "@/lib/stores/engagements";
 import { activeUsers, reviewers } from "@/lib/users";
-import { tasksForDesign } from "@/lib/stores/tasks";
-import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { loadEquipmentPriceTable } from "@/lib/stores/equipment-map";
 import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
@@ -35,22 +33,17 @@ export default async function Page({
   const user = await requireUser();
   const sp = await searchParams;
 
-  const [designs, engagements, roster, prices, reviewerRows, templateSets, wireLabor, settings] = await Promise.all([
+  const [designs, engagements, roster, prices, reviewerRows, wireLabor, settings] = await Promise.all([
     getAllDesigns(),
     allEngagements(),
     activeUsers(),
     loadEquipmentPriceTable(),
     reviewers(),
-    taskTemplateSetsFor("design"),
     loadWireLaborRules(),
     getSettings(),
   ]);
-  // D149/#118 — the selected design's rows from the shared tasks collection
-  // (tasks.ts's designId pointer, added alongside this feature — no design
-  // task UI existed before it). Mirrors the estimator page's tasksForQuote.
   // #316: designs drawing an Estimator quote offer "Open estimate →", not Add to Quotes (one batched read).
   const estimateLinks = await estimateLinksForDesigns(designs);
-  const designTasks = sp.id ? await tasksForDesign(sp.id) : [];
 
   // Derived, not stored: the design record carries no back-pointer, so the
   // reverse lookup is built here by scanning engagements each load — the two
@@ -80,8 +73,6 @@ export default async function Page({
       reviewerNames={reviewerRows.map((u) => u.name)}
       engagementsForDesign={engagementsForDesign}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
-      designTasks={designTasks}
-      templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
       venueTypes={venueTypesFrom(settings.venueTypes)}
     />
     </CanMapProvider>
