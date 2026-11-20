@@ -26,7 +26,7 @@ programs plus written specs the long-term coding team can fold into their own ap
 - A won estimate is only a status change; it creates nothing.
 - Tasks are removed entirely. Rewards are removed. The Daylite import is removed. Google Drive is removed as a catalog photo source. Consulting is removed (no read-only consulting quotes).
 - The Assessments module (`AS-####`, findings register) is added to Peak Service.
-- Flame results: IFR and Replace.
+- Flame results: IFR and Replace. Later the same day: Failed stays its own option, so the counts are Passed, IFR, Replace, Failed.
 - Not answered, so Claude's recommendation applies: spec text stays editable on catalog parts; client packages no longer include a specification file; Grid-only catalog fields (riser tags, cable diameter, designator code, symbol drawings) are removed.
 
 ## Deliverables
@@ -53,8 +53,7 @@ assessments are no longer accepted); take a `db:export`; afterwards revoke the G
 connections, Krisp keys and Anthropic key at their source and rebuild both native apps.
 
 Open with Jeff: keep or strip the "Credit applied" line on old Rewards-era estimates; the new
-estimate acceptance sentence ("To proceed, sign and return this quote."); whether "Replace"
-replacing "Failed" in flame results is what he meant.
+estimate acceptance sentence ("To proceed, sign and return this quote.").
 
 Source: the four stage reports in this session and `../removal-log.md`.
 
@@ -69,7 +68,7 @@ The offline program follows `flame-inspections-spec.md` except where a single of
 - Venue Assessments are drawn from `venue-assessment-form.json`, embedded in the file. Sketch pads are replaced by a photo upload per pad; the 3D preview, travel auto-fill from routing, the optional findings merge/split tools and Fill down / Mark range spare on the line set schedule are not ported.
 - The Assessments module (`AS-####`, findings register, venue profiles) is included: all 9 scopes, 55 sections, 284 questions and 51 gate rules are embedded as data and read by a port of the evaluator. Not ported: offline sync, Blob photo storage, the "Quote these findings" hand-off, emailing reports, admin-added pick-list values, assessment reminders.
 - Not included: the dashboard map, calendar holds, the customer portal, repairs flagged from inspections, the three report layout variants (one layout each), rewards credit.
-- Flame results are counted as Passed, IFR and Replace (Jeff, 2026-11-20). They are stored in the app's fields `passed`, `retreated` (IFR) and `failed` (Replace).
+- Flame results are counted as Passed, IFR, Replace and Failed — Failed is its own count (Jeff, 2026-11-20, corrected the same day). Stored as `passed`, `retreated` (IFR), `failed`, plus a new per-venue `replace` field the app never had. The Failed / Replace wording on the report is Claude's: Failed = re-treat and retest or replace; Replace = cannot be treated, must be replaced.
 
 ## Peak Design program vs. the app
 
