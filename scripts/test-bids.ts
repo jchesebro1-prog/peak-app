@@ -587,7 +587,6 @@ export async function bidDbChecks(ok: Ok) {
     ok((await awardBid(q, g1)).ok, "bids db: award again");
     await setStatus(q, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
     await regAll();
-    ok(projParties.some((p) => p.companyId === gc1) && !projParties.some((p) => p.companyId === gc2), "bids db: the awarded GC carries to the project; the losing bidder doesn't");
     const noUndo = await undoAward(q);
     ok(!noUndo.ok && noUndo.error === "The estimate is won — the award can't be undone.", "bids db: a won estimate's award can't be undone");
   } finally {

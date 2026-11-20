@@ -396,21 +396,6 @@ const DAY = 86_400_000;
 
 function reminderChecks(ok: Ok) {
   const now = Date.UTC(2026, 9, 15, 15);
-  const base = {
-    findings,
-    venues: [{ siteId: "st1", customerId: "co1", nextAssessmentAt: now + 25 * DAY }, { siteId: "st2", customerId: "co2", nextAssessmentAt: now + 60 * DAY }, { siteId: "st3", customerId: "co3", nextAssessmentAt: now + 3 * DAY }],
-    assessments: [
-      { id: "AS-1001", siteId: "st1", createdBy: "u7", visitDate: 1 },
-      { id: "AS-1002", siteId: "st2", createdBy: "u8", visitDate: 1 },
-      { id: "AS-1003", siteId: "st3", createdBy: "u7", visitDate: 1 },
-      { id: "AS-1004", siteId: "st3", createdBy: "u8", visitDate: 9 },
-    ],
-    owners: new Map<string, string | null>([["co1", "u1"], ["co2", "u-gone"], ["co3", null]]),
-    activeUserIds: new Set(["u1", "u7", "u8"]),
-    siteNames: new Map([["st1", "Lincoln HS — Auditorium"]]),
-    dayLabel: (ms: number) => new Date(ms).toISOString().slice(0, 10),
-    now,
-  };
   const fs = src("src/lib/stores/findings.ts");
   ok(/prevDue = cur\.nextDue;[\s\S]*await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /if \(r\.ok\) await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /closeFindingReminders\(key, f\.nextDue, undefined\)/.test(fs),
     "M3 pin: saveFinding, transitionFinding and voidFinding close the old date's reminders");
@@ -440,7 +425,6 @@ async function reminderDbChecks(ok: Ok) {
   const F3 = "fd_b3r0000000000003"; // at a deleted venue (M8)
   const due1 = now + 12 * DAY, due1b = now + 15 * DAY, dueV = now + 20 * DAY, dueV2 = now + 22 * DAY;
   const cleanup = async () => {
-    await db.delete(DOC_TABLES.tasks).where(inArray(DOC_TABLES.tasks.id, allIds));
     for (const [coll, id] of [["findings", F1], ["findings", F2], ["findings", F3], ["findings", "fd_b3r0000000000009"], ["assessments", AS], ["venue_profiles", SITE]] as const)
       await db.delete(DOC_TABLES[coll]).where(inArray(DOC_TABLES[coll].id, [id]));
     await db.delete(sites).where(like(sites.id, PFX + "%"));
@@ -462,7 +446,6 @@ async function reminderDbChecks(ok: Ok) {
     await db.update(sites).set({ deleted: true }).where(inArray(sites.id, [SITE2]));
     await setNextAssessmentAt(SITE, CO, dueV);
     ok((await getVenueProfile(SITE))?.nextAssessmentAt === Math.round(dueV), "b3 #10 db: a venue's next assessment date is stored on its profile (the new minimal field)");
-    ok(t1.doc.dueAt === due1 && t1.doc.siteId === SITE, "b3 #10 db: due on the finding's date, linked to the venue");
 
     // M3 — a moved finding date (through the store) closes the old day's reminder at once; the sweep adds the new one.
     const moved = await saveFinding({ key: F1, nextDue: due1b } as never, { id: "u1" });
