@@ -21,7 +21,7 @@ import { isLaborSku } from "./wire-labor";
 import { EQUIP_TIERS, NOT_INCLUDED, cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
 import { GRID_SCOPE_OF_SYS, UNSCOPED, type GridLayer } from "./grid-scopes";
 import { resolveFixture, type FixtureCatalogPart, type FixtureResolvable } from "@/lib/fixture-assemblies";
-import { isInternalCategory } from "@/lib/portal-visibility";
+import { isInternalCategory } from "@/lib/catalog-internal";
 
 export const ASSEMBLY_PART_PREFIX = "asm:";
 export const ALLOWANCE_PART_PREFIX = "allow:";

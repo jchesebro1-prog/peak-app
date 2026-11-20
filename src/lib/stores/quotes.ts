@@ -8,7 +8,6 @@ import {
   listDocsFiltered,
   casDocKey,
   patchDoc,
-  patchDocKey,
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
@@ -406,13 +405,8 @@ export type Quote = {
    *  patchQuoteBid under the row lock; update() drops it. Content (QUOTE_CONTENT_FIELDS): the awarded bidder
    *  prints as "Prepared for" and the bid line prints under the meta grid; never bumps updatedAt. */
   bid?: QuoteBid | null;
-  /** #348 slice 6 (Jeff 2026-10-15) — "Scope only" for good: once this estimate has had a GC/EC bidder (or was
-   *  split off one that had), the owner's portal shows it as a BOM with no prices, even after every bidder row is
-   *  removed. Store-owned: written only by markBidScopeOnly (addBidder, and a party write that revives a removed
-   *  bidder row — a key-level write that never bumps updatedAt) and by create() when a SERVER caller passes
-   *  `opts.bidScopeOnly` (Move system → New estimate and Copy system → New estimate, same customer only) —
-   *  buildQuote never copies it from `partial`, and update() drops it, so no client save can set or clear it.
-   *  Never content, never snapshotted. Read through portalQuoteHasBidders (stamp OR bidder rows incl. deleted). */
+  /** A stored stamp of the removed customer portal (#348 slice 6: the owner's portal showed the estimate without
+   *  prices once it had a bidder). Nothing writes or reads it any more; update() still drops it from incoming saves. */
   bidScopeOnly?: true;
   /** Box goods sale (spec 2026-10-21) — an Estimator system estimate that sells equipment + freight only: the
    *  customer document is the BOM view and the client link the itemized list. Absent = false; stored only as `true`
@@ -675,35 +669,6 @@ export function isImportedHistoryQuote(q: Pick<Quote, "source">): boolean {
   return q.source === "daylite";
 }
 
-type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "portalAcceptance" | "portalReview">;
-
-/** Customer portal list rule: the grant's customer's published quotes plus
- *  their own self-serve drafts (the retired estimate builder's
- *  "portal-self-serve" and #245's "portal-catalog" review quotes) — never an
- *  internal draft, never imported Daylite history. #248 Task 4 (carried from
- *  Task 2 review): a "portal-service" DRAFT is deliberately NOT listed —
- *  service quotes are never review quotes (Generate always sends them at
- *  once, firm), so the only way one is ever in draft is a staff recall
- *  (setStatus back to draft) — and that must not surface an in-progress
- *  staff edit to the customer. A sent/won/etc portal-service quote is still
- *  listed via the `status !== "draft"` branch below. */
-export function portalListsQuote(q: PortalQuoteFields, customerId: string): boolean {
-  if (!customerId || q.customerId !== customerId) return false;
-  if (isImportedHistoryQuote(q)) return false;
-  return (
-    q.status !== "draft" ||
-    q.source === "portal-self-serve" ||
-    q.source === "portal-catalog"
-  );
-}
-
-/** Customer portal Accept rule (button AND server action): a listed quote,
- *  sent, not already accepted, and not awaiting Peak's re-review (#245 Task
- *  13 — a refresh that turned up a price-on-request line, spec §4.5). */
-export function portalCanAcceptQuote(q: PortalQuoteFields, customerId: string): boolean {
-  return portalListsQuote(q, customerId) && q.status === "sent" && !q.portalAcceptance && !q.portalReview;
-}
-
 export type ApprovalGateAction = "send" | "won";
 export type ApprovalGateResult = { ok: true } | { ok: false; error: string };
 
@@ -848,18 +813,6 @@ export async function getMany(ids: readonly string[]): Promise<Map<string, Quote
   return out;
 }
 
-/** The live (not lost) renewal quote already minted for a completed job /
- *  record this cycle, if any (IDEAS #36 idempotence). */
-export async function byRenewalOf(recordId: string): Promise<Quote | null> {
-  if (!recordId) return null;
-  const list = await listDocs<Quote>("quotes");
-  const live = list.filter(
-    (q) => q.renewalOf === recordId && q.status !== "lost"
-  );
-  live.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return live[0] || null;
-}
-
 /**
  * The quote document create() writes, built without writing it. Pure: the
  * caller resolves the pipeline (null for service quotes) and the timestamp.
@@ -925,18 +878,14 @@ export function buildQuote(
 }
 
 /** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
-export async function create(partial: Partial<Quote> = {}, opts: { bidScopeOnly?: boolean } = {}): Promise<Quote> {
+export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
   const t = Date.now();
   const quoteType = partial.quoteType || "system";
   // System quotes enter their pipeline at its first stage (spec §3.4); a caller-chosen
   // pipeline is honoured when it exists, else the Settings default.
   const pipes = carriesPipeline(quoteType) ? await loadPipelines() : null;
   const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
-  // #348 slice 6: the Scope-only stamp comes only from the server-side second argument, never from `partial`.
-  const build = (id: string): Quote => {
-    const q = buildQuote(id, partial, quoteType, pl, t);
-    return opts.bidScopeOnly === true ? { ...q, bidScopeOnly: true } : q;
-  };
+  const build = (id: string): Quote => buildQuote(id, partial, quoteType, pl, t);
   // Explicit caller-supplied id (not a minted one) — no race to guard, keep
   // the prior upsert semantics. #223: an id that already exists keeps its
   // number — upsertDoc never replaces a stored estNo/estSuffix (doc-store).
@@ -979,7 +928,7 @@ export async function update(
     delete clean.packagePeakHeader;
     // #348: bid details are patchQuoteBid's alone.
     delete clean.bid;
-    // #348 slice 6: the Scope-only stamp is markBidScopeOnly's alone — a save can never set or clear it.
+    // The removed portal's Scope-only stamp: a save can never set or clear it.
     delete clean.bidScopeOnly;
     // #368: the Revise re-price summary is setStatus's alone.
     delete clean.repricedOnRevise;
@@ -1039,16 +988,6 @@ export async function updateCheckingLiveKey(id: string, baseKey: string | undefi
     const after = quote ? await get(id) : null;
     return { quote, conflict: null, ...(after ? { liveKey: liveKey(after) } : {}) };
   });
-}
-
-/** #348 slice 6 (Jeff 2026-10-15) — the ONLY writer of `Quote.bidScopeOnly` after create: set it (never clear
- *  it) as one key-level write (`doc || {bidScopeOnly: true}` in SQL), the setAssistNudge precedent — no
- *  read-modify-write, so it can't race an Estimator save; estNo/estSuffix and updatedAt are left as stored (no
- *  version bump, nothing stales). Joins the caller's transaction (addBidder's row lock). False = missing / deleted. */
-export async function markBidScopeOnly(quoteId: string): Promise<boolean> {
-  if (!quoteId) return false;
-  const res = await patchDocKey("quotes", [quoteId], "bidScopeOnly", true);
-  return res.ids.length > 0;
 }
 
 /* ---- revisions (punch item 24) ---- */
@@ -1767,15 +1706,6 @@ export function asReopened(q: Quote, plan: ReopenPlan | null): Quote {
  * callers — including the plain quotes-list status buttons — could push an
  * unapproved quote straight to `won`).
  *
- * `"engine-owned-flow"` is the ONLY value, and it exists for exactly four
- * call sites: repairs/quote, inspections/quote, flame-tests/quote,
- * rentals/quote. Each of those builder screens marks its OWN quote won as
- * the last step of a self-contained accept flow (persist →
- * setStatus(id,"won") → spawn the job) — there is no separate estimator
- * review queue in that flow to check an approval record against, and gating
- * it would just break those screens outright. Do not reach for this
- * anywhere else; every other caller must go through the real gate.
- *
  * `"historical-import"` exists for the CSV importer (`/import` registry) only.
  * An imported row records a status a quote ALREADY reached in whatever system
  * it came from — it is not a decision being made in this app, and there is no
@@ -1783,12 +1713,15 @@ export function asReopened(q: Quote, plan: ReopenPlan | null): Quote {
  * Without this, importing a spreadsheet of won/lost history would throw on the
  * first non-draft row. The importer is already gated behind `manage_users`.
  *
- * `"portal-firm"` exists for `sendPortalFirm` (src/lib/portal-quotes.ts) only,
- * and opens `sent` only — a portal quote reaches `won` through the real gate.
+ * `"engine-owned-flow"` was the service quote builders' bypass (repairs,
+ * inspections, flame tests, rentals — each marked its OWN quote won as the last
+ * step of a self-contained accept flow). Those builders are gone and nothing
+ * in `src/` passes it any more; it stays because the test suites move their
+ * fixture quotes to sent / won with it. Do not reach for it in app code. (The
+ * portal's `"portal-firm"` bypass was removed with the portal.)
  */
 export type SetStatusOpts = {
-  // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
-  bypassApprovalGate?: "engine-owned-flow" | "historical-import" | "portal-firm";
+  bypassApprovalGate?: "engine-owned-flow" | "historical-import";
   /** #287: move only if the quote's `updatedAt` still equals this (the
    *  version the sender was shown — Approve & send →). Checked under the row
    *  lock before anything is written; a mismatch throws QuoteVersionChanged. */
@@ -1818,9 +1751,6 @@ export function resolveStatusGate(
     opts.bypassApprovalGate === "historical-import"
   )
     return { ok: true };
-  // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
-  // It opens the SEND only — Approve (→ won) stays on the normal gate.
-  if (opts.bypassApprovalGate === "portal-firm" && status === "sent") return { ok: true };
   if (status !== "won" && status !== "sent") return { ok: true };
   return requireApprovalToAdvance(review, status === "won" ? "won" : "send");
 }

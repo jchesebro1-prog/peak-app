@@ -1,7 +1,6 @@
 /**
  * Pure halves of catalog/actions.ts, so the harness can test them.
  */
-import { normalizeVisibility } from "@/lib/portal-visibility";
 import { isFabricPart } from "@/lib/fabric-part";
 import { cleanTypeCode } from "@/lib/design/device-types";
 import { cleanTagFields, type TagFields } from "@/lib/design/conduit-riser/tags";
@@ -29,9 +28,6 @@ export type OptionalPartFields = {
   curtainAreaRate?: number;
   /** #227 — Fabric parts only: bolt width in inches. */
   boltWidthIn?: number;
-  /** #245 Task 5 — an explicit Show/Hide portal-visibility override; Auto is
-   *  stored as absent (undefined clears through mergeUpsert). */
-  portalVisibility?: "show" | "hide" | undefined;
   /** #292 — Fabric parts only: weight, its basis and flame rating (cut sheets). */
   oz?: number;
   ozBasis?: "lin-yd" | "sq-yd";
@@ -70,10 +66,6 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
   if (fd.has("designatorCode")) out.designatorCode = cleanTypeCode(fd.get("designatorCode")) ?? undefined;
   if (TAG_DEFAULT_KEYS.some((k) => fd.has(`tag_${k}`))) out.tagDefaults = tagDefaultsFromForm(fd);
   if (fd.has("cableOdIn")) out.cableOdIn = cleanCableOd(fd.get("cableOdIn")) ?? undefined;
-  if (fd.has("portalVisibility")) {
-    const v = normalizeVisibility(fd.get("portalVisibility"));
-    out.portalVisibility = v === "auto" ? undefined : v;
-  }
   // #296: rack data — same rule (only submitted keys; a blank clears). An
   // invalid value is dropped here; rackFactsProblem refuses the save first.
   const rack = cleanRackFacts(rackFactsFromForm(fd));

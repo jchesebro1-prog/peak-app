@@ -1,6 +1,5 @@
 // SERVER ONLY — the photo-sheet import's server lane (URL + Drive items).
 import { blobEnabled, deleteBlob, putBlob } from "@/lib/blob";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { attachDocument, createDocument, documentLinksForParts, getDocument, getDocuments, setImageOrder } from "@/lib/stores/part-documents";
 import { NO_DRIVE_REASON } from "./photo-sheet-io";
 
@@ -191,6 +190,5 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
       outcomes.push({ key: d.key, ok: false, error: `Stopped on this photo: ${errorText(e)}` });
     }
   }
-  if (outcomes.some((o) => o.ok)) invalidatePortalIndex();
   return { ok: true, outcomes, remaining: work.length - processed };
 }

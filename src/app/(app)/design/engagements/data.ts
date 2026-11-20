@@ -8,7 +8,6 @@ import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getAllDesigns } from "@/lib/stores/designs";
-import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
 import { activeUsers } from "@/lib/users";
 import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 
@@ -62,13 +61,12 @@ export type ConsultingData = {
 
 export async function loadConsultingData(): Promise<ConsultingData> {
   // No quote→engagement sweep: a quote status change no longer creates or advances any record.
-  const [engagements, quotes, designs, users, settings, visits, customerDocs] = await Promise.all([
+  const [engagements, quotes, designs, users, settings, customerDocs] = await Promise.all([
     allEngagements(),
     getAllQuotes(),
     getAllDesigns(),
     activeUsers(),
     getSettings(),
-    allVisits(),
     allCustomers(),
   ]);
 
@@ -93,23 +91,8 @@ export async function loadConsultingData(): Promise<ConsultingData> {
     designsById[d.id] = { id: d.id, name: d.name, venue: d.venue };
   }
 
-  const companyIds = new Set(engagements.map((e) => e.companyId).filter(Boolean));
-  const visitLites: VisitLite[] = visits
-    // #34: unscheduled lead requests (null startAt) don't ride the consulting
-    // Oversight timeline until scheduled — VisitLite stays non-nullable.
-    .filter(
-      (v: SiteVisit) =>
-        v.startAt != null && (v.engagementId || (v.customerId != null && companyIds.has(v.customerId)))
-    )
-    .map((v: SiteVisit) => ({
-      id: v.id,
-      customerId: v.customerId || "",
-      reason: v.reason,
-      venue: v.venue,
-      startAt: v.startAt ?? 0,
-      assignedTo: v.assignedTo,
-      engagementId: v.engagementId || null,
-    }));
+  // Site visits were removed with Venue Assessments: the Oversight tab lists none.
+  const visitLites: VisitLite[] = [];
 
   return {
     engagements,

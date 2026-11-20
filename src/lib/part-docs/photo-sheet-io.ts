@@ -2,12 +2,10 @@
 import ExcelJS from "exceljs";
 import { parseCsv } from "@/app/(app)/import/parse";
 import { cellText } from "@/lib/import/xlsx-to-csv";
-import { departmentOfCategory } from "@/lib/portal-departments";
 import { list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { listProjects } from "@/lib/stores/grid-projects";
 import { allDocumentLinks, allDocuments, detachedDocumentLinks } from "@/lib/stores/part-documents";
-import { getDepartments } from "@/lib/stores/portal-departments";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { buildPartMatcher, driveIdOf, exportRows, PHOTO_SHEET_HEADERS, PHOTO_SHEET_NAME, rowsToGrid, type DriveListedPhoto, type PartMatcher, type PhotoSheetRow, type SheetImage } from "./photo-sheet";
@@ -135,9 +133,9 @@ export async function loadPhotoSheetContext(listDrive: ListDrive = listDrivePhot
   };
 }
 
-/** Export rows: every part quoted anywhere or in a portal department. */
+/** Export rows: every part quoted anywhere. */
 export async function buildPhotoSheetExport(listDrive: ListDrive = listDrivePhotosForSheet): Promise<PhotoSheetRow[]> {
-  const [ctx, quotes, gridProjects, generated, departments, fixtures] = await Promise.all([loadPhotoSheetContext(listDrive), allQuotes(), listProjects(), allGeneratedSpecs(), getDepartments(), listFixtures()]);
+  const [ctx, quotes, gridProjects, generated, fixtures] = await Promise.all([loadPhotoSheetContext(listDrive), allQuotes(), listProjects(), allGeneratedSpecs(), listFixtures()]);
   const bySku = new Map(ctx.parts.map((p) => [p.sku, p] as const));
   // #332: Grid `asm:` assemblies count their members as quoted.
   const fixtureById = new Map(fixtures.map((f) => [f.id, f] as const));
@@ -145,8 +143,6 @@ export async function buildPhotoSheetExport(listDrive: ListDrive = listDrivePhot
     const p = bySku.get(sku);
     return !!p && p.category !== "Labor";
   });
-  const deptCats = departmentOfCategory(departments);
   const include = new Set<string>([...stats.keys()]);
-  for (const p of ctx.parts) if (deptCats.has(p.category)) include.add(p.sku);
   return exportRows(ctx.parts, include, ctx.imagesBySku, ctx.driveNames);
 }

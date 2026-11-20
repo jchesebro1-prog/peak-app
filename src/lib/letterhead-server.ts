@@ -74,7 +74,7 @@ async function bakedLetterhead(): Promise<Buffer | null> {
   try {
     // A LITERAL path (static fs/path imports): file tracing resolves it to the one file. A variable here
     // makes Turbopack trace the whole project. The harness checks it equals BAKED_LETTERHEAD (letterhead-path.ts).
-    const buf = await readFile(path.join(process.cwd(), "src/app/(app)/flame-tests/letter/peak-letterhead.jpg"));
+    const buf = await readFile(path.join(process.cwd(), "src/app/(app)/estimator/peak-letterhead.jpg"));
     if (jpegInfo(buf)) return buf;
     throw new Error("not a readable JPEG");
   } catch (err) {

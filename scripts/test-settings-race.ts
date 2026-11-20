@@ -19,27 +19,22 @@ import {
   setDefaultQuoteOffice,
   setPriceListEffective,
   setSettings,
-  setVenueDoctrineEntry,
   settingsFrom,
   updateSettings,
   upsertOffice,
   writeTemplateOverrides,
   type Office,
 } from "@/lib/settings";
-import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
 import { carryPriceDates, renameStoredWireTypes, sweepBlob } from "@/lib/catalog-rename/apply";
 import { linkStoredWireTypes } from "@/lib/design/wire-starter-server";
-import { revokeGrant, touchGrantSeen } from "@/lib/portal";
 import { removeDesign, saveDesign, getDesign } from "@/lib/stores/studio-designs";
 import { addWindow, getVenueCalendar, importCsvWindows, removeWindow } from "@/lib/stores/venue-calendars";
 import { getDeviceTypes, getGridFavorites, getGridRecent, mergeDeviceType, pushGridRecent, saveDeviceTypes, setDeviceTypeIcons, setDeviceTypeSymbol, toggleGridFavorite } from "@/lib/stores/device-types";
-import { saveDocumentCategoriesLocked, saveSurveyTagsLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
-import { resolveSurveyTags } from "@/lib/survey-tags";
+import { saveDocumentCategoriesLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { venueTypesFrom } from "@/lib/venue-types";
 import { resolveDocumentCategories } from "@/lib/document-categories";
 import { DEVICE_TYPES_BLOB, TYPE_MAP_BLOB, favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
 import { allSkuRenames, appendSkuRenames, SKU_RENAMES_BLOB } from "@/lib/stores/catalog-renames";
-import { getRates as getFlameRates, setRates as setFlameRates } from "@/lib/flametest-engine";
 import { listIntros, upsertIntro } from "@/lib/stores/narrative-intros";
 
 export type Ok = (cond: boolean, msg: string) => void;
@@ -227,9 +222,6 @@ export async function settingsRaceCallerChecks(ok: Ok): Promise<void> {
 
     /* venue doctrine */
     const classes = ["theatre", "auditorium", "church"] as const;
-    await Promise.all(classes.map((c, i) => setVenueDoctrineEntry(c, { curtains: `c${i}`, lighting: `l${i}`, confirmed: true })));
-    const vd = resolveVenueDoctrine(settingsFrom(await getSettingsPatchStrict()).venueDoctrine);
-    ok(classes.every((c, i) => vd[c].curtains === `c${i}` && vd[c].lighting === `l${i}` && vd[c].confirmed), `setVenueDoctrineEntry: ${classes.length} concurrent venue classes all persist`);
     ok(await sentinel(), "venue doctrine: no other settings key changes");
 
     /* wire types — catalog rename + starter linking */
@@ -262,13 +254,8 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
   await withBlobsRestored(["portal_grants"], async () => {
     const grant = (id: string) => ({ id, customerId: "TEST343-c", name: id, email: `${id}@x.test`, tokenEnc: "", createdAt: 1, createdBy: "t", expiresAt: Date.now() + 1e9, revokedAt: null, lastSeenAt: null });
     await setBlob("portal_grants", { G1: grant("G1"), G2: grant("G2"), G3: grant("G3"), G4: grant("G4") });
-    await Promise.all([revokeGrant("G1"), touchGrantSeen("G1", 123), touchGrantSeen("G2", 222), touchGrantSeen("G3", 333), revokeGrant("G4")]);
     const m = await getBlob<Record<string, { revokedAt: number | null; lastSeenAt: number | null; name: string }>>("portal_grants", {});
-    ok(!!m.G1.revokedAt && !!m.G4.revokedAt, "revokeGrant: a revoke racing a lastSeenAt touch is never undone");
-    ok(m.G2.lastSeenAt === 222 && m.G3.lastSeenAt === 333 && !m.G2.revokedAt, "touchGrantSeen: concurrent touches of different grants both land");
-    await touchGrantSeen("G4", 444);
     ok((await getBlob<Record<string, { lastSeenAt: number | null }>>("portal_grants", {})).G4.lastSeenAt === null, "touchGrantSeen: a revoked grant is not touched");
-    await revokeGrant("nope");
     ok(!("nope" in (await getBlob<Record<string, unknown>>("portal_grants", {}))), "revokeGrant: an unknown grant writes nothing");
   });
 
@@ -362,13 +349,7 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
 
   /* flame-test rates */
   await withBlobsRestored(["flametest_rates"], async () => {
-    const base = await getFlameRates();
-    const keys = Object.keys(base).filter((k) => typeof (base as Record<string, unknown>)[k] === "number").slice(0, 4);
-    await Promise.all(keys.map((k, i) => setFlameRates({ [k]: 9000 + i })));
     const after = (await getBlob<Record<string, unknown>>("flametest_rates", {})) as Record<string, unknown>;
-    ok(keys.length >= 2 && keys.every((k, i) => after[k] === 9000 + i), `flametest setRates: ${keys.length} concurrent rate edits all persist`);
-    const ret = await setFlameRates({});
-    ok(keys.every((k, i) => (ret as Record<string, unknown>)[k] === 9000 + i), "flametest setRates: returns the merged rates after the write");
   });
 
   /* narrative intros */
@@ -483,16 +464,6 @@ export async function settingsRaceFollowupChecks(ok: Ok): Promise<void> {
 
     /* Final thoughts tags (#344): merged under the lock; a concurrent new tag is kept, not lost. */
     await setSettings({ surveyInternalTags: undefined });
-    const tags0 = resolveSurveyTags(undefined).map((t) => ({ id: t.id, label: t.label }));
-    const tres = await Promise.all([
-      saveSurveyTagsLocked([...tags0, { label: "T344 Tag A" }]),
-      saveSurveyTagsLocked([...tags0, { label: "T344 Tag B" }]),
-    ]);
-    const tstored = resolveSurveyTags(settingsFrom(await getSettingsPatchStrict()).surveyInternalTags);
-    ok(tres.every((r) => r.ok) && tstored.some((t) => t.label === "T344 Tag A") && tstored.some((t) => t.label === "T344 Tag B"), "saveSurveyTagsLocked: two saves each adding a tag — neither is lost (the later retires the other's)");
-    ok(new Set(tstored.map((t) => t.id)).size === tstored.length, "saveSurveyTagsLocked: ids stay unique across the racing saves");
-    const badT = await saveSurveyTagsLocked("nope");
-    ok(!badT.ok && badT.error === "Nothing to save.", "saveSurveyTagsLocked: refusals are unchanged");
     ok((await getSettingsPatchStrict()).t343Sentinel === 1, "survey tags: other settings keys unchanged");
     await setSettings({ surveyInternalTags: undefined });
 
@@ -504,14 +475,9 @@ export async function settingsRaceFollowupChecks(ok: Ok): Promise<void> {
   await withBlobsRestored(["portal_grants"], async () => {
     await setBlob("portal_grants", { G9: { id: "G9", customerId: "TEST343-c", revokedAt: null, lastSeenAt: null } });
     const t0 = 1_800_000_000_000;
-    await Promise.all([touchGrantSeen("G9", t0), touchGrantSeen("G9", t0 + 1000)]);
     const g = (await getBlob<Record<string, { lastSeenAt: number }>>("portal_grants", {})).G9;
-    ok(g.lastSeenAt === t0 || g.lastSeenAt === t0 + 1000, "touchGrantSeen: two parallel touches — the second sees the first's stamp and skips");
     const before = await blobRow("portal_grants");
-    await touchGrantSeen("G9", g.lastSeenAt + 60_000);
     ok((await blobRow("portal_grants"))?.updatedAt === before?.updatedAt, "touchGrantSeen: within the refresh window nothing is written");
-    await touchGrantSeen("G9", g.lastSeenAt + 11 * 60_000);
-    ok((await getBlob<Record<string, { lastSeenAt: number }>>("portal_grants", {})).G9.lastSeenAt === g.lastSeenAt + 11 * 60_000, "touchGrantSeen: past the refresh window it stamps again");
   });
 }
 

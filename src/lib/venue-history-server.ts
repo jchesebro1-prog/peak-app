@@ -11,10 +11,6 @@ import { getAllSites } from "@/lib/identity/sites";
 import { getCompanies } from "@/lib/identity/companies";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { allEngagements } from "@/lib/stores/engagements";
-import { getAll as getAllFlame } from "@/lib/stores/flame-jobs";
-import { getAll as getAllInspections } from "@/lib/stores/inspections";
-import { getAll as getAllSurveys } from "@/lib/stores/surveys";
-import { allVisits } from "@/lib/stores/site-visits";
 import { notesForSite } from "@/lib/stores/notes";
 import {
   venueDocLocId,
@@ -38,7 +34,7 @@ export type VenueDirRow = {
 
 /** Jeff 2026-10-15 #11 — the directory reads only these fields of each record (a SQL projection), never whole
  *  quotes / jobs; the same stores the history below reads in full. */
-type ActivityRow = { id: string; customerId?: string | null; locationId?: string | null; companyId?: string | null; siteIds?: string[]; updatedAt?: number; startAt?: number | null };
+type ActivityRow = { id: string; customerId?: string | null; locationId?: string | null; companyId?: string | null; siteIds?: string[]; updatedAt?: number };
 function activityRows(coll: CollectionName, fields: readonly string[]): Promise<ActivityRow[]> {
   return listDocsFiltered<ActivityRow>(coll, { fields });
 }
@@ -50,19 +46,14 @@ const AT = ["customerId", "locationId", "updatedAt"] as const;
  * so the directory is a single pass over the data.
  */
 export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
-  const [sites, quotes, engagements, flame, inspections, surveys, visits] =
+  const [sites, quotes, engagements] =
     await Promise.all([
       getAllSites(),
       activityRows("quotes", AT),
       activityRows("consulting_engagements", ["companyId", "siteIds", "updatedAt"]),
-      activityRows("flame_jobs", AT),
-      activityRows("inspections", AT),
-      activityRows("surveys", AT),
-      activityRows("site_visits", ["customerId", "locationId", "startAt"]),
     ]);
 
   // Bucket the latest activity ts per `${customerId}|${locationId}`.
-  const dirNow = Date.now();
   const latest = new Map<string, number>();
   const bump = (customerId: string | null | undefined, locationId: string | null | undefined, ts: number) => {
     if (!customerId || !locationId || !ts) return;
@@ -70,16 +61,7 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
     const cur = latest.get(k) ?? 0;
     if (ts > cur) latest.set(k, ts);
   };
-  for (const list of [quotes, flame, inspections, surveys])
-    for (const r of list) bump(r.customerId, r.locationId, Number(r.updatedAt) || 0);
-  // Site visits can be scheduled in the future; clamp to now so a scheduled
-  // visit doesn't sort the venue to the top of "most recently active" (and
-  // so timeAgo doesn't render a future ts as "just now").
-  for (const v of visits) {
-    // #34: lead-borne requests may carry no customer / no schedule yet.
-    if (v.customerId == null || v.startAt == null) continue;
-    bump(v.customerId, v.locationId, Math.min(v.startAt, dirNow));
-  }
+  for (const r of quotes) bump(r.customerId, r.locationId, Number(r.updatedAt) || 0);
   // Engagements use companyId + siteIds (docLocId values), not customerId/locationId.
   for (const e of engagements) {
     if (!e.companyId) continue;
@@ -112,14 +94,10 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
   const companyId = site.companyId;
   const locId = venueDocLocId(site);
 
-  const [quotes, engagements, flame, inspections, surveys, visits, notes] =
+  const [quotes, engagements, notes] =
     await Promise.all([
       getAllQuotes(),
       allEngagements(),
-      getAllFlame(),
-      getAllInspections(),
-      getAllSurveys(),
-      allVisits(),
       // #323 — notes filed on this venue (sites.id), e.g. a meeting to-do decided "note"
       notesForSite(site.id).catch((e: unknown) => {
         console.error("[venue-history] notes read failed —", (e as Error)?.message || e);
@@ -143,39 +121,6 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
       href: "/design/engagements/" + encodeURIComponent(e.id),
     });
   }
-  for (const j of flame.filter((r) => docMatchesVenue(r, companyId, locId))) {
-    rows.push({
-      id: j.id, kind: "flame", title: j.venue || j.customer || j.id, subtitle: "Flame test",
-      ts: j.updatedAt, status: j.stage, open: isOpenStage("flame", j.stage),
-      href: "/flame-tests/results?job=" + encodeURIComponent(j.id),
-    });
-  }
-  for (const r of inspections.filter((x) => docMatchesVenue(x, companyId, locId))) {
-    rows.push({
-      id: r.id, kind: "inspection", title: r.venue || r.customer || r.id, subtitle: "Rigging inspection",
-      ts: r.updatedAt, status: r.stage, open: isOpenStage("inspection", r.stage),
-      href: "/inspections/" + encodeURIComponent(r.id),
-    });
-  }
-  for (const s of surveys.filter((r) => docMatchesVenue(r, companyId, locId))) {
-    rows.push({
-      id: s.id, kind: "survey", title: s.venue || s.venueType || s.id, subtitle: "Venue assessment",
-      ts: s.updatedAt, status: s.stage, open: isOpenStage("survey", s.stage),
-      href: "/venue-assessments?id=" + encodeURIComponent(s.id),
-    });
-  }
-  const now = Date.now();
-  for (const v of visits.filter((r) => docMatchesVenue(r, companyId, locId))) {
-    // #34: unscheduled requests sort by creation and read open via their stage.
-    rows.push({
-      id: v.id, kind: "visit", title: v.reason || v.venue || v.id, subtitle: "Site visit",
-      ts: v.startAt ?? v.createdAt,
-      status: v.startAt == null ? v.stage : v.startAt >= now ? "upcoming" : "past",
-      open: v.startAt == null ? v.stage !== "done" : v.startAt >= now,
-      href: v.engagementId ? "/design/engagements/" + encodeURIComponent(v.engagementId) : "/companies/" + encodeURIComponent(companyId),
-    });
-  }
-
   for (const n of notes) {
     const firstLine = n.text.split("\n").map((l) => l.trim()).find(Boolean) || "Note";
     rows.push({

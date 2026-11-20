@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { setRates as setFlameRates, getRates as getFlameRates } from "@/lib/flametest-engine";
-import { setRates as setInspectionRates, getRates as getInspectionRates } from "@/lib/inspection-engine";
 import {
   allEngagements,
   attachQuoteToEngagement,
@@ -64,14 +62,6 @@ async function main() {
     "B1 transaction failure propagates",
   );
   assert.equal(await getDoc("quotes", txProbe), null, "B1 failed transaction rolls back nested doc writes");
-
-  const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
-  assert.equal(flame.laborRate, 123, "flame-test setRates must return the editable labor rate");
-  assert.equal((await getFlameRates()).mileageRate, 1.23, "flame-test getRates must preserve mileage overrides");
-
-  const inspection = await setInspectionRates({ laborRate: 345, mileageRate: 3.45 });
-  assert.equal(inspection.laborRate, 345, "inspection setRates must return the editable labor rate");
-  assert.equal((await getInspectionRates()).mileageRate, 3.45, "inspection getRates must preserve mileage overrides");
 
   const quoteId = "Q-review-venue-regression";
   const quote: Quote = {

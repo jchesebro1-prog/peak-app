@@ -1,6 +1,6 @@
 import type { CatalogPart } from "@/lib/stores/catalog";
 import { effectivePriceDate, type PriceDateSettings } from "./catalog-books";
-import { capGraphemes, INVISIBLE_STRIP } from "./portal-quote-names";
+import { capGraphemes, INVISIBLE_STRIP } from "./text-caps";
 import { sanitizeRackLayout } from "./rack/layout";
 import type { RackLayout, RackPlacement } from "./rack/types";
 

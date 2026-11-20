@@ -26,7 +26,7 @@ export default async function AppLayout({
         color: u.color,
       }))
     : [];
-  const { counts, bell } = await navData(user.name, can("approve", user.roles), user.id);
+  const { counts, bell } = await navData(user.name, can("approve", user.roles));
 
 
   return (
@@ -42,7 +42,6 @@ export default async function AppLayout({
             color: user.color,
             roleLabel: user.roles.join(" · "),
             isAdmin: can("manage_users", user.roles),
-            canFieldDownload: can("create", user.roles),
           }}
           companyName={settings.companyName}
           logoLight={settings.logoLight || null}

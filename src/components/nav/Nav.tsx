@@ -35,8 +35,6 @@ export type NavUser = {
   color: string;
   roleLabel: string;
   isAdmin: boolean;
-  /** Batch 6 #65 — may download today's jobs for offline (`create`, the #351 pull gate). */
-  canFieldDownload?: boolean;
 };
 
 export type RosterEntry = {
@@ -296,7 +294,7 @@ export default function Nav({
         </div>
 
         <div className="pk-nav-right">
-          <SyncChip canDownload={!!user.canFieldDownload} />
+          <SyncChip />
 
           {!narrow && (
             <div style={{ position: "relative" }}>
@@ -463,8 +461,8 @@ export default function Nav({
                         You’re all caught up
                       </div>
                       <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 4 }}>
-                        Reviews, survey requests and at-risk projects assigned
-                        to you show up here.
+                        Reviews and lead follow-ups assigned to you show up
+                        here.
                       </div>
                     </div>
                   ) : (
@@ -748,7 +746,7 @@ export default function Nav({
               </button>
             </div>
 
-            <SyncChip variant="drawer" canDownload={!!user.canFieldDownload} />
+            <SyncChip variant="drawer" />
 
 
             <nav

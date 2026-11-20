@@ -811,7 +811,7 @@ export default function EditCustomerModal({
                 className="cu-m-in"
                 value={l.address}
                 onChange={(e) => typeSpot(i, { address: e.target.value })}
-                placeholder="Street address (for site-visit invites & maps)"
+                placeholder="Street address (for maps & drive distance)"
                 style={{ ...inStyle, fontSize: 12.5, padding: "8px 11px", borderRadius: 8, marginBottom: 8, width: "100%" }}
               />
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.7fr) 86px", gap: 8, marginBottom: 10 }}>

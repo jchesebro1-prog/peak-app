@@ -40,9 +40,6 @@ export type BidPanelVM = {
   canAward: boolean;
   canUndo: boolean;
   canCopyLink: boolean;
-  /** #348 follow-up (Jeff 2026-10-15): the owner's portal shows this estimate as Scope only (portalQuoteHasBidders —
-   *  sticky once it has had a bidder). A read-only label for staff; nothing clears it. */
-  scopeOnly: boolean;
 };
 
 export type BidPanelResult = { ok: true; panel: BidPanelVM; note?: string } | { ok: false; error: string };

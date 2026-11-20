@@ -17,7 +17,6 @@ import { fmtMiles, fmtTime } from "@/lib/geo";
 import { getVenueCalendar } from "@/lib/stores/venue-calendars";
 import VenueCalendarCard from "./calendar-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
-import { AssessmentsCard, FindingsCard, VenueProfileCard } from "@/components/assessments/assessment-cards";
 import { ACCENT_INK, ACCENT_SOFT, cityState, mono } from "../../companies/lib";
 
 /**
@@ -353,10 +352,6 @@ export default async function VenuePage({
       {/* documents (#218) — this venue's files; uploads default to it */}
       <DocumentsCard customerId={site.companyId} siteId={locationId} />
 
-      {/* #340 assessments engine — the venue's rolling profile, its assessments and its findings (with the venue code) */}
-      <VenueProfileCard siteId={site.id} style={card} headStyle={cardHead} />
-      <AssessmentsCard siteId={site.id} style={card} headStyle={cardHead} />
-      <FindingsCard siteId={site.id} customerId={site.companyId} style={card} headStyle={cardHead} />
 
 
       {/* contacts */}

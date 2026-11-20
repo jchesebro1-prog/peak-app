@@ -31,19 +31,11 @@ import {
 } from "@/lib/stores/quotes";
 import { reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { travelForId } from "@/lib/stores/customers";
-import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
-import { declinePortalAcceptance } from "@/lib/portal-quotes";
+import { clearPricedPor, sourceForSave } from "@/lib/portal-legacy";
 import type { QuoteLite, TravelLite } from "./types";
 import { rankCatalogParts } from "./catalog-rank";
 import { withSanitizedKeyProducts } from "./narrative";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
-import type { DraftedLine } from "./ai-scope-modal";
-import { get as getSurvey } from "@/lib/stores/surveys";
-import { kv, recordLines, surveyFindings } from "@/lib/survey-findings";
-import {
-  get as getInspection,
-  type InspectionRecord,
-} from "@/lib/stores/inspections";
 import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import { loadBomModelParts } from "@/lib/estimate-output/bom-models-server";
 import type { BomModelParts } from "@/lib/estimate-output/bom-models";
@@ -471,12 +463,8 @@ export async function saveQuoteAction(
   payload: SavePayload
 ): Promise<SaveResult> {
   const user = await requireUser();
-  // Read before the patch is built: a portal-catalog quote's `source` must
-  // survive a plain Estimator save (#245 Task 13) — staff price its
-  // price-on-request lines right here before sending, and a save that
-  // silently reclassified it to "estimator" would drop the Portal panel,
-  // the customer's "in review" copy and every portal-only rule for good.
-  // Every other quote keeps the prior unconditional "estimator" stamp.
+  // Read before the patch is built: a quote the removed customer portal created keeps its stored `source`
+  // (portal-legacy.ts); every other quote takes the "estimator" stamp.
   const prior = loadedId ? await get(loadedId) : null;
   const live = payload.live === true;
   const renderPdf = !live || payload.renderPdf === true;
@@ -485,10 +473,6 @@ export async function saveQuoteAction(
     const refusal = liveSaveRefusal(prior);
     if (refusal) return { ...refusedSave(prior, refusal), notLive: true };
   }
-  // #248 Task 4: source stamping goes through the shared sourceForSave —
-  // portal-catalog (the only portal source the Estimator ever loads; a
-  // portal-service quote redirects to its own builder before reaching here)
-  // keeps its source across this save exactly like before.
   const savedSource = sourceForSave(prior?.source, "estimator");
   // Estimator Phase 5: the package document is decided first — a posted one
   // over the caps refuses the WHOLE save (nothing written), so a too-large
@@ -500,12 +484,8 @@ export async function saveQuoteAction(
   const boxSale = boxSaleForSave(prior, payload.boxSale);
   const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);
   if (boxProblem) return refusedSave(prior, boxProblem);
-  // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
-  // item staff have now priced; `portalReview` clears once none remain —
-  // scoped to a portal-catalog quote so no other save's behavior changes.
-  // #250 (design pick 5): a priced curtain line (`portalConfirm`) also holds
-  // `portalReview` open on Save — it clears only when the quote is sent
-  // (setStatus already does that unconditionally), never here.
+  // A stored portal-catalog quote: `por` clears on any item staff have now priced, and `portalReview` clears once
+  // no price-on-request or curtain-confirm line remains. No other save's behaviour changes.
   const isPortalCatalog = savedSource === "portal-catalog";
   // #267: a system's typed sell / $25 rounding is only kept when valid
   // (sellOverride finite, > 0, ≤ $10M; priceRound exactly 25) — dropped
@@ -959,9 +939,8 @@ export async function moveSystemToEstimateAction(
     by: user.id,
     projectDiscounts,
     // #348 slice 3: only a Move into a NEW estimate splits off the source's lead and companies.
-    // #348 slice 6: and a new estimate inherits Scope only from its source (scopeOnlyFrom).
     ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId
-      ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id }, scopeOnlyFrom: sourceQuoteId }
+      ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id } }
       : {}),
   });
   if (!placed.ok) return placed;
@@ -1002,9 +981,9 @@ async function placeSystemInEstimate(
     tier?: { pricingTier: string; tierMargin: number };
     /** #348 slice 3 — Move into a NEW estimate: the stored source quote lends its lead and non-bidder companies. */
     splitFrom?: { quoteId: string; userId: string };
-    /** #348 slice 6 — Move or Copy into a NEW estimate: the stored source quote whose "Scope only" the new estimate
-     *  inherits (same customer only; newEstimateScopeOnly). Ignored for an existing target. */
-    scopeOnlyFrom?: string;
+    /** Copy into a NEW estimate: the stored source quote (its box-sale flag and project discounts carry). Ignored
+     *  for an existing target. */
+    copiedFrom?: string;
   }
 ): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
   const placedIds = vendorIdsInSections([placed]);
@@ -1084,15 +1063,13 @@ async function placeSystemInEstimate(
   // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
   // simply has none. The id only says which stored quote to read.
   // A read failure only skips the carry; a deleted lead isn't carried.
-  // The stored source quote (Move → New: lead + companies + Scope only; Copy → New: Scope only). Never the client's copy.
-  const sourceId = opts.splitFrom?.quoteId || opts.scopeOnlyFrom || null;
+  // The stored source quote (Move → New: lead + companies; both: box-sale flag + discounts). Never the client's copy.
+  const sourceId = opts.splitFrom?.quoteId || opts.copiedFrom || null;
   let sourceQuote: Quote | null = null;
-  let sourceReadFailed = false;
   if (sourceId) {
     try {
       sourceQuote = await get(sourceId);
     } catch (e) {
-      sourceReadFailed = true;
       console.error("placeSystemInEstimate: reading the source quote failed", sourceId, e);
     }
   }
@@ -1107,11 +1084,6 @@ async function placeSystemInEstimate(
   const t = totals(newSpecSections, 0);
   const splitSource: Quote | null = opts.splitFrom ? sourceQuote : null;
   const splitLeadId = splitSource ? await leadIdForCreate(splitSource.leadId) : null;
-  // #348 slice 6 (Jeff 2026-10-15): a new estimate made off a Scope-only estimate (its stamp, or bidders now or ever)
-  // for the same customer is Scope only too — stamped at create, in the same insert. An existing target changes nothing.
-  const scopeOnly = sourceId
-    ? await (await import("@/lib/parties/portal-bid-server")).newEstimateScopeOnly(sourceQuote, sourceReadFailed, opts.sourceContext.customerId)
-    : { stamp: false, failedClosed: false };
   let created: Quote;
   try {
     created = await create({
@@ -1130,7 +1102,7 @@ async function placeSystemInEstimate(
       // Box goods sale (spec 2026-10-21): Move / Copy → New estimate copies the STORED source's flag (an unsaved
       // source has none). The labor rule applies at the new estimate's next save.
       ...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),
-    }, { bidScopeOnly: scopeOnly.stamp });
+    });
   } catch (e) {
     return {
       ok: false,
@@ -1139,9 +1111,6 @@ async function placeSystemInEstimate(
           ? e.message
           : "Could not create the new estimate — please try again.",
     };
-  }
-  if (scopeOnly.failedClosed) {
-    console.error("placeSystemInEstimate: the source couldn't be checked — the new estimate was stamped Scope only (fail closed)", { source: sourceId, created: created.id });
   }
   // #348 slice 3: the split estimate starts with the source's companies (never its bidders).
   if (splitSource && opts.splitFrom) {
@@ -1300,8 +1269,7 @@ export async function copySystemToEstimateAction(
     by: user.id,
     projectDiscounts,
     tier: stamp,
-    // #348 slice 6: a Copy into a NEW estimate inherits Scope only from the stored source (same customer only).
-    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { scopeOnlyFrom: sourceQuoteId } : {}),
+    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { copiedFrom: sourceQuoteId } : {}),
   });
   if (!placed.ok) return placed;
   return {
@@ -1550,23 +1518,6 @@ export async function saveBonusAlternatesAction(id: string, ids: string[]): Prom
 }
 
 /**
- * Staff Decline (#245 Task 13, spec §4.4/§5) — the Portal panel's inline
- * textarea + button, no browser confirm(). Same session gate as the
- * Quotes-hub status action (`requireUser()` only — the panel's Approve
- * button reuses that action directly for the mirror-image "won" case).
- */
-export async function declinePortalAcceptanceAction(
-  quoteId: string,
-  note: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await requireUser();
-  if (!quoteId) return { ok: false, error: "Couldn't decline this quote — try again." };
-  const r = await declinePortalAcceptance(quoteId, user.name, note);
-  if (r.ok) refresh();
-  return r;
-}
-
-/**
  * Move a system quote to a pipeline stage from the estimator header's Daylite
  * stage bar (Task 6). Thin wrapper — all the real logic (approval gate on a
  * status-changing move, history, revision-on-send, spawn) lives in
@@ -1642,101 +1593,6 @@ export async function setQuotePipelineAction(id: string, pipelineId: string): Pr
   }
   refresh();
   return stageSyncOf(id, user);
-}
-
-/* ============================================================
-   D4 — Draft quote scope + line items from a survey / inspection
-   ============================================================
-
-   The AI only DRAFTS a scope paragraph and suggested line items (description /
-   qty / unit — NEVER a price; pricing is the estimator's job, guardrail D6).
-   Nothing is persisted here; the client renders the draft for the estimator to
-   review, then inserts the scope / adds lines (price blank) via the estimator's
-   own add-line path. This action just reads the source and calls the AI fn. */
-
-export type DraftScopeResult =
-  | { ok: true; scope: string; lines: DraftedLine[] }
-  | { ok: false; error: string };
-
-/** Flatten an inspection report (findings/logs + measurements) into plain text. */
-function inspectionFindings(ins: InspectionRecord): string {
-  const parts: string[] = [
-    kv("Venue type", ins.venueType),
-    kv("Overall condition", ins.condition),
-    kv("Scope", ins.scope),
-    kv("Narrative", ins.narrative),
-  ];
-  if (ins.logs?.length) {
-    const issues = ins.logs.map((lg, i) => {
-      const bits = [`[${lg.severity}] ${lg.problem}`.trim()];
-      if (lg.location) bits.push(`location: ${lg.location}`);
-      if (lg.explanation) bits.push(lg.explanation);
-      if (lg.solution) bits.push(`recommended: ${lg.solution}`);
-      if (lg.standards?.length) bits.push(`standards: ${lg.standards.join(", ")}`);
-      return `  ${i + 1}. ${bits.join(" — ")}`;
-    });
-    parts.push("Issues found:\n" + issues.join("\n"));
-  }
-  const facts = recordLines(ins.venueInfo);
-  if (facts) parts.push("Venue facts:\n" + facts);
-  const meas = recordLines(ins.measurements);
-  if (meas) parts.push("Measurements:\n" + meas);
-  return parts.filter(Boolean).join("\n");
-}
-
-export async function draftQuoteScopeAction(input: {
-  surveyId?: string;
-  inspectionId?: string;
-}): Promise<DraftScopeResult> {
-  await requireUser();
-
-  try {
-    let sourceLabel: string;
-    let customerName: string | undefined;
-    let venue: string | undefined;
-    let findings: string;
-
-    if (input.surveyId) {
-      const s = await getSurvey(input.surveyId);
-      if (!s) return { ok: false, error: "That field survey could not be found." };
-      sourceLabel = "field survey";
-      customerName = s.customer || undefined;
-      venue = s.venue || undefined;
-      findings = surveyFindings(s);
-    } else if (input.inspectionId) {
-      const ins = await getInspection(input.inspectionId);
-      if (!ins) return { ok: false, error: "That inspection could not be found." };
-      sourceLabel = "inspection";
-      customerName = ins.customer || undefined;
-      venue = ins.venue || undefined;
-      findings = inspectionFindings(ins);
-    } else {
-      return { ok: false, error: "No survey or inspection was specified." };
-    }
-
-    if (!findings.trim()) {
-      return {
-        ok: false,
-        error: "That " + sourceLabel + " has no findings to draft from yet.",
-      };
-    }
-
-    // Rules-based scope assembly (S12/D83 — Jeff: "it should just generate
-    // estimate scopes, that is it"; items stay manual, no model call). The
-    // scope is the record's own captured fields, standard-labeled: the
-    // field-captured scope/narrative first, then the context an estimator
-    // needs while pricing. Deterministic — same record, same text.
-    const header =
-      "Scope of work — from " +
-      sourceLabel +
-      (venue ? " at " + venue : "") +
-      (customerName ? " (" + customerName + ")" : "") +
-      ":";
-    const scope = header + "\n\n" + findings;
-    return { ok: true, scope, lines: [] };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
 }
 
 /**

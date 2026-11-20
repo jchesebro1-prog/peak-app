@@ -34,17 +34,12 @@ import { shortMoneyDash, shortMoneyZero } from "./money";
 import BoardView from "@/components/board/board-view";
 import WorklistRow from "./worklist-row";
 import LeadDrawer from "./lead-drawer";
-import { AssessmentsCard } from "@/components/assessments/assessment-cards";
 import { PartiesCard } from "@/components/parties/parties-card";
 import { LeadEstimates } from "@/components/parties/lead-estimates";
 import { OwnerDot } from "./avatar";
 import { setStageAction } from "./actions";
-import { getSettings } from "@/lib/settings";
-import { activeVisitForLead, mergedVisitReasons } from "@/lib/stores/site-visits";
-import { stageMeta as surveyStageMeta, surveysForLead } from "@/lib/stores/surveys";
-import { VISIT_STAGE_META, type VisitStage } from "@/lib/lead-thread";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
-import type { AvatarVM, ChipVM, LeadCustomerLiteVM, LeadThreadVM, WorklistRowVM } from "./types";
+import type { AvatarVM, ChipVM, LeadCustomerLiteVM, WorklistRowVM } from "./types";
 import type { BoardCardVM } from "@/components/board/types";
 
 /**
@@ -263,12 +258,11 @@ export default async function LeadsPage({
   const scopeName = who === "mine" ? me.name : who; // "" = unscoped
   const showParam = one(sp.show); // booth capture — "" = all shows
 
-  const [allLeads, users, fuListAll, unassignedAll, settings, shows] = await Promise.all([
+  const [allLeads, users, fuListAll, unassignedAll, shows] = await Promise.all([
     getAll(),
     activeUsers(),
     followUps(scopeName ? { owner: scopeName } : {}),
     unassigned(),
-    getSettings(),
     listShows(),
   ]);
   const roster: Ident[] = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
@@ -389,40 +383,6 @@ export default async function LeadsPage({
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  // #34 thread — drawer-scoped: two targeted store calls for the ONE open
-  // lead only, never a per-row scan.
-  const thread: LeadThreadVM = { visit: null, survey: null };
-  if (leadRec) {
-    const [visit, linkedSurveys] = await Promise.all([
-      activeVisitForLead(leadRec.id),
-      surveysForLead(leadRec.id),
-    ]);
-    if (visit) {
-      const vmMeta = VISIT_STAGE_META[visit.stage as VisitStage];
-      thread.visit = {
-        id: visit.id,
-        stage: visit.stage,
-        label: vmMeta.label,
-        ink: vmMeta.ink,
-        soft: vmMeta.soft,
-        bd: vmMeta.bd,
-        assignedTo: visit.assignedTo,
-        startAt: visit.startAt,
-      };
-    }
-    const survey = linkedSurveys[0] || null; // newest linked survey (updatedAt-desc)
-    if (survey) {
-      const sMeta = surveyStageMeta((survey.stage || "requested") as string);
-      thread.survey = {
-        id: survey.id,
-        stage: (survey.stage || "requested") as string,
-        label: sMeta.label,
-        ink: sMeta.ink,
-        soft: sMeta.soft,
-        bd: sMeta.bd,
-      };
-    }
-  }
 
   /* ---------- 1a — board ---------- */
   const boardColumns = STAGES.map((k) => ({
@@ -885,14 +845,11 @@ export default async function LeadsPage({
           meName={me.name}
           rosterNames={roster.map((r) => r.name)}
           sourceOptions={sourceOptions}
-          thread={thread}
-          visitReasons={mergedVisitReasons(settings.visitReasons)}
           customers={leadCustomers}
           canDelete={canDelete}
           meetingsSlot={
             drawerMode === "detail" && leadRec ? (
               <>
-                <AssessmentsCard leadId={leadRec.id} customerId={leadRec.customerId ?? leadRec.convertedCustomerId ?? undefined} compact />
                 <PartiesCard recordType="lead" recordId={leadRec.id} />
                 <LeadEstimates leadId={leadRec.id} />
               </>

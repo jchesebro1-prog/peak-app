@@ -2,18 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
-import { activeUsers, allUsers } from "@/lib/users";
-import { canChangeVisit } from "@/lib/visit-edit-rights";
+import { activeUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { DocumentsCard } from "@/components/documents/documents-card";
-import { AssessmentsCard, FindingsCard } from "@/components/assessments/assessment-cards";
 import { CompanyRolesCard } from "@/components/parties/company-roles-card";
 import { QuotesReceivedCard } from "@/components/vendors/quotes-received-card";
-import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
 import {
   coordsOf,
   estimate,
@@ -42,13 +37,10 @@ import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
 export const metadata = { title: "Company — Quartzite-6" };
 
-import { grantsFor, grantPath } from "@/lib/portal";
-import { PortalAccessCard } from "./portal-access";
 import { CompanyLogoCard } from "./logo-card";
 import { getCompanyLogo } from "@/lib/stores/company-logos";
 import EditCustomerModal from "../edit-modal";
 import VenueDialog from "../venue-dialog";
-import { DeleteVisitButton } from "../delete-visit-button";
 import {
   ACCENT_INK,
   ACCENT_SOFT,
@@ -65,10 +57,6 @@ import {
 } from "../lib";
 import type { SaveCustomerInput } from "../types";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { addressStatesForVisits } from "@/lib/address-verify/targets";
-import type { AddressState } from "@/lib/address-verify/types";
-import { ADDRESS_UNVERIFIED_TEXT } from "@/lib/address-verify/types";
-import AddressFlagBadge from "@/components/address-fix/address-flag";
 
 
 function one(v: string | string[] | undefined): string {
@@ -122,17 +110,14 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, surveys, offices, users, feedRows, settings, companyLogo, everyone] = await Promise.all([
+  const [quotes, offices, users, feedRows, settings, companyLogo] = await Promise.all([
     getAllQuotes(),
-    getAllSurveys(),
     officesFromSettings(),
     activeUsers(),
     loadCustomerFeed({ id: cust.id, name: cust.name }),
     getSettings(),
     // Grid notes #8 — the customer logo on the datasheet book's cover.
     getCompanyLogo(cust.id),
-    // Jeff 2026-10-15 #35 — the whole roster (any status) for the visit lead's unique-name check (#353 review M8: in parallel).
-    allUsers(),
   ]);
   const edit = one(sp.edit);
   const venueTypes = venueTypesFrom(settings.venueTypes);
@@ -154,16 +139,6 @@ export default async function CustomerDetailPage({
   const custQuotes = quotes.filter((qt) =>
     qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name
   );
-  /* #245 (spec §5) — "Portal activity" line under PortalAccessCard. #248
-     Task 4: widened to portal-service (the customer's own flame/inspection
-     quote intake) alongside portal-catalog. */
-  const portalQuotes = custQuotes.filter(
-    (qt) => qt.source === "portal-catalog" || qt.source === "portal-service"
-  );
-  const portalAwaitingApproval = portalQuotes.filter(
-    (qt) => qt.status === "sent" && !!qt.portalAcceptance
-  ).length;
-  const portalInReview = portalQuotes.filter((qt) => !!qt.portalReview).length;
   const openValue = custQuotes
     .filter((qt) => qt.status === "draft" || qt.status === "sent")
     .reduce((a, qt) => a + (qt.value || 0), 0);
@@ -174,8 +149,6 @@ export default async function CustomerDetailPage({
   const wonCount = custQuotes.filter((qt) => qt.status === "won").length;
   const decided = custQuotes.filter((qt) => qt.status === "won" || qt.status === "lost").length;
   const winRate = decided > 0 ? Math.round((wonCount / decided) * 100) + "%" : "—";
-
-  const custSurveys = surveys.filter((s) => s.customerId === cust.id);
 
   /* ---- derived account owner (newest quote owner) ---- */
   const ownerActs = [
@@ -222,32 +195,6 @@ export default async function CustomerDetailPage({
   const locN = (cust.locations || []).length;
 
   const contacts = (cust.contacts || []).map((ct) => ({ ...ct, mono: mono(ct.name) }));
-
-  /* ---- site visits (D76) ---- */
-  const visits = await visitsForCustomer(cust.id);
-  // Address flags are advisory: a failed lookup shows none, never breaks the page.
-  let visitAddr: Map<string, AddressState> = new Map();
-  try {
-    visitAddr = await addressStatesForVisits(
-      visits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
-      "cache"
-    );
-  } catch (err) {
-    console.error("[address-verify] company visit address states failed", err);
-  }
-  // Jeff 2026-10-15 #35 — a scheduled visit's Delete is live only for its lead or an approver.
-  const visitRoster = everyone.map((u) => ({ id: u.id, name: u.name }));
-
-  /* ---- portal access grants (IDEAS #47) ---- */
-  const portalGrants = (await grantsFor(cust.id)).map((g) => ({
-    id: g.id,
-    name: g.name,
-    email: g.email,
-    path: grantPath(g),
-    createdAt: g.createdAt,
-    revoked: !!g.revokedAt,
-    lastSeenAt: g.lastSeenAt ?? null,
-  }));
 
   /* ---- edit-modal initial ---- */
   const editInitial: SaveCustomerInput = {
@@ -517,12 +464,12 @@ export default async function CustomerDetailPage({
           )}
           {feedRows.length === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-              No activity yet — quotes, messages, visits and notes will land here.
+              No activity yet — quotes and notes will land here.
             </div>
           )}
         </div>
 
-        {/* documents (#218) — company files; customer uploads show as New */}
+        {/* documents (#218) — company files */}
         <DocumentsCard customerId={cust.id} />
 
         <div className="cu-detail-grid">
@@ -575,48 +522,8 @@ export default async function CustomerDetailPage({
             )}
           </div>
 
-          {/* right column: surveys + contacts */}
+          {/* right column: roles, vendor quotes, details, contacts */}
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <div style={{ ...card, marginBottom: 0 }}>
-              <div style={cardHead}>
-                <span style={{ fontSize: 14.5, fontWeight: 600 }}>Site surveys</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{custSurveys.length}</span>
-              </div>
-              {custSurveys.length > 0 && (
-                <ShortList
-                  searchPlaceholder="Search site surveys…"
-                  items={custSurveys.map((s) => {
-                    const sm = surveyStageMeta(s.stage || "requested");
-                    return (
-                      <Link
-                        key={s.id}
-                        href={`/venue-assessments?id=${encodeURIComponent(s.id)}`}
-                        className="cu-d-row"
-                        style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                      >
-                        <span style={{ fontSize: 10, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
-                          {sm.label}
-                        </span>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {s.venue || s.venueType || "Site survey"}
-                        </span>
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", flexShrink: 0 }}>{s.id}</span>
-                      </Link>
-                    );
-                  })}
-                  searchText={custSurveys.map((s) => [s.venue, s.venueType, s.id, surveyStageMeta(s.stage || "requested").label].filter(Boolean).join(" "))}
-                />
-              )}
-              {custSurveys.length === 0 && (
-                <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-                  No site surveys yet.
-                </div>
-              )}
-            </div>
-
-            {/* #340 assessments engine — this company's assessments and findings (with the customer code) */}
-            <AssessmentsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
-            <FindingsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             {/* #348 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
             <CompanyRolesCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             <QuotesReceivedCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
@@ -681,93 +588,6 @@ export default async function CustomerDetailPage({
 
             <CompanyLogoCard companyId={cust.id} companyName={cust.name} logoSrc={companyLogo?.dataUrl ?? null} />
 
-            <PortalAccessCard
-              customerId={cust.id}
-              contacts={(cust.contacts || []).map((ct) => ({
-                name: ct.name,
-                email: ct.email || "",
-              }))}
-              grants={portalGrants}
-            />
-
-            {/* #245 — Portal activity: counts over this company's portal-catalog
-                quotes. Hidden when there are none; no /quotes?customer= filter
-                exists yet, so this is plain text, not a link. */}
-            {portalQuotes.length > 0 && (
-              <div style={{ fontSize: 12, color: "#8c919c", padding: "0 2px" }}>
-                Portal activity: {portalQuotes.length} portal quote
-                {portalQuotes.length === 1 ? "" : "s"}
-                {portalAwaitingApproval > 0 &&
-                  ` · ${portalAwaitingApproval} awaiting approval`}
-                {portalInReview > 0 && ` · ${portalInReview} in review`}
-              </div>
-            )}
-
-            {/* ---- site visits (D76/#34) — Inbox-scheduled + lead-requested ---- */}
-            {visits.length > 0 && (
-              <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>
-                  Site visits
-                </div>
-                <ShortList
-                  searchPlaceholder="Search site visits…"
-                  items={visits.map((v) => {
-                    const sm = VISIT_STAGE_META[v.stage];
-                    const va = visitAddr.get(v.id);
-                    return (
-                      <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
-                            {v.reason}
-                            {v.venue ? " · " + v.venue : ""}
-                          </div>
-                          <span
-                            style={{
-                              fontSize: 9.5,
-                              fontWeight: 600,
-                              color: sm.ink,
-                              background: sm.soft,
-                              border: `1px solid ${sm.bd}`,
-                              padding: "1px 7px",
-                              borderRadius: 20,
-                              whiteSpace: "nowrap",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {sm.label}
-                          </span>
-                          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
-                            {can("create", me.roles) && (
-                              <Link
-                                href={`/assessments/new?visit=${encodeURIComponent(v.id)}`}
-                                style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}
-                              >
-                                Start assessment
-                              </Link>
-                            )}
-                            <DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
-                          {v.startAt != null
-                            ? new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-                            : v.preferredTiming || "Not scheduled yet"}
-                          {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
-                          {v.attendees.length ? " + " + v.attendees.join(", ") : ""}
-                          {v.invite?.sentAt ? " · invite sent" : ""}
-                        </div>
-                        {v.stage !== "done" && va && va.status !== "verified" && (
-                          <div style={{ marginTop: 3 }}>
-                            <AddressFlagBadge flag={{ text: ADDRESS_UNVERIFIED_TEXT, fix: va.fix }} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  searchText={visits.map((v) => [v.reason, v.venue, VISIT_STAGE_META[v.stage]?.label, v.assignedTo].filter(Boolean).join(" "))}
-                />
-              </div>
-            )}
 
 
 

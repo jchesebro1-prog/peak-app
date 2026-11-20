@@ -49,7 +49,6 @@ import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
 import { walkPhotoSides } from "../src/lib/package-doc/photo-sides";
 import { onlineShowsCutSheets } from "../src/lib/curtain-cut-sheets/online";
 import { acceptanceLine, cleanPoNumber, sanitizeClientResponse, responseNoteText, responseRows, cleanClientResponses, CLIENT_ACTION_COPY } from "../src/lib/estimate-output/responses";
-import { ACCEPT_SIGNER_NAME_COPY, ACCEPT_SIGNER_TITLE_COPY, ACCEPT_PO_NUMBER_COPY } from "../src/lib/portal-quotes";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { generateQuotePdf } from "../src/lib/quote-pdf/generate";
@@ -94,11 +93,6 @@ export async function oct15PureChecks(ok: Ok) {
     const sel = rd("src/app/share/quote/[id]/[token]/scope-selection.tsx");
     ok(/aria-label=\{CLIENT_ACTION_COPY\.title\}[^>]* required /.test(sel) && sel.includes("aria-label={CLIENT_ACTION_COPY.poNumber}") && sel.includes("{ name, title, po, email"),
       "oct15 #15: the share page's Choose your scopes form requires the title and offers a PO #");
-    const dlg = rd("src/app/portal/accept-dialog.tsx");
-    ok(dlg.includes('id="pk-accept-name"') && dlg.includes('id="pk-accept-title"') && dlg.includes('id="pk-accept-po"') && dlg.includes("signerName, signerTitle, poNumber })"),
-      "oct15 #15: the portal Accept dialog asks for name, title and PO #");
-    const pq = rd("src/lib/portal-quotes.ts");
-    const acc = pq.slice(pq.indexOf("export async function acceptPortal("), pq.indexOf("export async function notifyPortalAcceptance("));
   }
   /* ---- #22 — the online estimate shows cut sheets when the PDF includes them ---- */
   {
@@ -107,10 +101,6 @@ export async function oct15PureChecks(ok: Ok) {
     ok(!onlineShowsCutSheets({ pdfCutSheets: true }, 101, 100), "oct15 #22: the print route's rule — edited since the revision, the live-built sheets would disagree, so none");
     const on = rd("src/lib/curtain-cut-sheets/online.ts");
     ok(on.includes('loadCutSheets(q.id, { images: "data" })') && on.includes("CUT_SHEET_APPEND_LOAD_MS") && on.includes("loaded.models.client.length > 0"), "oct15 #22: the online pages load the Client sheets with inlined photos, capped at 8 s");
-    const share = rd("src/app/share/quote/[id]/[token]/page.tsx"), portal = rd("src/app/portal/quotes/[id]/page.tsx"), pkg = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
-    ok(share.includes("await onlineCutSheets(ok.q, ok.rev)") && portal.includes("await onlineCutSheets(q, state.rev)") && pkg.includes("await onlineCutSheets(hit.q, hit.rev)") &&
-       [share, portal, pkg].every((t) => t.includes("<OnlineCutSheets loaded={")) && rd("src/components/estimate-output/package-view.tsx").includes('{slots.cutSheets && <section data-mount="cutsheets"'),
-      "oct15 #22: the v1 share page, the portal page and the package page each show them for their sent revision");
     ok(!/["']use client["']/.test(rd("src/components/cutsheets/online-cut-sheets.tsx")), "oct15 #22: the cut-sheet block is a server component");
   }
   /* ---- #20 — narrative photos alternate right, left, right ---- */
@@ -335,9 +325,6 @@ function oct15BonusRateChecks(ok: Ok) {
   ok(sentRe === def, "oct15 #19: re-saving a sent quote at new rates leaves its bonus lines (and price) untouched");
   ok(canonicalBonusSections({ source: "estimator", status: "won" }, def as never, r) === def && lineBonusPct({ bonus: "estimator" }) === 0.02, "oct15 #19: won / lost never re-derive; a line without bonusPct reads its default");
   const acts = rd("src/app/(app)/estimator/actions.ts");
-  // #368: the save's call is the shared deriveEstimatorSections (derive.ts → canonicalBonusSections); Move / Copy keep theirs.
-  ok((acts.match(/canonicalBonusSections\([^\n]*await loadBonusRates\(\)\)/g) || []).length === 2 && /deriveEstimatorSections\([^\n]*await loadBonusRates\(\)\)/.test(acts) && rd("src/lib/assessments/quote-from-findings.ts").includes("[section], await loadBonusRates())"),
-    "oct15 #19: every server write of an Estimator quote's sections passes the current rates");
 }
 
 /* ---- #375 — remove a bonus from a system ---- */
@@ -611,7 +598,6 @@ export async function oct15DbChecks(ok: Ok) {
       const users = [{ id: "u-lead", name: "Lead O15", status: "active", roles: ["Estimator"] }, { id: "u-appr", name: "Appr O15", status: "active", roles: ["Admin"] }, { id: "u-mgr", name: "Mgr O15", status: "active", roles: ["Manager"] }];
       const q = { id: "Q-O15", estNo: 1015, name: "Stage", owner: "Lead O15", preparedBy: "", customerId: "C-1", quoteType: "system" } as never;
       const none: typeof made = [];
-      ok(ACCEPT_SIGNER_NAME_COPY.length > 0 && ACCEPT_SIGNER_TITLE_COPY.length > 0 && ACCEPT_PO_NUMBER_COPY.length > 0, "oct15 #15: refusal copy exists");
     }
     {
       const before = await loadBonusRates();
@@ -702,8 +688,7 @@ export function discardConfirmChecks(ok: Ok) {
   const vqm = code("src/app/(app)/estimator/vendor-quote-modal.tsx");
   ok(vqm.includes("const closeGuard = confirmClose ? () => (uploading ? window.confirm(DISCARD_COPY.vendorUploading) : confirmClose()) : undefined;") &&
      (vqm.match(/confirmClose=\{/g) || []).length === 1, "discard pins (fix 1): the vendor form asks while its own upload is in flight, else defers to the hook (no prop → no guard)");
-  ok(!/confirmClose/.test(code("src/app/(app)/estimator/ai-scope-modal.tsx")) && !/confirmClose/.test(code("src/app/(app)/estimator/add-system-modal.tsx")) &&
-     /<AiScopeModal[\s\S]*?onClose=\{\(\) => setAiOpen\(false\)\}/.test(bs), "discard pins: AI scope and Add a system don't pass confirmClose (they close as before)");
+  ok(!/confirmClose/.test(code("src/app/(app)/estimator/add-system-modal.tsx")), "discard pins: Add a system doesn't pass confirmClose (it closes as before)");
   const hook = code("src/app/(app)/estimator/use-estimator-state.ts");
   const fn = (start: string, next: string) => hook.slice(hook.indexOf(start), hook.indexOf(next, hook.indexOf(start) + start.length));
   const closeFn = fn("const closeInput = () => {", "const openInputMethod = ");

@@ -5,7 +5,7 @@
  * components (the Estimator preview, the service builders) import it freely.
  */
 
-export type PdfKind = "quote" | "flame" | "repair" | "inspection";
+export type PdfKind = "quote";
 export type QuotePdfStatus = "pending" | "ready" | "failed";
 
 /**
@@ -126,20 +126,19 @@ const ERROR_MAX = 300;
 /** Which document a quote prints as — null for types with no saved PDF. */
 export function pdfKindForQuoteType(quoteType: string | null | undefined): PdfKind | null {
   if (!quoteType || quoteType === "system") return "quote";
-  if (quoteType === "flame_test") return "flame";
-  if (quoteType === "inspection") return "inspection";
   return null;
 }
 
 /** Whether a quote of this type ever gets a saved PDF (#222). Callers check it
- *  before marking a PDF pending; consulting and rental quotes never do. */
+ *  before marking a PDF pending; only system estimates do (the service letters were removed). */
 export function canHavePdf(quoteType: string | null | undefined): boolean {
   return pdfKindForQuoteType(quoteType) !== null;
 }
 
 export function printPathFor(kind: PdfKind, id: string): string {
   const eid = encodeURIComponent(id);
-  return kind === "quote" ? `/print/quote/${eid}` : `/print/letter/${kind}/${eid}`;
+  void kind;
+  return `/print/quote/${eid}`;
 }
 
 export function pdfStoragePath(quoteId: string, name: string): string {
@@ -259,49 +258,6 @@ export function pdfIsCurrent(pdf: QuotePdfState | null | undefined, contentChang
 }
 
 type PdfSourceFields = { pdf?: QuotePdfState | null; revisions?: RevisionPdfFields[] | null; contentChangedAt?: number | null };
-
-/**
- * What a customer may open (#222 fix wave 1). Once a quote has been sent, only
- * the exact document that went out: the latest sent revision's copy. When that
- * copy isn't there yet it is nothing (the route says "being prepared") — never
- * the current file, which may carry edits made after the send. A quote never
- * sent (the customer's own self-serve estimate, legacy won-without-send) may
- * open its current READY file.
- */
-export function portalPdfSource(q: PdfSourceFields): { path: string; rev: number | null } | null {
-  const sent = latestSentRevision(q.revisions);
-  if (sent) return sent.pdfBlobPath ? { path: sent.pdfBlobPath, rev: sent.rev } : null;
-  if (q.pdf?.status === "ready" && q.pdf.blobPath) return { path: q.pdf.blobPath, rev: null };
-  return null;
-}
-
-/**
- * A sent quote whose sent copy can still arrive — the portal's "being
- * prepared" (#222 T4 re-review). The copy only ever comes from a PDF saved at
- * or before the send (revisionAwaitingPdf), so a revision sent before #222
- * with no PDF at all, or one whose document changed after the send (the PDF
- * now belongs to a newer save), will never get one: that is not "preparing"
- * but unavailable (portalPdfUnavailable). Nor is a render that FAILED (#222
- * final wave B): a failed state — or a pending one past the stale window,
- * which pdfView reports as failed — has nothing behind it that will ever
- * land, so "being prepared" would read forever; it is unavailable until the
- * team retries. The portal route and the portal list share this one predicate.
- */
-export function portalPdfPreparing(q: PdfSourceFields, now: number = Date.now()): boolean {
-  const sent = latestSentRevision(q.revisions);
-  if (!sent || sent.pdfBlobPath || !q.pdf) return false;
-  const status = pdfView(q.pdf, now)?.status;
-  if (revisionAwaitingPdf(sent, q.pdf.savedAt)) return status !== "failed";
-  // #376: a live-saved draft sent over a stale file renders right after the cut, so the file's save is past the send.
-  // Nothing printed changed since the cut, so that render lands as this revision's copy.
-  return status === "pending" && typeof q.contentChangedAt === "number" && q.contentChangedAt <= sent.at;
-}
-
-/** A sent quote whose sent copy is missing and never coming — "No PDF is available for this version". */
-export function portalPdfUnavailable(q: PdfSourceFields, now: number = Date.now()): boolean {
-  const sent = latestSentRevision(q.revisions);
-  return !!sent && !sent.pdfBlobPath && !portalPdfPreparing(q, now);
-}
 
 /**
  * What the Retry button does (#222 fix wave 1). A stale MARK (no render behind

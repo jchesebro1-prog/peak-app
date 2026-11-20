@@ -9,7 +9,7 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
-import type { CurtainRequest } from "@/lib/portal-cart-types";
+import type { CurtainRequest } from "@/lib/curtain-request";
 import type { CategoryOption } from "@/lib/system-categories";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import type { PackageDoc } from "@/lib/package-doc/types";
@@ -74,7 +74,7 @@ export type SpecItem = {
   /** #250: a portal curtain line priced live (Estimator curtain math, tier
    *  markup) that still needs Peak to confirm measurements + fabric — stays
    *  set through Save; only sending the quote (or staff replacing the line)
-   *  resolves it (clearPricedPor's `anyConfirm`, portal-quote-mode.ts). */
+   *  resolves it (clearPricedPor's `anyConfirm`, portal-legacy.ts). */
   portalConfirm?: boolean;
   /** optional-scope item — excluded from totals (prototype carried the flag) */
   option?: boolean;
@@ -563,35 +563,12 @@ export type TravelLite = {
 };
 
 /**
- * The staff Portal panel's data (#245 Task 13, spec §5) — present only for a
- * loaded quote with `source === "portal-catalog"`; null otherwise (a fresh
- * estimate, or any other quote type/source never renders the panel).
- * `porItems` is a point-in-time read of the loaded spec's `por` lines (the
- * next Save recomputes what remains — see `clearPricedPor`). `confirmItems`
- * (#250) is the same read of `portalConfirm` lines — priced curtains still
- * awaiting Peak's confirmation.
+ * A loaded quote the removed customer portal created (`source === "portal-catalog"`), or null for every other
+ * quote. Only what still changes behaviour: its prices are left exact on load and its document prints the stored
+ * "Valid until" date.
  */
-export type PortalPanelData = {
-  quoteId: string;
+export type PortalLegacyInfo = {
   portalFirm: { generatedAt: number; validUntil: number } | null;
-  portalReview: { requestedAt: number; reasons: string[] } | null;
-  portalAcceptance: {
-    at: number;
-    by: string;
-    byEmail: string;
-    purchaseMethod?: "po" | "card" | "check" | "other";
-    notes?: string;
-    poDocumentId?: string | null;
-    /** Jeff 2026-10-15 #15 — the signer and PO # typed at Accept. */
-    signerName?: string;
-    signerTitle?: string;
-    poNumber?: string;
-  } | null;
-  portalDecline: { at: number; by: string; note: string } | null;
-  porItems: Array<{ desc: string; qty: number }>;
-  confirmItems: Array<{ desc: string; qty: number }>;
-  /** Where the Approve (→ won) status button redirects back to on refusal. */
-  back: string;
 };
 
 export type InitialQuote = {
@@ -657,8 +634,8 @@ export type InitialQuote = {
   pdfOptions: QuotePdfOptions;
   /** The saved PDF's state (#222) — null for a new or never-rendered estimate. */
   pdf: QuotePdfView | null;
-  /** #245 Task 13 — set only for a loaded `source === "portal-catalog"` quote. */
-  portal: PortalPanelData | null;
+  /** Set only for a loaded `source === "portal-catalog"` quote (stored quotes of the removed portal). */
+  portal: PortalLegacyInfo | null;
   /** Estimator bonuses — the loaded quote's source / quoteType (a new
    *  estimate reads "estimator" / "system"); feeds `bonusRulesApply`. */
   bonusSource: string;
@@ -674,18 +651,6 @@ export type InitialQuote = {
   /** Box goods sale (spec 2026-10-21) — the stored flag (boxSaleOf); false for a new estimate unless the
    *  + New quote card opened it (?box=1). Rides every Save. */
   boxSale: boolean;
-};
-
-/**
- * The venue-assessment / inspection this quote is drafting from (Phase 8, D4).
- * Resolved server-side in page.tsx from ?surveyId= / ?inspectionId= and passed
- * in only when the AI gate is on. `null` → no source linked (button hidden).
- */
-export type AiSource = {
-  kind: "survey" | "inspection";
-  id: string;
-  /** Human label for the button/modal (venue or customer, falls back to id). */
-  label: string;
 };
 
 export type EstimatorProps = {
@@ -730,9 +695,6 @@ export type EstimatorProps = {
    *  quote). Replaces the review bar's reviewers / me / canApprove props and
    *  carries the #242 review-limit chip as its strip. */
   next: QuoteNextStepView | null;
-  /** Linked survey/inspection to assemble the scope from, or null
-   *  (S12/D83 — rules-based, no AI gate). */
-  aiSource: AiSource | null;
   /** Active roster for the quote Tasks card's assignee picker (PUNCHLIST #17 remainder). */
   people: { id: string; name: string }[];
   /** #245: the freight-by-distance rule (Estimating Rules), loaded server-side
@@ -740,9 +702,6 @@ export type EstimatorProps = {
   freightRule: FreightRule;
   /** Company-managed checked assumptions shared with consulting proposals. */
   assumptionLibrary: string[];
-  /** #245 Task 13 — a Portal panel Approve refusal's message (?statusError=
-   *  from the Quotes-hub status action), or null. */
-  portalStatusError: string | null;
   /** #368 — what the last Revise re-priced to today's catalog (null when nothing / never). Absent = null. */
   repricedOnRevise?: RepricedOnRevise | null;
   /** Spec records design §6 — the Spec select's options: every non-archived

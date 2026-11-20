@@ -1,11 +1,12 @@
-import { categoryLabel, OTHER_CATEGORY, type DocumentCategory } from "./document-categories";
+import { categoryLabel, type DocumentCategory } from "./document-categories";
 import { cleanText, formatBytes, titleFromFileName } from "./document-files";
 
 /**
- * Documents (#218) — the record and every rule about who sees what. Pure:
- * client components import the types and view models; the store, the
- * finalize step and both download routes call the same functions, so the
- * portal's access rule lives in exactly one place (`portalCanSee`).
+ * Documents (#218) — the record and its view models. Pure: client components
+ * import the types and view models; the store, the finalize step and the
+ * download route call the same functions. (The customer portal that shared
+ * documents both ways was removed; `visibility` / `source` / `seenByTeamAt`
+ * stay on stored records.)
  */
 
 export type DocumentVisibility = "internal" | "shared";
@@ -25,7 +26,7 @@ export type DocumentRecord = {
   /** `documents/<customer>/<uploadKey>/<file>-<suffix>` — private Blob. */
   blobPath: string;
   category: string;
-  /** shared = visible on the customer portal. */
+  /** Stored by the removed portal sharing ("shared" = was visible on the customer portal). Nothing reads it now. */
   visibility: DocumentVisibility;
   source: DocumentSource;
   /** Required — every document belongs to a company. Never changes. */
@@ -73,8 +74,6 @@ export type DocumentFilter = {
   projectId?: string | null;
   visibility?: DocumentVisibility;
   category?: string;
-  /** Only what the customer portal may show for `customerId`. */
-  portal?: boolean;
 };
 
 /** Keeps input order. Deleted rows never pass. */
@@ -86,16 +85,8 @@ export function filterDocuments(docs: readonly DocumentRecord[], f: DocumentFilt
     if (f.projectId !== undefined && (d.projectId || null) !== f.projectId) return false;
     if (f.visibility && d.visibility !== f.visibility) return false;
     if (f.category && d.category !== f.category) return false;
-    if (f.portal && !portalCanSee(d, f.customerId ?? "")) return false;
     return true;
   });
-}
-
-/** THE portal rule: the session's own company, and shared or their own upload. */
-export function portalCanSee(doc: DocumentRecord | null | undefined, customerId: string | null | undefined): boolean {
-  if (!doc || doc.deleted || !customerId) return false;
-  if (doc.customerId !== customerId) return false;
-  return doc.visibility === "shared" || doc.source === "customer";
 }
 
 export type DocumentScopeFacts = {
@@ -177,59 +168,3 @@ export function documentRows(
     }));
 }
 
-export type PortalDocGroup = {
-  venueId: string | null;
-  venueLabel: string;
-  categories: Array<{ key: string; label: string; docs: DocumentRecord[] }>;
-};
-
-/** The portal list: only what `portalCanSee`, company-wide first, then the
- *  company's venues in order, each split by category in category order. A
- *  file on a venue that no longer exists reads as company-wide. */
-export function groupForPortal(
-  docs: readonly DocumentRecord[],
-  customerId: string,
-  categories: readonly DocumentCategory[],
-  venues: readonly DocumentOption[]
-): PortalDocGroup[] {
-  const visible = docs.filter((d) => portalCanSee(d, customerId)).sort((a, b) => b.uploadedAt - a.uploadedAt);
-  const known = new Set(venues.map((v) => v.id));
-  const catOrder = new Map(categories.map((c, i) => [c.key, i]));
-  const order: Array<{ id: string | null; label: string }> = [
-    { id: null, label: "Company-wide" },
-    ...venues.map((v) => ({ id: v.id, label: v.label })),
-  ];
-  const out: PortalDocGroup[] = [];
-  for (const v of order) {
-    const inVenue = visible.filter((d) => (d.siteId && known.has(d.siteId) ? d.siteId : null) === v.id);
-    if (!inVenue.length) continue;
-    const byCat = new Map<string, DocumentRecord[]>();
-    for (const d of inVenue) {
-      const key = catOrder.has(d.category) ? d.category : OTHER_CATEGORY;
-      const list = byCat.get(key);
-      if (list) list.push(d);
-      else byCat.set(key, [d]);
-    }
-    out.push({
-      venueId: v.id,
-      venueLabel: v.label,
-      categories: [...byCat.entries()]
-        .sort((a, b) => (catOrder.get(a[0]) ?? 999) - (catOrder.get(b[0]) ?? 999))
-        .map(([key, list]) => ({ key, label: categoryLabel(categories, key), docs: list })),
-    });
-  }
-  return out;
-}
-
-/** One bell row per company with unseen customer uploads, newest first. */
-export function customerUploadBell(docs: readonly DocumentRecord[]): Array<{ customerId: string; count: number; latestAt: number }> {
-  const by = new Map<string, { customerId: string; count: number; latestAt: number }>();
-  for (const d of docs) {
-    if (d.deleted || d.source !== "customer" || d.seenByTeamAt != null || !d.customerId) continue;
-    const e = by.get(d.customerId) || { customerId: d.customerId, count: 0, latestAt: 0 };
-    e.count++;
-    e.latestAt = Math.max(e.latestAt, d.uploadedAt || 0);
-    by.set(d.customerId, e);
-  }
-  return [...by.values()].sort((a, b) => b.latestAt - a.latestAt);
-}

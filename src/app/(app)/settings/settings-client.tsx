@@ -79,10 +79,6 @@ export default function SettingsClient({
         return (
           <FieldGroup
             venueTypes={data.venueTypes}
-            intakeCatalog={data.intakeCatalog}
-            visitReasons={data.visitReasons}
-            surveyTags={data.surveyTags}
-            run={run}
           />
         );
       case "consulting":

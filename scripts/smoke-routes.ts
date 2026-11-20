@@ -80,7 +80,6 @@ const ROUTES = [
   "/catalog/riser-data", // #328 A2 — riser data sheet: download, upload, preview, apply (admin)
   "/catalog/riser-data/export", // #328 A2 — the riser data .xlsx download
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
-  "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/catalog/manufacturers", // Manufacturer section Part 1
   "/catalog/manufacturers/rosebrand", // Manufacturer section Part 2 — one manufacturer's page
   "/catalog/model-numbers", // #304 — crosswalk upload → preview → apply (admin)
@@ -89,8 +88,6 @@ const ROUTES = [
   "/estimating-rules/pipe-types", // #373 — the pipe configurator's parts map (admin)
   "/estimating-rules/lineset-types", // #373 — the lineset configurator's parts map (admin)
   "/estimating-rules/curtain-mounts", // #292 — curtain-mount hardware (admin)
-  "/inspections",
-  "/flame-tests",
   // Extra top-level routes found under src/app/(app) — cheap to add, same coverage rationale.
   "/customers",
   "/companies",
@@ -122,11 +119,6 @@ const ROUTES = [
   "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
   "/templates",
   "/consulting",
-  "/venue-assessments",
-  "/assessments", // #337 assessments engine
-  "/assessments/new",
-  "/assessments/findings", // #337 Task 9: the findings register
-  "/assessments/pick-lists", // #337 Task 11: the pick-list admin (manage_users)
   "/design-studio/lineset",
   "/design-studio/motors",
   "/design-studio/steel",
@@ -146,81 +138,12 @@ const ROUTES = [
   "/knowledge/fixtures",
   "/account",
   "/people",
-  /* Modules that had NO coverage at all until now — /rentals shipped whole
-   * without a single smoked route, and the service lines' letter/report/quote
-   * builders are the customer-facing deliverables. */
   "/design",
   "/quotes/new",
-  // #288 — the staff Portal quotes queue: default (Needs action), and a
-  // filtered + searched view focused on a quote id that isn't there.
-  "/quotes/portal",
-  "/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0",
-  "/flame-tests/scheduling",
-  "/flame-tests/report/options",
-  "/inspections/scheduling",
-  "/inspections/report/options",
   /* Legacy redirect stubs: these assert the hop still resolves, same as the
    * /customers/lakefront entry below. */
   "/design-studio",
   "/consulting/quote",
-  "/flame-tests/today",
-  // #245 portal catalog: signed out (the team session is not a portal grant)
-  // renders the signed-out card; a team preview renders the full browse page
-  // (search + facets + tiles); the retired /portal/estimate redirects here.
-  "/portal/catalog",
-  "/portal/catalog?preview=lakefront",
-  "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
-  // #252 — a ?dept= filter, signed out; an unknown id is simply ignored.
-  "/portal/catalog?dept=rigging",
-  // #252 fix round 1 — the same, as a team preview: Other, and an id that
-  // resolves to nothing (both are ignored gracefully, no error).
-  "/portal/catalog?preview=lakefront&dept=other",
-  "/portal/catalog?preview=lakefront&dept=bogus",
-  // #289 — Packages & Assemblies: signed out, and as a team preview.
-  "/portal/catalog?dept=packages",
-  "/portal/catalog?preview=lakefront&dept=packages",
-  // #245 Task 11: the part sidebar renders server-side from ?part= — a real
-  // SKU, and an unknown key ("This item isn't available.").
-  "/portal/catalog?preview=lakefront&q=velour&part=RB-EN-22",
-  "/portal/catalog?preview=lakefront&part=no-such-part",
-  "/portal/estimate",
-  "/portal/estimate?preview=lakefront",
-  // #245 Task 12: the cart page — signed out, and a team preview (read-only);
-  // /portal with a Generate banner flag (the quote id isn't this customer's,
-  // so the banner names no number).
-  "/portal/catalog/quote",
-  "/portal/catalog/quote?preview=lakefront",
-  "/portal?preview=lakefront&generated=firm&q=Q-0",
-  // #288: My quotes — signed out, and a team preview (read-only) with the
-  // Generate banner flag (moved here from /portal) and a filter.
-  "/portal/my-quotes",
-  "/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0",
-  "/portal/my-quotes?preview=lakefront&show=accepted",
-  // #323 — Meeting notes: signed out, and a team preview (shared summaries only).
-  // #282 phase 4 — the portal dashboard's team preview (the Rewards card
-  // renders only while the program is on; the smoke DB leaves it off).
-  "/portal?preview=lakefront",
-  // #248 Task 3 — the service intake: signed out (no team-preview session
-  // here, so it renders the signed-out card, same as /portal/catalog above).
-  "/portal/service",
-  "/portal/service?type=inspection&level=2",
-  // #248 final review (minor 7): signed-out still 200s with the entry-point
-  // query params a real "Quote it" link / "Quote again" row carries — the
-  // page returns the signed-out card before any of them are read.
-  "/portal/service?type=flame&venue=x",
-  "/portal/service?from=x",
-  // #293 slice 3 — the online estimate page. No seeded quote has a sent
-  // revision, so these cover the 200 cards (signed out; not available, in a
-  // team preview) and compile the page; the document itself is harness-
-  // rendered (#293 slice 3 blocks). Q-0 is an unknown id.
-  "/portal/quotes/Q-2041",
-  "/portal/quotes/Q-2041?preview=lakefront",
-  "/portal/quotes/Q-2041?preview=lakefront&view=bom",
-  "/portal/quotes/Q-0?preview=lakefront",
-  // #348 slice 6 Task 4 — a bidder company's previews (no seeded bids): Home compiles the Bids-card branch (no card
-  // without a bid) and the online page runs its bidder branch on another company's quote → the unavailable card.
-  "/portal?preview=northridge",
-  "/portal/quotes/Q-2041?preview=northridge",
   // #293 slice 3 — the signed share page: a well-formed token that passes the
   // shape check and reaches the DB read + HMAC verify (and fails it), and a
   // malformed one refused before any read — both the one 200 "isn't active" card.
@@ -267,8 +190,6 @@ const CONTENT_CHECKS: Array<{ route: string; reject: string; expect: string; lab
  * cannot distinguish a rendered editor from a miss.
  */
 const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true }> = [
-  { route: "/inspections/RI-2042" },
-  { route: "/venue-assessments/FS-1055" },
   { route: "/companies/lakefront" },
   { route: "/customers/lakefront" }, // the legacy path — this entry tests that the redirect to /companies/[id] still resolves
   { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}
@@ -296,8 +217,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&thread=C-1032" },
   { route: "/estimator?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+estimate" },
   { route: "/estimator?customer=lakefront&category=Acoustics&replaces=Q-2041" },
-  { route: "/flame-tests/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+flame" },
-  { route: "/inspections/quote?customer=lakefront&venue=lf2&contact=Nobody&name=Smoke+inspection" },
   { route: "/design/engagements/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+consulting" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // #207: the part editor with its Documents section (a seeded fabric SKU).
@@ -322,15 +241,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/design/engagements/CE-1001?tab=oversight" },
   // #323 — the lead drawer's detail mode mounts the Meetings card slot.
   { route: "/leads?lead=L-1061" },
-  /* Service-line documents (#78's uncovered half). Each is the artifact a
-   * customer actually receives, and each compiles a different report/letter
-   * module that nothing else in this list pulls in. */
-  { route: "/flame-tests/report?job=FT-3001&variant=certificate" },
-  { route: "/flame-tests/report?job=FT-3001&variant=letter" },
-  { route: "/flame-tests/report?job=FT-3001&variant=summary" },
-  { route: "/flame-tests/results?job=FT-3001" },
-  { route: "/flame-tests/letter?id=FT-3001" },
-  { route: "/inspections/RI-2042/report" },
   /* The Grid's derived drawings (D112 riser, device schedule). */
   { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/conduit-riser", reject: "no longer exists" },
@@ -369,16 +279,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — no rack is seeded, so the staff submittal preview is checked on its
   // not-found path: the module compiles and an unknown id is a clean 404, not a 500.
   { route: "/design/assemblies/rack/SA-NOPE", expectNotFound: true },
-  // #337 — an unknown assessment is a clean 404 from the editor page, never a 500.
-  { route: "/assessments/AS-NOPE", expectNotFound: true },
-  // #337 Task 10 — the assessment report: an unknown id is a clean 404 (page and PDF); the signed print routes
-  // without a token (or with a well-formed bad one) are clean 404s before any read.
-  { route: "/assessments/AS-NOPE/report", expectNotFound: true },
-  { route: "/api/assessments/AS-NOPE/report-pdf", expectNotFound: true },
-  { route: "/api/assessments/findings-pdf?scope=site:st-nope", expectNotFound: true },
-  { route: "/print/assessment/AS-NOPE", expectNotFound: true },
-  { route: "/print/assessment/AS-1001?t=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },
-  { route: "/print/assessment-findings/site%3Ast-nope", expectNotFound: true },
   // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
   { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },

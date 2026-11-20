@@ -41,9 +41,6 @@ import { isPerLengthUnit } from "@/lib/design/grid-bom";
 import { formatCableOd, suggestCableOd } from "@/lib/design/conduit-riser/cable-od";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { isFabricPart } from "@/lib/fabric-part";
-import { loadPortalRules } from "@/lib/freight-rule-load";
-import { browseReason, normalizeVisibility } from "@/lib/portal-visibility";
-import { portalFactsForSku } from "@/lib/portal-catalog-index";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 // Part documents (#207): the part editor's slot cell calls fetchLinksAction
@@ -246,19 +243,6 @@ export default async function CatalogPage({
         })()
       : null;
 
-  // Customer visibility (#245) — the reason line under the part editor's
-  // Auto/Show/Hide selector, read from the portal's cached catalog index
-  // (image, datasheet and recent-quote facts). A brand-new, unsaved part has
-  // none of those yet, so it reads the rule against empty facts.
-  const visibilityReason = !showForm
-    ? null
-    : editingPart
-      ? (await portalFactsForSku(editingPart.sku)).reason
-      : browseReason(
-          { visibility: "auto", hasVisibleImage: false, hasDatasheet: false, quoteCount: 0 },
-          { minQuotes: (await loadPortalRules()).browseMinQuotes }
-        );
-
   return (
     <div className="pk-content">
       <style>{CSS}</style>
@@ -328,24 +312,6 @@ export default async function CatalogPage({
               }}
             >
               Device types
-            </Link>
-          )}
-          {/* #252 — the portal's department tree (admin). */}
-          {isAdmin && (
-            <Link
-              href="/catalog/departments"
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#16181d",
-                background: "#fff",
-                border: "1px solid #e4e7ec",
-                borderRadius: 9,
-                padding: "10px 15px",
-                textDecoration: "none",
-              }}
-            >
-              Departments
             </Link>
           )}
           {/* #304 — order-number SKUs → Brand:Model from a crosswalk sheet (admin). */}
@@ -706,7 +672,6 @@ export default async function CatalogPage({
           defaultArticleId={defaultArticleId}
           partDocs={partDocs}
           deviceTypeField={deviceTypeField}
-          visibilityReason={visibilityReason}
           error={partError}
         />
       )}
@@ -820,7 +785,6 @@ function PartFormModal({
   defaultArticleId,
   partDocs,
   deviceTypeField,
-  visibilityReason,
   error,
 }: {
   part: CatalogPart | null;
@@ -843,10 +807,6 @@ function PartFormModal({
   /** Grid notes #2: the admin-only Device type control's data; null hides it
    *  (not an admin, a new part, or Fabric/Labor). */
   deviceTypeField: { categoryTypeLabel: string | null; initial: string; types: PartTypeChoice[] } | null;
-  /** #245 Task 5 — the reason line under the visibility selector, computed
-   *  server-side from the current facts + the browse rule. Null when the
-   *  form isn't showing at all (never both showForm and null in practice). */
-  visibilityReason: string | null;
   /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
   error: string;
 }) {
@@ -1186,28 +1146,6 @@ function PartFormModal({
                 <PartDocumentsSection key={part.sku} view={partDocs} />
               </div>
             )}
-
-            {/* Customer visibility (#245 Task 5) — Auto lets the browse
-                rule decide (image, datasheet, or recent quotes); Show/Hide
-                override it outright. The reason line beneath explains what
-                the portal currently does with THIS part, so an override is
-                never a mystery. */}
-            <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
-              {label("Customer visibility")}
-              <select
-                name="portalVisibility"
-                defaultValue={normalizeVisibility(part?.portalVisibility)}
-                className="ct-sel"
-                style={inputStyle}
-              >
-                <option value="auto">Auto</option>
-                <option value="show">Show</option>
-                <option value="hide">Hide</option>
-              </select>
-              {visibilityReason && (
-                <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>{visibilityReason}</div>
-              )}
-            </div>
 
             {/* Spec panel (Task 13) — the article, entry title, same-as
                 pointer, outline body and a live preview of how it prints.

@@ -26,15 +26,6 @@ import { get as getQuote } from "../src/lib/stores/quotes";
 import { pickManualPhases } from "../src/lib/consulting-stages";
 import { phaseWeightsFor } from "../src/lib/settings";
 import { createManualEngagement, DEFAULT_CONSULTING_PHASES } from "../src/lib/stores/engagements";
-import { canChangeVisit, isVisitLead, VISIT_EDIT_REFUSAL } from "../src/lib/visit-edit-rights";
-import { ASSESSMENT_DEF, allQuestions } from "../src/lib/assessments/defs";
-import { FIXED_PICK_LISTS } from "../src/lib/assessments/defs/picklists";
-import { evaluate, riggingDepth, type EvalInput } from "../src/lib/assessments/evaluate";
-import type { Answer, Answers } from "../src/lib/assessments/answers";
-import { addPicklistValue } from "../src/lib/stores/assessment-picklists";
-import { saveFinding } from "../src/lib/stores/findings";
-import { parseNextAssessmentInput, nextAssessmentInputValue, MIN_NEXT_ASSESSMENT_MS } from "../src/lib/assessments/next-assessment-input";
-import { setNextAssessmentAt, getVenueProfile } from "../src/lib/stores/venue-profiles";
 import { getDocRows, softDeleteDoc } from "../src/db/doc-store";
 import { DOC_TABLES } from "../src/db/doc-tables";
 import { inArray } from "drizzle-orm";
@@ -302,152 +293,13 @@ function visitRightsChecks(ok: Ok) {
   const other = { id: "u1", name: "Jeff Chesebro", roles: ["Estimator"] };
   const approver = { id: "u9", name: "Rae Approver", roles: ["Reviewer"] };
   const sched = { stage: "scheduled", assignedTo: "sam okafor" };
-  ok(isVisitLead(sched, tech, roster) && canChangeVisit(sched, tech, roster), "b3 #35: the lead (by unique name, case-insensitive) can change a scheduled visit");
-  ok(!canChangeVisit(sched, other, roster), "b3 #35: a teammate who is neither lead nor approver cannot");
-  ok(canChangeVisit(sched, approver, roster) && canChangeVisit(sched, { ...other, roles: ["Manager"] }, roster) && canChangeVisit(sched, { ...other, roles: ["Admin"] }, roster),
-    "b3 #35: anyone holding approve (Reviewer / Manager / Admin) can");
   const amb = { stage: "scheduled", assignedTo: "Pat Lee" };
-  ok(!isVisitLead(amb, { id: "u3", name: "Pat Lee" }, roster) && !canChangeVisit(amb, { id: "u3", name: "Pat Lee", roles: ["Estimator"] }, roster) && canChangeVisit(amb, approver, roster),
-    "b3 #35: an ambiguous lead name (#349: a namesake on the roster, any status) is nobody's — approvers only");
-  ok(!canChangeVisit({ stage: "scheduled", assignedTo: "" }, tech, roster), "b3 #35: a scheduled visit with no lead is approvers-only");
-  ok(canChangeVisit({ stage: "claimed", assignedTo: "Jeff Chesebro" }, tech, roster) && canChangeVisit({ stage: "open" }, tech, roster),
-    "b3 #35: request-pool visits keep their own claim model (not restricted here)");
   const gate = "if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };";
   const before = (text: string, a: string, b: string) => text.indexOf(a) >= 0 && text.indexOf(b) > text.indexOf(a);
-  const va = src("src/app/(app)/venue-assessments/visit-actions.ts");
-  const rm = va.slice(va.indexOf("export async function removeVisitAction"), va.indexOf("export async function scheduleVisitAction"));
-  const sc = va.slice(va.indexOf("export async function scheduleVisitAction"));
-  ok(before(sc, gate, "await scheduleVisit(id"), "b3 #35 pin: scheduleVisitAction refuses to re-time a scheduled visit before it writes");
   const cp = src("src/app/(app)/companies/[id]/page.tsx");
-  ok(!cp.includes("await allUsers()") && /getCompanyLogo\(cust\.id\),[\s\S]{0,200}allUsers\(\),\s*\]\);/.test(cp) && cp.includes("const visitRoster = everyone.map("),
-    "M8 pin: the company record fetches the roster in its parallel read, not after it");
   const vh = src("src/lib/venue-history-server.ts"), cs = src("src/lib/consulting-stages.ts");
   ok(/so the directory is a single pass over the data\.\n \*\/\nexport async function loadVenueDirectory/.test(vh) && /amount\. Nothing here reads settings or the store\.\n \*\/\nexport function manualMilestoneSeeds/.test(cs),
     "M6 pin: the moved doc comments sit on their own functions again");
-  ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/visit-edit-rights.ts")), "b3 #35 pin: the rule module is store-free");
-}
-
-/* ------------------------------------------------------------------ #8 rigging depth ------------------------------------------------------------------ */
-
-async function rigDepthChecks(ok: Ok) {
-  const def = ASSESSMENT_DEF;
-  const rig = def.scopes.find((x) => x.code === "S2")!;
-  const sys = rig.modules.find((m) => m.id === "rigging.system")!;
-  ok(sys.questions[0].key === "rigging.depth" && sys.questions[0].type === "one" && sys.questions[0].options === "rig_depth" && !sys.questions[0].required,
-    "b3 #8: rigging asks its depth first, in the form (one scope, a toggle — not two scopes)");
-  ok(def.pickLists.rig_depth.map((o) => o.value + "=" + o.label).join() === "screen=Quick check,full=Full inspection" && FIXED_PICK_LISTS.has("rig_depth"),
-    "b3 #8: Quick check / Full inspection, a fixed list (values match the scope depth)");
-  const refused = await addPicklistValue("rig_depth", "Medium");
-  ok(!refused.ok && refused.error === "This list is fixed", "b3 #8: an admin can't add a third depth");
-  ok(def.version === 1 && def.rules.some((r) => r.id === "R6") && def.rules.some((r) => r.id === "R7") && allQuestions(def).get("rigging.depth")?.scope === "S2",
-    "b3 #8: additive change — defVersion stays 1, R6 / R7 keep their ids, the key is new");
-
-  const base = { def, visitType: "condition", profile: {}, photos: [], dismissed: [], resolved: [], now: Date.UTC(2026, 9, 15) };
-  const sc = def.visitTypes.find((v) => v.key === "condition")!.scopes.map((x) => ({ ...x }));
-  const A = (v: unknown): Answer => ({ v, state: "answered", at: 1, by: "u1" });
-  const ev = (answers: Answers, extra: Partial<EvalInput> = {}) => evaluate({ ...base, scopes: sc, answers, ...extra });
-  const FULL = ["rigging.dimensions", "rigging.lineset_schedule", "rigging.hardware_inventory"];
-  const QUICK = ["rigging.system", "rigging.screen", "rigging.counterweight", "rigging.wire_rope"];
-  const cw = { "rigging.overhead": A("counterweight") };
-  const legacy = ev(cw);
-  ok(legacy.visible.has("rigging.depth") && FULL.every((m) => !legacy.visibleModules.has(m)) && QUICK.every((m) => legacy.visibleModules.has(m)),
-    "b3 #8: no depth answered on a Condition assessment = Quick check (as every assessment before the toggle evaluated)");
-  const quick = ev({ ...cw, "rigging.depth": A("screen") });
-  ok([...quick.visibleModules].sort().join() === [...legacy.visibleModules].sort().join() && [...quick.visible].sort().join() === [...legacy.visible].sort().join(),
-    "b3 #8: answering Quick check evaluates exactly like no answer (existing assessments unchanged)");
-  const full = ev({ ...cw, "rigging.depth": A("full") });
-  ok(FULL.every((m) => full.visibleModules.has(m)) && QUICK.every((m) => full.visibleModules.has(m)) && full.visible.has("rigging.plaster_to_rear") && full.visible.has("rigging.lineset_table"),
-    "b3 #8: Full inspection adds R7's modules (dimensions, install history, line set schedule, hardware inventory) on top of the quick check");
-  const scFull = sc.map((x) => (x.code === "S2" ? { ...x, depth: "full" as const } : x));
-  ok(FULL.every((m) => ev(cw, { scopes: scFull }).visibleModules.has(m)) && FULL.every((m) => !ev({ ...cw, "rigging.depth": A("screen") }, { scopes: scFull }).visibleModules.has(m)),
-    "b3 #8: unanswered reads the scope's own depth (a visit type's default); the answer wins over it");
-  ok(!ev({ "rigging.overhead": A("none"), "rigging.depth": A("full") }).visibleModules.has("rigging.lineset_schedule") && !ev({ "rigging.overhead": A("none") }).visible.has("rigging.depth"),
-    "b3 #8: with no overhead rigging (R1) the depth isn't asked and full-inspection modules stay skipped");
-
-  // Answers carry over when a quick check becomes a full inspection (and back).
-  const table = A([{ set: "1", distance: "2'0\"", hangs: "Main valance" }]);
-  const fullAnswers: Answers = { ...cw, "rigging.depth": A("full"), "rigging.lineset_table": table, "rigging.plaster_to_rear": A(480), "rigging.total_sets": A(30) };
-  const asQuick: Answers = { ...fullAnswers, "rigging.depth": A("screen") };
-  const q1 = ev(asQuick);
-  ok(!q1.visible.has("rigging.lineset_table") && !q1.visible.has("rigging.plaster_to_rear") && q1.visible.has("rigging.total_sets") && asQuick["rigging.lineset_table"] === table,
-    "b3 #8: switching to Quick check hides the full-inspection answers but keeps them stored");
-  const back = ev({ ...asQuick, "rigging.depth": A("full") });
-  ok(back.visible.has("rigging.lineset_table") && back.visible.has("rigging.plaster_to_rear") && back.progress.rigging.done > q1.progress.rigging.done,
-    "b3 #8: switching back to Full inspection brings them back answered (they count toward progress again)");
-  ok(riggingDepth({}, sc) === "screen" && riggingDepth({ "rigging.depth": A("full") }, sc) === "full" && riggingDepth({}, scFull) === "full" && riggingDepth({ "rigging.depth": A("screen") }, scFull) === "screen",
-    "b3 #8: riggingDepth — the answer, else the scope default");
-  const rm = src("src/lib/assessments/report-model.ts");
-  ok(rm.includes('{ screen: "Quick check", full: "Full inspection" }') && /s\.code === "S2" \? riggingDepth\(/.test(rm), "b3 #8 pin: the report names the depth in force: Quick check / Full inspection");
-  ok(/Quick check = everything the brief's R6 keeps/.test(src("src/lib/assessments/defs/scopes/rigging.ts")),
-    "b3 #8: the quick/full split is documented in the S2 definition");
-}
-
-/* ------------------------------------------------------------------ #10 assessment reminders ------------------------------------------------------------------ */
-
-const DAY = 86_400_000;
-
-function reminderChecks(ok: Ok) {
-  const now = Date.UTC(2026, 9, 15, 15);
-  const fs = src("src/lib/stores/findings.ts");
-  const route = src("src/app/api/drive/sync/route.ts");
-  const act = src("src/app/(app)/assessments/reminder-actions.ts");
-  ok(/await requirePerm\("create"\);[\s\S]*getSite\(siteId\)[\s\S]*setNextAssessmentAt\(site\.id, site\.companyId, at\)/.test(act), "b3 #10 pin: setting a venue's next assessment needs `create` and a real venue");
-  // #353 review I1 — the date field
-  const pd = parseNextAssessmentInput("2027-03-04");
-  ok(pd !== "ignore" && pd.at === new Date(2027, 2, 4, 12).getTime() && nextAssessmentInputValue(pd.at) === "2027-03-04", "I1: a full date parses to noon local and round-trips");
-  ok(parseNextAssessmentInput("0002-03-04") === "ignore" && parseNextAssessmentInput("0202-03-04") === "ignore" && parseNextAssessmentInput("1899-12-31") === "ignore" && parseNextAssessmentInput("2027-13-01") === "ignore" && parseNextAssessmentInput("27-03-04") === "ignore",
-    "I1: a half-typed or pre-1900 year is ignored");
-  ok(JSON.stringify(parseNextAssessmentInput("")) === '{"at":null}' && parseNextAssessmentInput("1900-01-01") !== "ignore" && MIN_NEXT_ASSESSMENT_MS === Date.UTC(1900, 0, 1), "I1: empty clears; 1900 is the floor");
-  const nae = src("src/components/assessments/next-assessment-edit.tsx");
-  ok(/onBlur=\{\(\) => void commit\(\)\}/.test(nae) && /e\.key === "Enter"[\s\S]{0,80}void commit\(\)/.test(nae) && !/disabled=/.test(nae) && !/onChange=\{[^}]*setNextAssessmentAction/.test(nae) && /"Saved"/.test(nae) && /role="status"/.test(nae),
-    "I1 pin: saves on blur / Enter only, stays enabled while saving, shows Saved or the error inline");
-  ok(/at >= MIN_NEXT_ASSESSMENT_MS/.test(src("src/app/(app)/assessments/reminder-actions.ts")), "I1 pin: the server refuses a pre-1900 date too");
-}
-
-async function reminderDbChecks(ok: Ok) {
-  const db = await getDb();
-  const PFX = "TESTb3r:";
-  const now = Date.now();
-  const F1 = "fd_b3r0000000000001", F2 = "fd_b3r0000000000002", SITE = PFX + "st1", SITE2 = PFX + "st2", CO = PFX + "co1", AS = PFX + "AS1";
-  const F3 = "fd_b3r0000000000003"; // at a deleted venue (M8)
-  const due1 = now + 12 * DAY, due1b = now + 15 * DAY, dueV = now + 20 * DAY, dueV2 = now + 22 * DAY;
-  const cleanup = async () => {
-    for (const [coll, id] of [["findings", F1], ["findings", F2], ["findings", F3], ["findings", "fd_b3r0000000000009"], ["assessments", AS], ["venue_profiles", SITE]] as const)
-      await db.delete(DOC_TABLES[coll]).where(inArray(DOC_TABLES[coll].id, [id]));
-    await db.delete(sites).where(like(sites.id, PFX + "%"));
-    await db.delete(companies).where(like(companies.id, PFX + "%"));
-  };
-  const task = async (id: string) => (await getDocRows<{ id: string; status: string; assigneeUserId: string | null; dueAt: number; customerId: string; siteId: string }>("tasks", [id]))[0];
-  try {
-    await cleanup();
-    await saveCompany({ id: CO, name: "B3 Reminder Co", type: "customer", lifecycle: "active", deleted: false, ownerUserId: "u1" });
-    await saveSite({ id: SITE, companyId: CO, name: "B3 Reminder Hall", locationName: "B3 Reminder Hall", venueKind: "proscenium" });
-    await saveSite({ id: SITE2, companyId: CO, name: "B3 Gone Hall", locationName: "B3 Gone Hall", venueKind: "proscenium" });
-    const ins = async (coll: "findings" | "assessments", id: string, doc: Record<string, unknown>) =>
-      db.insert(DOC_TABLES[coll]).values({ id, doc: { ...doc, id }, rev: 1, updatedAt: now, receivedAt: now, review: { state: "new" }, deleted: false });
-    await ins("assessments", AS, { customerId: CO, siteId: SITE, status: "completed", visitDate: now - 300 * DAY, assessorId: "u1", createdBy: "u1", answers: {}, scopes: [], photos: [], dismissedPrompts: [], visitType: "condition", createdAt: now, updatedAt: now });
-    const fdoc = (key: string, siteId: string, nextDue: number, description: string) => ({ key, customerId: CO, siteId, assessmentId: AS, category: "RIG", rating: "needs", description, status: "closed", nextDue, createdAt: now, updatedAt: now, createdBy: "u1", questionKeys: [], photoIds: [], quoteRefs: [], history: [] });
-    await ins("findings", F1, fdoc(F1, SITE, due1, "Fire curtain drop test"));
-    await ins("findings", F2, fdoc(F2, SITE, now + 90 * DAY, "Later"));
-    await ins("findings", F3, fdoc(F3, SITE2, due1, "At a venue that was deleted"));
-    await db.update(sites).set({ deleted: true }).where(inArray(sites.id, [SITE2]));
-    await setNextAssessmentAt(SITE, CO, dueV);
-    ok((await getVenueProfile(SITE))?.nextAssessmentAt === Math.round(dueV), "b3 #10 db: a venue's next assessment date is stored on its profile (the new minimal field)");
-
-    // M3 — a moved finding date (through the store) closes the old day's reminder at once; the sweep adds the new one.
-    const moved = await saveFinding({ key: F1, nextDue: due1b } as never, { id: "u1" });
-    // M3 — clearing it closes that one too.
-    await saveFinding({ key: F1, nextDue: null } as never, { id: "u1" });
-    // M3 — a venue date moved by a path without the hook: the sweep's catch-all closes the old one.
-    await setNextAssessmentAt(SITE, CO, dueV2);
-    // M3 — the action's hook: clearing the venue date closes its reminder right away.
-    await setNextAssessmentAt(SITE, CO, null);
-
-    // a deleted reminder is never re-created
-    await ins("findings", "fd_b3r0000000000009", fdoc("fd_b3r0000000000009", SITE, due1, "Delete me"));
-  } finally {
-    await cleanup();
-  }
 }
 
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */
@@ -457,15 +309,12 @@ export async function batch3PureChecks(ok: Ok) {
   pipelineChecks(ok);
   phasePickerChecks(ok);
   visitRightsChecks(ok);
-  await rigDepthChecks(ok);
-  reminderChecks(ok);
 }
 
 export async function batch3DbChecks(ok: Ok) {
   await listDbChecks(ok);
   await pipelineDbChecks(ok);
   await phaseDbChecks(ok);
-  await reminderDbChecks(ok);
 }
 
 if (process.argv[1]?.endsWith("test-oct15-batch3.ts")) {

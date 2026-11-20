@@ -7,13 +7,11 @@ import { listAddressesToVerifyAction } from "../address-actions";
 
 /**
  * Settings → Data — Addresses to verify (spec 2026-10-09), grown from the
- * #175 unlocated-venues worklist: venues, upcoming site visits and open
- * leads whose address isn't verified. Live query; rows leave as they're fixed.
+ * #175 unlocated-venues worklist: venues and open leads whose address isn't verified. Live query; rows leave as they're fixed.
  */
 const PAGE = 50;
 const KINDS: Array<{ key: VerifyKind | "all"; label: string }> = [
   { key: "all", label: "All" },
-  { key: "visit", label: "Visits" },
   { key: "lead", label: "Leads" },
   { key: "venue", label: "Venues" },
 ];

@@ -9,7 +9,6 @@ import { designBudgetLabel, designNeedsPart, designRefreshHint } from "@/lib/des
 import { designOpenHref } from "@/lib/design/design-links";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { timeAgo as designTimeAgo } from "@/lib/stores/designs";
-import { stageMeta as surveyStageMeta, timeAgo as surveyTimeAgo } from "@/lib/stores/surveys";
 import {
   followUpInfo, sla as leadSla, sourceMeta, stageMeta as leadStageMeta, dueLabel, dateLabel,
   timeAgo as leadTimeAgo, type LeadRecord,
@@ -23,7 +22,6 @@ import HomeMyDesigns, { type DesignCard } from "../../home-my-designs";
 import { estimateLinksForDesigns } from "@/lib/design/estimate-links-server";
 import HomePipeline, { type PipelineRow } from "../../home-pipeline";
 import HomeCatalog from "../../home-catalog";
-import HomeVenueAssessments, { type SurveyCard } from "../../home-venue-assessments";
 import HomeTeamActivity, { type TeamActivityRow } from "../../home-team-activity";
 import HomeNeedsAttention from "../../home-needs-attention";
 
@@ -135,18 +133,6 @@ export const HOME_RENDERERS = {
   catalog: async (ctx) => {
     const parts = await ctx.data.catalogParts();
     return <HomeCatalog books={priceBooks(parts, await ctx.data.settings())} partCount={parts.length} />;
-  },
-
-  /* ---- venue assessments (page.tsx 459-474) ---- */
-  "venue-assessments": async (ctx) => {
-    const surveysAll = await ctx.data.surveys();
-    const surveyCards: SurveyCard[] = surveysAll.slice(0, 3).map((s) => ({
-      id: s.id, mono: (s.customer || "FS").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "FS",
-      customer: s.customer || "Untitled survey", sub: `${s.id} · ${s.venueType || "—"} · ${surveyTimeAgo(s.updatedAt)}`,
-      href: `/venue-assessments?id=${encodeURIComponent(s.id)}`, stage: surveyStageMeta(s.stage || "requested"),
-    }));
-    const surveyPendingCount = surveysAll.filter((s) => s.syncState === "pending" || s.syncState === "syncing").length;
-    return <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />;
   },
 
   /* ---- team activity (page.tsx 179-181, 443-457) ---- */

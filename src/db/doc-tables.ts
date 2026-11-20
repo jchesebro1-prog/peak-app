@@ -187,11 +187,6 @@ export type CollectionName = keyof typeof DOC_TABLES;
  * customers doc table remains registered read-only as rollback history.
  */
 export const SYNCABLE_COLLECTIONS: CollectionName[] = [
-  "surveys",
-  "inspections",
-  "flame_jobs",
-  "assessments",
-  "findings",
   "booth_captures",
 ];
 export const SYNCABLE_SET: ReadonlySet<string> = new Set(SYNCABLE_COLLECTIONS);

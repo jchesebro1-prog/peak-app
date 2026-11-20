@@ -14,13 +14,6 @@ export const FREIGHT_RATE_IDS = {
   cap: "freight.capPct",
 } as const;
 
-export const PORTAL_RATE_IDS = {
-  validityDays: "portal.validityDays",
-  browseMinQuotes: "portal.browseMinQuotes",
-  browseWindowMonths: "portal.browseWindowMonths",
-  staleCostMonths: "portal.staleCostMonths",
-} as const;
-
 export function freightPctForMiles(
   miles: number | null | undefined,
   rule: FreightRule

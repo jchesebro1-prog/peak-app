@@ -13,13 +13,6 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
 export type PdfBannerTone = "info" | "warn" | "error";
 export type PdfBannerNote = { tone: PdfBannerTone; text: string; action?: "Retry" | "Create PDF" };
 
-export function pdfCanRetry(pdf: QuotePdfView | null, timedOut: boolean, retrying: boolean): boolean {
-  if (retrying) return false;
-  if (!pdf) return true;
-  if (pdf.status === "failed") return true;
-  return pdf.status === "pending" && timedOut;
-}
-
 export function pdfBanner(s: {
   quoteId: string | null;
   pdf: QuotePdfView | null;

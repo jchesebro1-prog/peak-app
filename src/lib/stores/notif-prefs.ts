@@ -31,15 +31,7 @@ const DEFAULT_USER = "Jeff Chesebro";
 export const CATEGORIES = [
   { key: "reviews",     label: "Needs your approval",          desc: "Quotes waiting for any approver (and designs assigned to you)." },
   { key: "reviewBack",  label: "Back from review",             desc: "Your quotes that were approved and are ready to send, or sent back for changes." },
-  { key: "surveys",     label: "Survey requests to schedule",  desc: "Field-survey requests waiting to be booked." },
-  { key: "visits",      label: "Site visit requests",          desc: "Open site-visit requests to claim, plus your claimed visits waiting on a schedule." },
-  { key: "inspections", label: "Inspections to schedule",      desc: "Rigging-inspection requests waiting to be booked." },
-  { key: "flame",       label: "Flame tests due for renewal",  desc: "Annual flame-test renewals coming due or overdue." },
   { key: "leads",       label: "Leads needing follow-up",      desc: "New and open leads overdue for a first response or follow-up." },
-  { key: "portal",      label: "Portal acceptances to confirm", desc: "Quotes a customer accepted in the portal — approve or decline in the quote." },
-  { key: "portalReview", label: "Portal quotes to review",      desc: "Customer quotes with items waiting on a Peak price or confirmation." },
-  { key: "portalNew",   label: "New portal quotes",             desc: "Firm quotes customers generated in the last 3 days." },
-  { key: "documents",   label: "New documents from customers", desc: "Files customers sent through the portal that nobody on the team has opened yet." },
 ] as const;
 
 export type NotifCategoryKey = (typeof CATEGORIES)[number]["key"];

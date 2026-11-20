@@ -16,7 +16,7 @@ import {
 } from "@/lib/booth/capture";
 import { cardTextAvailable, recognizeCardLines } from "@/lib/booth/card-text";
 import { parseCardText } from "@/lib/booth/card-parse";
-import { resizePhoto, shrinkForInline } from "@/lib/assessments/photo-resize";
+import { resizePhoto, shrinkForInline } from "@/lib/photo-resize";
 import { saveBoothCaptureAction } from "./actions";
 
 /* Booth mode: type a visitor in, Save & next. Saves go through the offline outbox (saveThroughOutbox), so with no

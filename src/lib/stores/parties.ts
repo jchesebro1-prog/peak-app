@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { getDoc, getDocRows, listDocsByField, patchDoc, patchDocKey, softDeleteDoc, upsertDoc, type Doc } from "@/db/doc-store";
 import { getCompany } from "@/lib/identity/companies";
 import { getContact } from "@/lib/identity/contacts";
-import { getMany as getQuotes, markBidScopeOnly, withQuoteRowLock } from "@/lib/stores/quotes";
+import { getMany as getQuotes, withQuoteRowLock } from "@/lib/stores/quotes";
 import type { Quote } from "@/lib/stores/quotes";
 import type { LeadRecord } from "@/lib/stores/leads";
 import {
@@ -32,23 +32,6 @@ export async function listForRecords(recordType: PartyRecordType, recordIds: rea
   const ids = [...new Set(recordIds.filter(Boolean))];
   if (!ids.length) return out;
   const rows = await listDocsByField<Party>("record_parties", "recordId", ids);
-  for (const p of sortParties(rows)) {
-    if (p.recordType !== recordType) continue;
-    const list = out.get(p.recordId) ?? [];
-    list.push(p);
-    out.set(p.recordId, list);
-  }
-  return out;
-}
-
-/** #348 slice 6 (Jeff 2026-10-15) — like listForRecords, but soft-deleted (removed) rows come back too. Only for a
- *  rule that must remember a party once removed — the portal's "Scope only" (portalQuoteHasBidders). Every other
- *  reader keeps listFor / listForRecords, which return live rows only. */
-export async function listForRecordsIncludingDeleted(recordType: PartyRecordType, recordIds: readonly string[]): Promise<Map<string, Party[]>> {
-  const out = new Map<string, Party[]>();
-  const ids = [...new Set(recordIds.filter(Boolean))];
-  if (!ids.length) return out;
-  const rows = await listDocsByField<Party>("record_parties", "recordId", ids, { includeDeleted: true });
   for (const p of sortParties(rows)) {
     if (p.recordType !== recordType) continue;
     const list = out.get(p.recordId) ?? [];
@@ -110,16 +93,6 @@ async function contactProblem(companyId: string, contactId: string | null): Prom
   return c && c.homeCompanyId === companyId ? null : "That person isn't at this company.";
 }
 
-/** #348 slice 6 (Jeff 2026-10-15, final review Minor 1) — before a row is (re)written by its deterministic id: when the
- *  PRIOR row under that id (live or soft-deleted) was a quote GC/EC row with bid state, stamp the quote Scope only
- *  first. A revive writes `bid: null` over the deleted row — on a quote bid before the stamp existed that row was the
- *  only evidence of the bid, and the owner's prices would come back. Call under the quote's row lock (onQuoteLocked). */
-async function keepBidEvidence(id: string): Promise<void> {
-  const [prior] = await getDocRows<Party>("record_parties", [id]);
-  const p = prior?.doc;
-  if (p && p.recordType === "quote" && !!p.recordId && (p.role === "gc" || p.role === "ec") && !!p.bid) await markBidScopeOnly(p.recordId);
-}
-
 /** A quote's party writes run under its row lock — the store's lock order (quote row first, then party rows, as
  *  addBidder / setStatus do); nested calls join the outer transaction. Other record types run as before. */
 function onQuoteLocked<T>(recordType: PartyRecordType, recordId: string, fn: () => Promise<T>): Promise<T> {
@@ -147,7 +120,6 @@ export async function addParty(
     const existing = await getDoc<Party>("record_parties", id);
     if (existing) return { ok: true as const, party: existing, existed: true };
     if (ownerConflict(await listFor(input.recordType, input.recordId), input)) return { ok: false as const, error: "This record already has an owner." };
-    await keepBidEvidence(id);
     const t = Date.now();
     const party: Party = {
       id,
@@ -207,7 +179,6 @@ export async function copyParties(
       if (await getDoc<Party>("record_parties", id)) continue;
       // One owner per record: never copy a second owner company onto a target that already has one.
       if (ownerConflict(targetRows, p)) continue;
-      await keepBidEvidence(id);
       const row: Party = {
         id,
         recordType: to.type,

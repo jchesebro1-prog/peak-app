@@ -37,7 +37,6 @@ import {
 import { ENGAGEMENT_STAGE_KEYS, manualMilestoneSeeds, type ManualFee, pickManualPhases, validateSpan } from "@/lib/consulting-stages";
 import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
-import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { resolveQuoteInput, type QuoteInputResolution } from "@/lib/stores/estimate-numbers";
 import { ambiguousQuoteNumberMessage } from "@/lib/estimate-number";
@@ -829,16 +828,13 @@ export async function removeDocumentAction(
 
 /* ---------- site visits (oversight) ---------- */
 
+/** Site visits were removed with Venue Assessments; the Oversight tab lists none, so nothing calls this with a real id. */
 export async function linkVisitAction(
   visitId: string,
   engId: string | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  void visitId;
+  void engId;
   await requireUser();
-  if (engId) {
-    const eng = await getEngagement(engId);
-    if (!eng) return { ok: false, error: "Engagement not found." };
-  }
-  await linkVisitToEngagement(visitId, engId);
-  revalidatePath("/", "layout");
-  return { ok: true };
+  return { ok: false, error: "Site visits are no longer part of this app." };
 }

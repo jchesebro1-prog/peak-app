@@ -3,8 +3,6 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { GROUPS, defaultOf, value } from "@/lib/stores/pricing";
 import { RulesActions, RulesEditor, type GroupVM, type ItemVM } from "./controls";
-import { getSettings } from "@/lib/settings";
-import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
 
 export const metadata = { title: "Estimating Rules — Quartzite-6" };
 
@@ -29,7 +27,6 @@ const PRINT_CSS = `
 export default async function EstimatingRulesPage() {
   const user = await requireUser();
   const isAdmin = can("manage_users", user.roles);
-  const settings = isAdmin ? await getSettings() : null;
 
   const groups: GroupVM[] = isAdmin
     ? await Promise.all(
@@ -219,10 +216,7 @@ export default async function EstimatingRulesPage() {
             </div>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>Open →</span>
           </Link>
-          <RulesEditor
-            groups={groups}
-            venueDoctrine={resolveVenueDoctrine(settings?.venueDoctrine)}
-          />
+          <RulesEditor groups={groups} />
         </>
       )}
     </div>

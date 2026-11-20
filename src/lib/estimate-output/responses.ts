@@ -4,7 +4,7 @@ import { fmt } from "@/app/(app)/estimator/pricing";
 import { cleanText } from "@/lib/document-files";
 import { permsFor } from "@/lib/team";
 import { alternateScopes, outputScopes } from "./scopes";
-import { looksLikeCardNumber } from "@/lib/portal-quote-mode";
+import { looksLikeCardNumber } from "@/lib/card-number";
 
 /**
  * #301 slice C (D-m, D-n, R1, R15, R16) — what a client sends from the
@@ -329,24 +329,6 @@ export function responseAssignees<T extends RosterUser>(owner: string | null | u
 
 export function confirmationText(leadName: string | null): string {
   return `Thanks — ${(leadName || "").trim() || PEAK_NAME} has been notified.`;
-}
-
-/** 11:59 PM Chicago on the day `now` falls on there (the task's "due today"). */
-export function chicagoDayEnd(now: number): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const p = Object.fromEntries(parts.map((x) => [x.type, x.value])) as Record<string, string>;
-  const wallAsUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
-  const offset = wallAsUtc - Math.floor(now / 1000) * 1000; // Chicago wall clock − UTC
-  return Date.UTC(+p.year, +p.month - 1, +p.day, 23, 59, 0) - offset;
 }
 
 export type ResponseRow = { id: string; kindLabel: string; revLabel: string; who: string; scopes: string; total: string; message: string; when: string };

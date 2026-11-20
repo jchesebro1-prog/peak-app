@@ -236,8 +236,8 @@ export function DataGroup({
             <div>
               <div style={{ fontSize: 13.5, fontWeight: 600 }}>Clear demo data (go-live)</div>
               <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2, maxWidth: 460 }}>
-                Permanently removes every demo customer, lead, quote, project,
-                flame test, inspection, survey and catalog part so you can
+                Permanently removes every demo customer, lead, quote and
+                catalog part so you can
                 import your real data into a clean database. Keeps your team,
                 company settings and estimating rates.
                 This cannot be undone — export a backup first.

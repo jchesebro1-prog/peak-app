@@ -8,7 +8,7 @@ import { liveSaveHookChecks } from "./test-estimate-live-save-hook";
 import { canAutoSave, DEBOUNCE_MS, flushLanded, INITIAL_LIVE_STATE, liveStatusOf, reduceLive, reportedLiveStatus, retryDelayMs, type LiveGate } from "../src/lib/estimate-live-save/scheduler";
 import { chipLabel, conflictMessage, LIVE_COPY } from "../src/lib/estimate-live-save/copy";
 import { liveKey } from "../src/lib/estimate-live-save/live-key";
-import { portalPdfPreparing, portalPdfUnavailable, type QuotePdfState } from "../src/lib/quote-pdf/state";
+import { type QuotePdfState } from "../src/lib/quote-pdf/state";
 import { limitToLivePatch, liveSaveEligible, liveSaveRefusal, saveAdoptsStatus, saveGoesLive } from "../src/lib/estimate-live-save/rules";
 import { COALESCE_MS, diffEdit, emptyUndoHistory, mapSnapshots, recordEdit, takeRedo, takeUndo, UNDO_CAP, type UndoSnap } from "../src/lib/estimate-live-save/undo";
 
@@ -205,7 +205,6 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(/flagEdit\("re-priced"\)/.test(hookSrc), "undo: a tier re-price is one labelled step");
   ok(/setSectionsState\(\(prev\) => \{[\s\S]{0,260}if \(next !== prev\) undoRef\.current\?\.flagEdit\(\)/.test(hookSrc.slice(setSecAt, setSecAt + 900)), "undo: a user edit that changes nothing leaves no pending flag");
   ok(/const changed = tierReprice\.before !== sectionsRef\.current;\s*if \(changed\) undoRef\.current\?\.flagEdit/.test(hookSrc), "undo: undoing a re-price that changes nothing leaves no pending flag");
-  ok(/fillClientGoals\(prev, r\.goals\)\);\s*undoRef\.current\?\.mapHistory\(\(ss\) => fillClientGoals\(ss, r\.goals\)\)/.test(hookSrc), "undo: the survey goals pre-fill reaches stored snapshots");
   ok(/shortcuts: undoStep === "build" \|\| undoStep === "package"/.test(hookSrc), "undo: Cmd+Z works only on Build and Build package");
   ok(/setActiveId\(\(a\) => \(a && s\.sections\.some/.test(hookSrc), "undo: a restore that removes the active system falls back like a delete");
   const buildStepSrc = readFileSync(join(__dirname, "..", "src/app/(app)/estimator/steps/build-step.tsx"), "utf8");
@@ -326,12 +325,7 @@ export function livePdfPreparingChecks(ok: Ok) {
   const rev = { rev: 1, at: now - 5_000, reason: "sent" as const };
   const pending = { status: "pending", savedAt: now - 1_000, at: now - 1_000 } as unknown as QuotePdfState;
   const live = { revisions: [rev], pdf: pending, contentChangedAt: now - 6_000 };
-  ok(portalPdfPreparing(live, now) && !portalPdfUnavailable(live, now), "send over a stale file: the render after the cut reads as being prepared");
-  ok(!portalPdfPreparing({ ...live, contentChangedAt: now - 1_000 }, now), "an edit after the send is not being prepared: that render never lands on this revision");
-  ok(!portalPdfPreparing({ revisions: [rev], pdf: pending }, now), "no content stamp is not being prepared");
   const marked = { ...pending, stale: true } as QuotePdfState;
-  ok(!portalPdfPreparing({ ...live, pdf: marked }, now), "a stale mark with no render behind it is not being prepared");
-  ok(!portalPdfPreparing({ ...live, revisions: [{ ...rev, pdfBlobPath: "copy" }] }, now), "a revision holding its copy is simply available");
 }
 
 export async function liveSaveDbChecks(ok: Ok) {

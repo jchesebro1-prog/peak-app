@@ -109,6 +109,18 @@ See `.env.example`.
 > customer → or the status select); bidders are stamped with Mark submitted. Vendor quotes are
 > upload-only. The token encryption helper now lives in `src/lib/crypto/token.ts`. Phases 7, 8,
 > 42 (Phase 3 send), 46, 53–58, 60, 63 and the Drive half of 26 below describe removed code.
+>
+> **Stage 3 (2026-11-20)** removed Flame Tests, Rigging Inspections, Venue Assessments / Field Survey
+> and site visits, the Assessments engine (findings, venue profiles), the customer portal (`/portal`,
+> grants, carts, portal catalog and departments, portal service quotes, the Portal quotes queue) and
+> the service pricing engines (flights over drive, renewals, service letters). Old flame-test and
+> inspection quotes are rows in the Quotes hub only, like repair and rental quotes; a quote the portal
+> created is an ordinary quote. Offline sync carries booth captures only. Leads convert without a
+> survey; the Estimator's Client goals is a plain field. Moved helpers: `src/lib/price-rounding.ts`,
+> `portal-legacy.ts`, `card-number.ts`, `catalog-internal.ts`, `curtain-request.ts`, `text-caps.ts`,
+> `csv.ts`, `photo-resize.ts`, `identity/short-code.ts`. Phases 4, 5 (Field Survey), 6 (capture
+> editors), 15, 19, 20, 22, 23, 28, 30, 59, 61 and the portal slice of 62 below describe removed code.
+> Stage 4 (the Design tab) is still to come.
 
 1. ✅ Scaffold, DB, Google SSO + invite list, team/roles port, nav shell,
    Settings (branding/team/roles), deploy-ready config (DEPLOY.md)

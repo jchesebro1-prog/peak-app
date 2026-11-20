@@ -1,5 +1,5 @@
 import { curtainCost, curtainPrice, fabricAreaRateOf, type CurtainSewing } from "@/lib/design/curtain-pricing";
-import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } from "@/lib/service-pricing";
+import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } from "@/lib/price-rounding";
 import { creditLineAmount, isRewardCreditItem } from "@/lib/credit-line";
 import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";

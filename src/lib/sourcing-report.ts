@@ -30,7 +30,7 @@ import { isLaborSku } from "@/lib/design/wire-labor";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { expandLine, type FixtureLookup } from "@/lib/quote-line-members";
 import { partModel } from "@/lib/catalog-rename/sku";
-import { toCsv } from "@/lib/assessments/csv";
+import { toCsv } from "@/lib/csv";
 
 export type SourcingQuote = { id: string; status: string; spec?: unknown; updatedAt?: number; createdAt?: number };
 export type SourcingPart = {

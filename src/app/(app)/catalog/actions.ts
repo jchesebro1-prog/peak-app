@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { clearCatalogPriceList, get as getPart, mergeUpsert, remove as removePart } from "@/lib/stores/catalog";
 import { mfrKey, parseEffectiveDate } from "@/lib/catalog-books";
 import { checkSize } from "@/lib/catalog-import-guard";
@@ -23,7 +22,6 @@ export async function deleteCatalogPriceListAction(formData: FormData): Promise<
   await requirePerm("manage_users");
   if (String(formData.get("confirmation") || "") !== "DELETE") return;
   await clearCatalogPriceList();
-  invalidatePortalIndex();
   revalidatePath("/catalog");
   redirect("/catalog?reset=1");
 }
@@ -39,7 +37,6 @@ export async function deletePartAction(sku: string): Promise<Result> {
   // #304: remove() deletes only a live doc at this exact id — an old SKU
   // retired by a rename (or an already-deleted part) acts on nothing.
   if (!(await removePart(clean))) return { ok: false, error: "That part was renamed or already deleted." };
-  invalidatePortalIndex();
   revalidatePath("/catalog");
   return { ok: true };
 }
@@ -125,7 +122,6 @@ export async function upsertPart(formData: FormData): Promise<void> {
     note: String(formData.get("note") || "").trim() || undefined,
     ...(ports ? { ports } : {}),
   });
-  invalidatePortalIndex();
   revalidatePath("/", "layout");
   redirect("/catalog");
 }
@@ -173,7 +169,6 @@ export async function importCatalog(formData: FormData): Promise<void> {
   });
   if (!res.ok) return fail(res.error);
 
-  invalidatePortalIndex();
   revalidatePath("/", "layout");
   const qs = new URLSearchParams();
   qs.set("mfr", res.mfr);
@@ -303,7 +298,6 @@ export async function writePartSpecFieldsAction(input: {
     console.error("writePartSpecFieldsAction", e);
     return { ok: false, error: "Could not save the spec text. Try again." };
   }
-  invalidatePortalIndex();
   revalidatePath("/catalog");
   revalidatePath("/design/specs/library");
   return { ok: true };

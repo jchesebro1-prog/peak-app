@@ -1216,8 +1216,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 >
                   <div style={{ ...microLabel, marginBottom: 2 }}>Acceptance</div>
                   <div style={{ fontSize: 11.5, color: "#5b616e", lineHeight: 1.6, marginBottom: 18 }}>
-                    To proceed, sign and return this quote — or accept it online through your{" "}
-                    {p.companyName} customer portal.
+                    To proceed, sign and return this quote.
                   </div>
                   <div
                     className="est-sig"

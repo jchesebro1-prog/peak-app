@@ -15,7 +15,6 @@ import MoveLinesBar from "../move-lines-bar";
 import { isMovableLine, lineRefKey, parseLineRefKey, type LineRef } from "@/lib/estimate-line-move/move";
 import { CommentPin, useCommentsFocusRefresh, useResolveComment } from "../comment-pins";
 import SystemLibraryModal from "../system-library-modal";
-import AiScopeModal from "../ai-scope-modal";
 import CurtainModal from "../curtain-modal";
 import FixtureModal from "../fixture-modal";
 import AddSystemModal from "../add-system-modal";
@@ -24,7 +23,6 @@ import TrackModal from "../track-modal";
 import PipeModal from "../pipe-modal";
 import LinesetModal from "../lineset-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
-import { PortalPanel } from "../portal-panel";
 import { RepriceBanner } from "../reprice-banner";
 import { bonusNotFigured, bonusRulesApply, isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
 import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
@@ -55,7 +53,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     markBuilt,
     setGroupAlternateAction,
     setSystemGroup,
-    addAiLine,
     addCurtain,
     addCustomPart,
     addFixture,
@@ -84,15 +81,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     linesetSec,
     linesetTypes,
     addVendorLine,
-    aiAdded,
-    aiBusy,
-    aiErr,
-    aiLines,
-    aiOpen,
-    aiScope,
-    aiScopeInserted,
-    aiSource,
-    aiTargetSection,
     applyAutoMiles,
     applyTravelTrip,
     blobUploads,
@@ -126,7 +114,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     importMaterials,
     inc,
     initial,
-    insertAiScope,
     isExpanded,
     isInternal,
     isOpenFor,
@@ -151,7 +138,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     openTrackEdit,
     openVendorEdit,
     placeLibrarySystem,
-    portalStatusError,
     repricedOnRevise,
     projectDiscounts,
     rate,
@@ -164,13 +150,11 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     resetAutoHrs,
     resetSystemSell,
     roundSystemPrice,
-    runAiDraft,
     savingCustom,
     scrollRef,
     searchQuotes,
     sections,
     setActiveId,
-    setAiOpen,
     setAutoHrs,
     setCurtainField,
     setCurtainTrack,
@@ -496,7 +480,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               {boxSaleLaborBanner(s.boxSaleLabor)}
             </div>
           )}
-          {initial.portal && <PortalPanel data={initial.portal} statusError={portalStatusError} />}
           {pinned.whole.length > 0 && (
             <div style={{ margin: "0 0 12px" }}>
               <CommentPin
@@ -907,26 +890,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onPickVendor={(c) => setVendorCompany(c)}
           onTypedVendor={(name) => setVendorField("vendor", name)}
           onUnlinkVendor={() => setVendorCompany(null)}
-        />
-      )}
-      {aiSource && aiOpen && (
-        <AiScopeModal
-          sourceLabel={
-            (aiSource.kind === "survey" ? "field survey" : "inspection") +
-            " · " +
-            aiSource.label
-          }
-          targetSection={aiTargetSection()?.name || ""}
-          busy={aiBusy}
-          error={aiErr}
-          scope={aiScope}
-          lines={aiLines}
-          scopeInserted={aiScopeInserted}
-          addedLines={aiAdded}
-          onInsertScope={insertAiScope}
-          onAddLine={addAiLine}
-          onRetry={runAiDraft}
-          onClose={() => setAiOpen(false)}
         />
       )}
     </div>

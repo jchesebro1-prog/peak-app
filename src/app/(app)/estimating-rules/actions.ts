@@ -12,9 +12,6 @@ import {
   exportFileName,
   type PricingEntry,
 } from "@/lib/stores/pricing";
-import { setVenueDoctrineEntry } from "@/lib/settings";
-import { VENUE_CLASSES, type VenueClass } from "@/lib/stores/venue-classes";
-import type { VenueDoctrineEntry } from "@/lib/venue-doctrine";
 
 /**
  * Estimating Rules mutations — the pricing registry editor.
@@ -64,31 +61,4 @@ export async function exportCsvAction() {
 export async function exportJsonAction() {
   await requirePerm("manage_users");
   return { json: await exportJSON(), name: exportFileName("json") };
-}
-
-export async function saveVenueDoctrineAction(
-  venueClass: VenueClass,
-  entry: VenueDoctrineEntry
-) {
-  await requirePerm("manage_users");
-  if (!VENUE_CLASSES.some((item) => item.key === venueClass)) {
-    return { ok: false as const };
-  }
-  if (
-    typeof entry?.curtains !== "string" ||
-    typeof entry?.lighting !== "string" ||
-    typeof entry?.confirmed !== "boolean"
-  ) {
-    return { ok: false as const };
-  }
-
-  // #343 — one class's entry, edited under the settings row lock.
-  await setVenueDoctrineEntry(venueClass, {
-    curtains: entry.curtains.trim().slice(0, 500),
-    lighting: entry.lighting.trim().slice(0, 500),
-    confirmed: entry.confirmed,
-  });
-  revalidatePath("/estimating-rules");
-  revalidatePath("/venue-assessments", "layout");
-  return { ok: true as const };
 }

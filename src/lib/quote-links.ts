@@ -15,14 +15,13 @@ export type QuoteLinkInput = { id: string; quoteType?: string | null };
 export function quoteBuilderHref(q: QuoteLinkInput): string {
   const id = encodeURIComponent(q.id);
   switch (q.quoteType) {
-    case "flame_test":
-      return `/flame-tests/quote?id=${id}`;
-    case "inspection":
-      return `/inspections/quote?id=${id}`;
     case "consulting":
       return `/design/engagements/quote?id=${id}`;
-    // The repair and rental builders were removed: an old quote of either type
-    // opens its row in the Quotes hub (status, value and history stay readable).
+    // The flame test, inspection, repair and rental builders were removed: an old
+    // quote of any of those types opens its row in the Quotes hub (status, value
+    // and history stay readable).
+    case "flame_test":
+    case "inspection":
     case "repair":
     case "rental":
       return `/quotes?id=${id}`;
@@ -41,4 +40,9 @@ export function quoteBuilderHref(q: QuoteLinkInput): string {
  *  into a self-redirect loop. */
 export function estimatorShouldRedirect(q: QuoteLinkInput): boolean {
   return !quoteBuilderHref(q).startsWith("/estimator?");
+}
+
+/** Quote types whose builder was removed — a row in the Quotes hub only (no builder link, no saved PDF). */
+export function hasNoBuilder(quoteType: string | null | undefined): boolean {
+  return quoteType === "flame_test" || quoteType === "inspection" || quoteType === "repair" || quoteType === "rental";
 }

@@ -198,60 +198,6 @@ export async function getCompanySummaryAction(id: string): Promise<CompanySummar
   return getCompanySummary(String(id || ""));
 }
 
-/* ---- customer portal access (IDEAS #47) ---- */
-
-export async function createPortalGrantAction(input: {
-  customerId: string;
-  name: string;
-  email: string;
-}) {
-  const user = await requireUser();
-  const { get } = await import("@/lib/stores/customers");
-  const { createGrant, grantPath } = await import("@/lib/portal");
-  const cust = await get(String(input.customerId || ""));
-  const name = String(input.name || "").trim();
-  const email = String(input.email || "").trim();
-  if (!cust) return { ok: false as const, error: "Unknown customer." };
-  if (!name || !email)
-    return { ok: false as const, error: "A name and email are required." };
-  const grant = await createGrant({
-    customerId: cust.id,
-    name,
-    email,
-    createdBy: user.name,
-  });
-  revalidatePath("/companies/" + encodeURIComponent(cust.id));
-  return { ok: true as const, path: grantPath(grant), ...PORTAL_LINK_NOT_EMAILED };
-}
-
-/** The app no longer sends email: a portal link is copied and sent by hand. */
-const PORTAL_LINK_NOT_EMAILED = { emailed: "not-sent" as "sent" | "unknown" | "not-sent" | "too-soon", note: "Copy the link and send it yourself — the app no longer sends email." };
-
-/** An active grant's sign-in link again (to copy). */
-export async function resendPortalLinkAction(input: { customerId: string; grantId: string }) {
-  const user = await requireUser();
-  const { get } = await import("@/lib/stores/customers");
-  const { grantPath, grantsFor } = await import("@/lib/portal");
-  const customerId = String(input?.customerId || "");
-  const grantId = String(input?.grantId || "");
-  const cust = customerId ? await get(customerId) : null;
-  if (!cust) return { ok: false as const, error: "Unknown customer." };
-  const g = (await grantsFor(cust.id)).find((x) => x.id === grantId);
-  if (!g || g.revokedAt || (g.expiresAt && g.expiresAt < Date.now())) return { ok: false as const, error: "That access link is no longer active." };
-  return { ok: true as const, path: grantPath(g), ...PORTAL_LINK_NOT_EMAILED };
-}
-
-export async function revokePortalGrantAction(input: {
-  customerId: string;
-  grantId: string;
-}) {
-  await requireUser();
-  const { revokeGrant } = await import("@/lib/portal");
-  await revokeGrant(String(input.grantId || ""));
-  revalidatePath("/companies/" + encodeURIComponent(String(input.customerId || "")));
-  return { ok: true as const };
-}
-
 /** #21 — the Activity card's note composer. parentKind "customer" is the
  *  only v1 composer; the NoteRecord is attachable by design (lead/project/
  *  quote surfaces come later with no migration). */

@@ -3,17 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { boxSaleLaborSystems, boxSaleSaveProblem, isBoxSaleQuoteType, isBoxSaleSource, newSystemPresentation } from "@/lib/estimate-box-sale/rules";
 import { SIDE_OPEN_KEY } from "./estimator-styles";
-import { surveyGoalsAction } from "./output-actions";
 import { listReviewCommentsAction } from "./review-actions";
 import type { ReviewComment } from "@/lib/estimate-review/comments";
-import { fillClientGoals } from "@/lib/estimate-output/goals";
 import { addGroup, groupBlocks, moveGroupBy, moveSystemBy, moveSystemTo, newGroupId, normalizeSystemOrder, removeGroup, renameGroup, setGroupAlternate, unmarkEdited, withoutBuilt, type SystemGroup } from "@/lib/estimate-groups/groups";
 import type { Dispatch, SetStateAction } from "react";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
-import { currentLiveKeyAction, saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
+import { currentLiveKeyAction, saveBonusAlternatesAction, saveBonusSplitAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
 import { isBonusItem, type BonusKind } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -22,7 +20,6 @@ import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines, w
 import { applyProjectDiscounts, parseDiscountPct, projectDiscountsKey, PROJECT_DISCOUNT_NOTE_MAX, type ProjectDiscounts } from "@/lib/project-discounts/rules";
 import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
-import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
 import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMarkup, buildLaborItems, computeCurtain, computeLabor, lineMarkupOf, makeLaborRate, repricedAtLineMarkup, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
 import type { PdfToggle } from "./preview-doc";
@@ -232,8 +229,8 @@ export const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3�
 export function useEstimatorState(props: EstimatorProps) {
   const {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, pipeTypes, linesetTypes, riggingParts, laborRates, fixtureRates,
-    fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
-    assumptionLibrary, freightRule, portalStatusError, specKeys, canApplyCredit,
+    fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, people,
+    assumptionLibrary, freightRule, specKeys, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
     repricedOnRevise = null,
   } = props;
@@ -832,14 +829,6 @@ export function useEstimatorState(props: EstimatorProps) {
   }, [draftBaselineTick, modalDrafts]);
   const [, startTransition] = useTransition();
 
-  /* ---- AI scope draft (Phase 8, D4) — drafts only, estimator sets prices ---- */
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiErr, setAiErr] = useState<string | null>(null);
-  const [aiScope, setAiScope] = useState<string | null>(null);
-  const [aiLines, setAiLines] = useState<DraftedLine[] | null>(null);
-  const [aiScopeInserted, setAiScopeInserted] = useState(false);
-  const [aiAdded, setAiAdded] = useState<Record<number, boolean>>({});
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -2597,94 +2586,6 @@ export function useEstimatorState(props: EstimatorProps) {
     else w.location.href = href;
   };
 
-  /* ---- Scope draft from survey/inspection (S12/D83 — rules-based) ----
-     Deterministic: the linked record's captured fields are assembled into a
-     scope paragraph (no model call, no line items — Jeff adds items
-     manually). "Insert scope" appends the paragraph to the quote note. */
-  const aiTargetSection = (): SpecSection | null =>
-    sections.find((s) => s.id === activeId) || sections[0] || null;
-
-  /* #301 (R3): a page opened from a site visit (?surveyId=) copies that
-     visit's Client goals into every system whose discipline (stored, else
-     inferred) matches and whose goals are blank. Automatic, like the tier
-     re-price, so it writes setSectionsState and leaves the #254 banner alone;
-     fillClientGoals returns the same array when nothing matches (no dirty). */
-  const goalsSurveyId = aiSource?.kind === "survey" ? aiSource.id : null;
-  useEffect(() => {
-    if (!goalsSurveyId) return;
-    let live = true;
-    // Raw state on purpose (not the setSections wrapper, which clears the #254
-    // banner). Automatic, so — like the freight auto-apply — the same pre-fill
-    // goes into a live re-price banner's Undo snapshot, or Undo would drop it.
-    surveyGoalsAction(goalsSurveyId)
-      .then((r) => {
-        if (!live || !r.ok) return;
-        setSectionsState((prev) => fillClientGoals(prev, r.goals));
-        undoRef.current?.mapHistory((ss) => fillClientGoals(ss, r.goals));
-        setTierReprice((n) => (n ? { ...n, before: fillClientGoals(n.before, r.goals) } : n));
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [goalsSurveyId]);
-
-  const runAiDraft = () => {
-    if (!aiSource) return;
-    setAiBusy(true);
-    setAiErr(null);
-    startTransition(async () => {
-      const res = await draftQuoteScopeAction(
-        aiSource.kind === "survey"
-          ? { surveyId: aiSource.id }
-          : { inspectionId: aiSource.id }
-      );
-      if (res.ok) {
-        setAiScope(res.scope);
-        setAiLines(res.lines);
-      } else {
-        setAiErr(res.error);
-      }
-      setAiBusy(false);
-    });
-  };
-
-  const openAiDraft = () => {
-    setAiOpen(true);
-    setAiScopeInserted(false);
-    setAiAdded({});
-    setAiScope(null);
-    setAiLines(null);
-    runAiDraft();
-  };
-
-  const insertAiScope = () => {
-    if (aiScope == null) return;
-    const cur = (quoteNote || "").trim();
-    onQuoteNote(cur ? cur + "\n\n" + aiScope : aiScope);
-    setAiScopeInserted(true);
-  };
-
-  const addAiLine = (index: number, line: DraftedLine) => {
-    const target = aiTargetSection();
-    if (!target) return;
-    const qty = Number.isFinite(line.qty) && line.qty > 0 ? line.qty : 1;
-    // Price/cost left at 0 — the estimator sets pricing (guardrail D6).
-    pushItems(target.id, [
-      {
-        id: nextId(),
-        sku: "AI",
-        desc: line.description,
-        qty,
-        unit: (line.unit || "ea").trim() || "ea",
-        cost: 0,
-        price: 0,
-        custom: true,
-      },
-    ]);
-    setAiAdded((m) => ({ ...m, [index]: true }));
-  };
-
   /* ---------------- add-flows (portals + modals) ----------------
      One coordinator for every input method, so "click a different input
      method" is a single, uniform transition: discard the OUTGOING draft, seed
@@ -3613,7 +3514,6 @@ export function useEstimatorState(props: EstimatorProps) {
     actionError,
     actionNotice,
     activeId,
-    addAiLine,
     addCurtain,
     addCustomPart,
     customEdit,
@@ -3632,15 +3532,6 @@ export function useEstimatorState(props: EstimatorProps) {
     addPipe,
     addLineset,
     addVendorLine,
-    aiAdded,
-    aiBusy,
-    aiErr,
-    aiLines,
-    aiOpen,
-    aiScope,
-    aiScopeInserted,
-    aiSource,
-    aiTargetSection,
     applyAutoMiles,
     applySync,
     applyTravelTrip,
@@ -3710,7 +3601,6 @@ export function useEstimatorState(props: EstimatorProps) {
     importMaterials,
     inc,
     initial,
-    insertAiScope,
     installTimeframe,
     intros,
     isExpanded,
@@ -3741,7 +3631,6 @@ export function useEstimatorState(props: EstimatorProps) {
     onInstallTimeframe,
     onNotIncluded,
     onQuoteNote,
-    openAiDraft,
     openCurtainEdit,
     openInput,
     openInputMethod,
@@ -3777,7 +3666,6 @@ export function useEstimatorState(props: EstimatorProps) {
     pickVenue,
     pipelines,
     placeLibrarySystem,
-    portalStatusError,
     repricedOnRevise,
     preparedValue,
     projectName,
@@ -3798,7 +3686,6 @@ export function useEstimatorState(props: EstimatorProps) {
     resetSystemSell,
     revNum,
     roundSystemPrice,
-    runAiDraft,
     samePerson,
     saveNow,
     savingCustom,
@@ -3810,7 +3697,6 @@ export function useEstimatorState(props: EstimatorProps) {
     setGroupAlternateAction,
     setActionNotice,
     setActiveId,
-    setAiOpen,
     setAutoHrs,
     setCategory,
     setCurtainField,

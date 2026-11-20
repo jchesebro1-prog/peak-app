@@ -3,8 +3,6 @@ import { getDb, withTransaction } from "@/db";
 import { appSettings } from "@/db/schema";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
-import { resolveVenueDoctrine, type VenueDoctrineEntry } from "@/lib/venue-doctrine";
-import type { VenueClass } from "@/lib/stores/venue-classes";
 
 /**
  * AppSettings — port of settings.js. The DB row stores a sparse patch over
@@ -39,12 +37,11 @@ export type AppSettingsData = {
   seedDemo: boolean;
   feedbackEmail: string;
   offices: Office[];
-  /** Site-intake type catalog overrides, keyed by category (e.g.
-   * "lighting.fixture") — see DEFAULT_INTAKE_CATALOG in survey-intake.ts. */
-  intakeCatalog?: Record<string, string[]>;
-  /** Site-visit reason picklist overrides (D76) — see DEFAULT_VISIT_REASONS
-   *  in stores/site-visits.ts; empty/absent means use the defaults. */
-  visitReasons?: string[];
+  /** Stored settings of the removed Venue Assessments / site visits (the intake type catalog, the visit-reason
+   *  picklist, the Final thoughts tags). Nothing reads or edits them any more; the values stay in the settings row. */
+  intakeCatalog?: unknown;
+  visitReasons?: unknown;
+  surveyInternalTags?: unknown;
   /** Consulting phase-menu overrides (D90) — see DEFAULT_CONSULTING_PHASES
    *  in stores/engagements.ts; empty/absent means use the defaults. */
   consultingPhases?: string[];
@@ -104,9 +101,6 @@ export type AppSettingsData = {
    *  resolveDocumentCategories in lib/document-categories returns the seed
    *  when absent. Edited in Settings → Admin → Document categories. */
   documentCategories?: import("@/lib/document-categories").DocumentCategory[];
-  /** #344 — Venue Assessments Final thoughts: internal tags. FULL REPLACEMENT on save; resolveSurveyTags in
-   *  lib/survey-tags returns the starter list when absent. Edited in Settings → Field. */
-  surveyInternalTags?: import("@/lib/survey-tags").SurveyTag[];
   /** #216 — Settings → Venue types. FULL REPLACEMENT list; resolved by
    *  venueTypesFrom (lib/venue-types) — absent = the seed (5 built-ins +
    *  Gym Stage). sites.venue_kind stores a type key. */
@@ -116,9 +110,8 @@ export type AppSettingsData = {
    *  a missing key = blank = always needs review. FULL REPLACEMENT on save,
    *  read through reviewLimitsFrom (lib/review-limits); absent = {}. */
   reviewLimits?: import("@/lib/review-limits").ReviewLimits;
-  /** Venue-class soft-goods and lighting guidance (D132), stored sparsely
-   * over the source-sheet defaults in lib/venue-doctrine.ts. */
-  venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
+  /** Stored venue-class guidance of the removed Venue Assessments (D132). Nothing reads or edits it any more. */
+  venueDoctrine?: unknown;
   /** Pre-#210 Assemblies-tab records. Since the fixture builder they are
    *  converted into `subassemblies` fixture rows (src/lib/fixtures-migrate.ts)
    *  and this array is a read-only backup — never written by the app. */
@@ -180,7 +173,7 @@ export function designatorDigitsOf(s: { designatorDigits?: 1 | 2 | null } | null
   return s?.designatorDigits === 1 ? 1 : 2;
 }
 
-/** #145 — the intake four (survey-intake.ts DISCIPLINE_GROUPS) as defaults. */
+/** #145 — the four disciplines as defaults. */
 export const DEFAULT_CONSULTING_DISCIPLINES = ["rigging", "curtain", "lighting", "av"];
 
 export function mergedConsultingDisciplines(stored?: string[] | null): string[] {
@@ -532,19 +525,5 @@ export async function writeTemplateOverrides(
       templatesMeta[id] = { ...stamp };
     }
     return { templates, templatesMeta };
-  });
-}
-
-/** Estimating Rules → venue doctrine (#343): replace one venue class's entry
- *  under the settings row lock. The stored map is resolved over the source-
- *  sheet defaults first and written whole, exactly as the action did before. */
-export async function setVenueDoctrineEntry(
-  venueClass: VenueClass,
-  entry: VenueDoctrineEntry
-): Promise<void> {
-  await updateSettings((cur) => {
-    const venueDoctrine = resolveVenueDoctrine(settingsFrom(cur).venueDoctrine);
-    venueDoctrine[venueClass] = { ...entry };
-    return { venueDoctrine };
   });
 }

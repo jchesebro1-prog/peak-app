@@ -63,20 +63,6 @@ export function pickContactName(cust: { contacts: ContactLike[] }, name: string,
   return (cs.find((c) => c.primary) || cs[0])?.name || "";
 }
 
-/** On/off for the multi-venue builders (flame, repair, inspection): a valid
- *  forwarded venue is the only one on; otherwise the existing rule — primary
- *  (or the only venue) on, else the first. */
-export function seedVenueOn(locs: LocLike[], venueId: string): Record<string, boolean> {
-  const on: Record<string, boolean> = {};
-  if (venueId && locs.some((l) => l.id === venueId)) {
-    locs.forEach((l) => (on[l.id] = l.id === venueId));
-    return on;
-  }
-  locs.forEach((l) => (on[l.id] = !!l.primary || locs.length === 1));
-  if (locs.length && !locs.some((l) => on[l.id])) on[locs[0].id] = true;
-  return on;
-}
-
 export type IntakeInitial = {
   type: ServiceType;
   category: string;

@@ -15,7 +15,7 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { scopesTotal } from "@/lib/consulting-stages";
 import { PrintButton } from "./controls";
-import letterhead from "@/app/(app)/flame-tests/letter/peak-letterhead.jpg";
+import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 
 export const metadata = { title: "Consulting document — Quartzite-6" };
 

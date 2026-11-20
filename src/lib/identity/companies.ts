@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { CODE_RE } from "@/lib/assessments/codes";
+import { CODE_RE } from "@/lib/identity/short-code";
 import { isPlaceholderCompany } from "@/lib/identity/placeholder";
 import { getDb } from "@/db";
 import {

@@ -2,29 +2,19 @@
  * #21 customer Activity feed — PURE per-source row builders. Structural arg
  * types, ZERO store imports (every store module value-imports doc-store,
  * which must never reach this spec-tested / potentially-client-safe layer).
- * The ONE allowed import is VISIT_STAGE_META from @/lib/lead-thread — that
- * module is dependency-free by construction (plan 03) — and `@/lib/estimate-number`
- * (#223), which is pure by construction.
+ * The one import is `@/lib/estimate-number` (#223), pure by construction.
  *
- * Vocab mirrors (drift-guarded by exact-literal specs, see the #21 section
- * of the harness): QUOTE_VERB mirrors quotes.STAGE_LABEL's stage set;
- * SURVEY_STAGE_LABEL mirrors surveys.STAGES labels.
+ * QUOTE_VERB mirrors quotes.STAGE_LABEL's stage set (drift-guarded by an
+ * exact-literal spec in the harness).
  */
-import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 // Type-only — erased at build time, so the zero-store-import / client-bundle
 // rule still holds at runtime (no store code is ever pulled in here).
 import type { QuoteStatus } from "@/lib/stores/quotes";
-import type { SurveyStage } from "@/lib/stores/surveys";
 
 export type FeedKind =
   | "note"
   | "quote"
-  | "comm"
-  | "visit"
-  | "flame"
-  | "inspection"
-  | "survey"
   ;
 
 export type FeedRow = {
@@ -50,11 +40,6 @@ export type FeedRow = {
 export const FEED_META: Record<FeedKind, { letter: string; ink: string; soft: string }> = {
   note: { letter: "N", ink: "#8a6d1f", soft: "#fbf3dd" },
   quote: { letter: "Q", ink: "#3155a8", soft: "#e9eefb" },
-  comm: { letter: "C", ink: "#7b3f8a", soft: "#f3eaf5" },
-  visit: { letter: "V", ink: "#1f7a52", soft: "#eaf6ef" },
-  flame: { letter: "F", ink: "#b4543a", soft: "#f8ece7" },
-  inspection: { letter: "I", ink: "#b4543a", soft: "#f8ece7" },
-  survey: { letter: "S", ink: "#3155a8", soft: "#e9eefb" },
 };
 
 function row(
@@ -110,87 +95,6 @@ export function quoteFeedRows(q: {
       )
     );
   return rows;
-}
-
-export function visitFeedRows(v: {
-  id: string;
-  reason: string;
-  stage: string;
-  startAt: number | null;
-  createdAt: number;
-  assignedTo: string;
-}): FeedRow[] {
-  const meta = VISIT_STAGE_META[v.stage as keyof typeof VISIT_STAGE_META];
-  return [
-    row(
-      "visit",
-      `visit:${v.id}`,
-      v.startAt ?? v.createdAt,
-      `Site visit — ${v.reason}`,
-      meta ? meta.label : v.stage,
-      "/venue-assessments",
-      v.assignedTo || ""
-    ),
-  ];
-}
-
-const JOB_NOUN = { flame: "Flame test", inspection: "Inspection" } as const;
-const JOB_OPEN_VERB = { flame: "approved", inspection: "requested" } as const;
-const JOB_HREF = { flame: "/flame-tests", inspection: "/inspections" } as const;
-
-/**
- * Flame / repair / inspection point stamps. openedAt is approvedAt (flame,
- * repair — epoch-ms, always set) or requestedAt (inspection — epoch-ms
- * DEFAULTING TO 0 on legacy records, hence the falsy skip). completedAt is
- * epoch-ms for flame/repair; for inspections the loader precomputes it via
- * the store's completedAtOf (ISO surveyDate/reportDate → ms) — the pure
- * module never parses dates. The "scheduled" transition has NO ms stamp
- * anywhere (scheduledDate is a bare ISO day) — deliberately skipped.
- */
-export function jobFeedRows(
-  kind: "flame" | "inspection",
-  job: {
-    id: string;
-    venue: string;
-    openedAt: number | null;
-    openedBy: string;
-    completedAt: number | null;
-    completedBy: string;
-  }
-): FeedRow[] {
-  const rows: FeedRow[] = [];
-  if (job.openedAt)
-    rows.push(
-      row(kind, `${kind}:${job.id}:open`, job.openedAt, `${JOB_NOUN[kind]} ${job.id} ${JOB_OPEN_VERB[kind]}`, job.venue, JOB_HREF[kind], job.openedBy || "")
-    );
-  if (job.completedAt != null)
-    rows.push(
-      row(kind, `${kind}:${job.id}:done`, job.completedAt, `${JOB_NOUN[kind]} ${job.id} completed`, job.venue, JOB_HREF[kind], job.completedBy || "")
-    );
-  return rows;
-}
-
-/** Mirrors surveys.STAGES labels (same drift guard as QUOTE_VERB). */
-const SURVEY_STAGE_LABEL: Record<SurveyStage, string> = {
-  requested: "Requested",
-  scheduled: "Scheduled",
-  onsite: "On-site",
-  completed: "Completed",
-};
-
-/** One row per survey at updatedAt — surveys carry no completedAt. */
-export function surveyFeedRows(s: { id: string; stage: string; venue: string; updatedAt: number }): FeedRow[] {
-  return [
-    row(
-      "survey",
-      `survey:${s.id}`,
-      s.updatedAt,
-      `Survey ${s.id} — ${SURVEY_STAGE_LABEL[s.stage as SurveyStage] ?? s.stage}`,
-      s.venue || "",
-      `/venue-assessments?id=${encodeURIComponent(s.id)}`,
-      ""
-    ),
-  ];
 }
 
 /** Real NoteRecord rows — full text as title (the UI clamps display). A

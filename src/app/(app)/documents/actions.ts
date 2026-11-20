@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { deleteBlob } from "@/lib/blob";
 import { normalizeCategory } from "@/lib/document-categories";
-import { isVisibility, resolveDocumentScope } from "@/lib/document-rules";
+import { resolveDocumentScope } from "@/lib/document-rules";
 import { documentScopeFacts, finalizeDocumentUpload, type FinalizeDocumentInput } from "@/lib/documents-upload";
 import {
   documentCategories,
@@ -43,7 +43,6 @@ export async function updateDocumentAction(
   patch: {
     title?: string;
     category?: string;
-    visibility?: string;
     siteId?: string | null;
     projectId?: string | null;
     notes?: string;
@@ -85,7 +84,6 @@ export async function updateDocumentAction(
     title: typeof p.title === "string" ? p.title : undefined,
     // The store writes category as given — only a listed key (or Other) lands.
     category: p.category !== undefined ? normalizeCategory(categories, p.category) : undefined,
-    visibility: isVisibility(p.visibility) ? p.visibility : undefined,
     siteId: scope.siteId,
     projectId: scope.projectId,
     notes: typeof p.notes === "string" ? p.notes : undefined,

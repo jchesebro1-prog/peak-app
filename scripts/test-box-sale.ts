@@ -147,7 +147,7 @@ function wiringChecks(ok: Ok) {
   ok(/boxSale\?: boolean;/.test(act.slice(act.indexOf("export type SavePayload"), act.indexOf("export type SaveResult"))), "box sale save (source): SavePayload carries an optional boxSale");
   const place = act.slice(act.indexOf("async function placeSystemInEstimate("), act.indexOf("export type CopySystemTarget"));
   const carry = place.indexOf("...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),");
-  ok(carry > place.indexOf("created = await create({") && carry < place.indexOf("}, { bidScopeOnly: scopeOnly.stamp });"),
+  ok(carry > place.indexOf("created = await create({") && carry < place.indexOf("} catch (e) {", place.indexOf("created = await create({")),
     "box sale move/copy (source): Move / Copy system → New estimate creates the estimate with the STORED source's flag");
   ok(!place.slice(0, place.indexOf("// Estimator bonuses: the new draft estimate")).replace("if (boxSaleOf(existing)) {\n      const problem = boxSaleSaveProblem(true, [placed]);", "").includes("boxSale"),
     "box sale move/copy (source): Move / Copy into an existing estimate leaves the target's flag alone (it only refuses labor into a box sale)");
@@ -259,7 +259,6 @@ function buildUiChecks(ok: Ok) {
   const step = rd("src/app/(app)/estimator/steps/build-step.tsx");
   ok(step.includes("{s.boxSaleLabor.length > 0 && (") && step.includes("{boxSaleLaborBanner(s.boxSaleLabor)}") && step.includes("boxSale={s.boxSale}"),
     "box sale build (source): Build shows the labor banner and tells each card it is a box sale");
-  ok(rd("src/app/(app)/estimator/header-more-menu.tsx").includes("{s.aiSource && !s.boxSale && ("), "box sale build (source): More ▾ hides Draft from survey/inspection");
   const us = rd("src/app/(app)/estimator/use-estimator-state.ts");
   ok(us.includes("const [boxSale, setBoxSale] = useState(initial.boxSale);") && us.includes("const canBoxSale = isBoxSaleQuoteType(initial.quoteType) && isBoxSaleSource(initial.bonusSource);") &&
      us.includes("const boxSaleLabor = useMemo(() => (boxSale ? boxSaleLaborSystems(sections) : []), [boxSale, sections]);") && /\n    boxSale,\n    boxSaleLabor,\n    canBoxSale,\n    setBoxSale,\n/.test(us),
@@ -412,7 +411,7 @@ async function finalReviewChecks(ok: Ok) {
 
   // Minor: the Change type hint.
   ok(boxSwitchHint("box_sale", "system") === "Use the Box goods sale switch in the Estimator's Quote details." && boxSwitchHint("system", "box_sale") === boxSwitchHint("box_sale", "system") &&
-     boxSwitchHint("system", "system") === null && boxSwitchHint("box_sale", "box_sale") === null && boxSwitchHint("flame_test", "system") === null && boxSwitchHint("box_sale", "flame_test") === null,
+     boxSwitchHint("system", "system") === null && boxSwitchHint("box_sale", "box_sale") === null && boxSwitchHint("consulting", "system") === null && boxSwitchHint("box_sale", "consulting") === null,
     "box sale final minor: Change type between System and Box goods sale hints at the Estimator's switch");
   ok(rd("src/app/(app)/quotes/new/intake-form.tsx").includes("boxSwitchHint("), "box sale final minor (source): the intake shows the hint");
 
@@ -488,9 +487,6 @@ function modelNumberChecks(ok: Ok) {
   ok(at > 0 && pr.slice(at, pr.indexOf("return (", at)).includes("loadBomModelPartsFor(doc.sections)") && pr.includes("bomModelParts={bomModelParts}"),
     "box sale + #365 (source): the print route's bomLayout branch (BOM PDF and a box sale's whole PDF) reads the models");
   const gate = 'view === "bom" || docProps.showModels === true ? await loadBomModelPartsFor(docProps.sections) : undefined';
-  ok(rd("src/app/portal/quotes/[id]/page.tsx").includes(gate) && rd("src/app/share/quote/[id]/[token]/page.tsx").includes(gate) &&
-    rd("src/components/online-estimate/online-estimate.tsx").includes("docProps.showModels === true ? { ...docProps, bomModelParts } : docProps"),
-    "box sale + #365 (source): the portal and share pages read the models for a box sale on the default view too, and OnlineEstimateView passes them");
 }
 
 // (later tasks: check functions above this line)

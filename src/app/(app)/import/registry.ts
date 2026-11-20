@@ -8,9 +8,6 @@
 
 import * as Customers from "@/lib/stores/customers";
 import * as Leads from "@/lib/stores/leads";
-import * as Flame from "@/lib/stores/flame-jobs";
-import * as Inspections from "@/lib/stores/inspections";
-import * as Surveys from "@/lib/stores/surveys";
 import * as Quotes from "@/lib/stores/quotes";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { DEFAULT_PIPELINES, type Pipelines } from "@/lib/pipelines";
@@ -34,8 +31,6 @@ import {
   resolveCustomerForRow,
   type CustomerRef,
 } from "./link";
-
-const YEAR = 365 * 86400000;
 
 type Values = Record<string, string | number>;
 
@@ -714,126 +709,6 @@ const WRITERS: Record<string, Writer> = {
     },
   },
 
-  flametests: {
-    count: async () => (await Flame.getAll()).length,
-    load: async () => (await Flame.getAll()) as unknown as Record<string, unknown>[],
-    find: (v, cache) =>
-      cache.find((j) => ci(j.customer, v.customer) && ci(j.venue || "", v.venue || "")) || null,
-    create: async (v, cache) => {
-      const completedAt = isoToMs(str(v.completedDate)) ?? Date.now();
-      await Flame.create({
-        customer: str(v.customer),
-        venue: str(v.venue),
-        curtainsTotal: num(v.curtains),
-        contact: v.contact ? { name: str(v.contact), email: str(v.email) } : null,
-        stage: "completed",
-        completedAt,
-        dueAt: completedAt + YEAR,
-        results: {
-          overall: "pass",
-          cert: str(v.certNo),
-          performedBy: "",
-          method: "",
-          venues: [],
-          notes: str(v.notes),
-        },
-      });
-      cache.push({ customer: str(v.customer), venue: str(v.venue) });
-    },
-    exportObjects: async () => {
-      const list = await Flame.getAll();
-      return list.map((j) => {
-        const r = j.results;
-        return {
-          customer: j.customer || "",
-          venue: j.venue || "",
-          contact: j.contact?.name || "",
-          email: j.contact?.email || "",
-          curtains: j.curtainsTotal || 0,
-          passed: "",
-          completedDate: j.completedAt ? isoOf(j.completedAt) : "",
-          certNo: r?.cert || "",
-          notes: r?.notes || "",
-        };
-      });
-    },
-  },
-
-  inspections: {
-    count: async () => (await Inspections.getAll()).length,
-    load: async () => (await Inspections.getAll()) as unknown as Record<string, unknown>[],
-    find: (v, cache) =>
-      cache.find(
-        (s) =>
-          ci(s.customer, v.customer) &&
-          ci(s.venue || "", v.venue || "") &&
-          (!v.surveyDate || str(s.surveyDate) === str(v.surveyDate))
-      ) || null,
-    create: async (v, cache) => {
-      await Inspections.create({
-        customer: str(v.customer),
-        venue: str(v.venue),
-        venueType: str(v.venueType) || "Proscenium theater",
-        address: str(v.address),
-        contact: str(v.contact),
-        contactEmail: str(v.email),
-        inspector: str(v.inspector),
-        surveyDate: str(v.surveyDate),
-        stage: pick(v.stage, ["requested", "scheduled", "onsite", "completed"] as const, str(v.surveyDate) ? "completed" : "requested"),
-      });
-      cache.push({ customer: str(v.customer), venue: str(v.venue), surveyDate: str(v.surveyDate) });
-    },
-    exportObjects: async () => {
-      const list = await Inspections.getAll();
-      return list.map((s) => ({
-        customer: s.customer || "",
-        venue: s.venue || "",
-        venueType: s.venueType || "",
-        address: s.address || "",
-        contact: s.contact || "",
-        email: s.contactEmail || "",
-        inspector: s.inspector || "",
-        surveyDate: s.surveyDate || "",
-        stage: s.stage || "",
-      }));
-    },
-  },
-
-  surveys: {
-    count: async () => (await Surveys.getAll()).length,
-    load: async () => (await Surveys.getAll()) as unknown as Record<string, unknown>[],
-    find: (v, cache) =>
-      cache.find((s) => ci(s.customer, v.customer) && ci(s.venue || "", v.venue || "")) || null,
-    create: async (v, cache) => {
-      await Surveys.create({
-        customer: str(v.customer),
-        venue: str(v.venue),
-        venueType: str(v.venueType) || "Proscenium theater",
-        address: str(v.address),
-        contact: str(v.contact),
-        contactEmail: str(v.email),
-        visitType: str(v.visitType),
-        reason: str(v.reason),
-        stage: pick(v.stage, ["requested", "scheduled", "onsite", "completed"] as const, "requested"),
-      });
-      cache.push({ customer: str(v.customer), venue: str(v.venue) });
-    },
-    exportObjects: async () => {
-      const list = await Surveys.getAll();
-      return list.map((s) => ({
-        customer: s.customer || "",
-        venue: s.venue || "",
-        venueType: s.venueType || "",
-        address: s.address || "",
-        contact: s.contact || "",
-        email: s.contactEmail || "",
-        visitType: s.visitType || "",
-        reason: s.reason || "",
-        stage: s.stage || "",
-      }));
-    },
-  },
-
   team: {
     count: async () => (await allUsers()).length,
     load: async () => (await allUsers()) as unknown as Record<string, unknown>[],
@@ -1121,8 +996,7 @@ export async function commitImport(
 
 /**
  * Whether a type can genuinely UPDATE an existing record, i.e. its writer has
- * an `update`. Four types do not (`flametests`, `inspections`, `surveys`,
- * `projects`): their `find` returns a lightweight match stub with no id, so
+ * an `update`. A type without one: its `find` returns a lightweight match stub with no id, so
  * there is nothing to address an update at. The import hub reads this to
  * disable the "Update existing" mode rather than offer a choice that cannot
  * work, and commitImport skips defensively if it is asked anyway (#147).

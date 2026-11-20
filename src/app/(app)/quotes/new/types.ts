@@ -7,8 +7,6 @@
 export type ServiceType =
   | "system"
   | "box_sale"
-  | "flame_test"
-  | "inspection"
   | "consulting"
   | "custom";
 
@@ -47,24 +45,6 @@ export const SERVICE_TYPES: Array<{
     badgeBd: "",
   },
   {
-    key: "flame_test",
-    label: "Flame test quote",
-    sub: "Auto-priced by travel + curtain count",
-    badge: "Auto",
-    badgeInk: "#b4543a",
-    badgeSoft: "#f7e9e5",
-    badgeBd: "#f0d6cd",
-  },
-  {
-    key: "inspection",
-    label: "Inspection quote",
-    sub: "Auto-priced by line sets + level + travel",
-    badge: "Auto",
-    badgeInk: "#3155a8",
-    badgeSoft: "#e9eefb",
-    badgeBd: "#d4ddf3",
-  },
-  {
     key: "consulting",
     label: "Consulting quote",
     sub: "Fee-based design & advisory work",
@@ -94,8 +74,6 @@ export const BUILDER_BASE: Record<ServiceType, string> = {
   system: "/estimator",
   box_sale: "/estimator",
   custom: "/estimator",
-  flame_test: "/flame-tests/quote",
-  inspection: "/inspections/quote",
   consulting: "/design/engagements/quote",
 };
 

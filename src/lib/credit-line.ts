@@ -70,28 +70,6 @@ export function serviceRewardCredit(
   return normalizeServiceCredit((sub as { rewardCredit?: unknown }).rewardCredit);
 }
 
-/** What the customer pays: the engine total less the credit, never below $0. */
-export function netServiceTotal(total: number, credit: number): number {
-  const t = Number.isFinite(total) ? total : 0;
-  const c = Number.isFinite(credit) && credit > 0 ? credit : 0;
-  return Math.max(0, Math.round(t - c));
-}
-
-/**
- * A saved service quote's price, split for the letters: `gross` (the engine
- * total), `credit`, and `net` (what the customer pays). `quote.value` is
- * already net; a legacy quote with no value falls back to the subdoc's total.
- */
-export function serviceLetterPrice(
-  quote: { value?: number | null; quoteType?: unknown; flameTest?: unknown; inspection?: unknown; repair?: unknown },
-  sub: { total?: number | null } | null | undefined
-): { gross: number; credit: number; net: number } {
-  const credit = serviceRewardCredit(quote);
-  const net =
-    quote.value != null && Number.isFinite(quote.value) ? quote.value : netServiceTotal(sub?.total || 0, credit);
-  return { gross: net + credit, credit, net };
-}
-
 /** True for the Rewards credit line. Structural (works on any stored shape). */
 export function isRewardCreditItem(it: unknown): boolean {
   return !!it && typeof it === "object" && (it as { rewardCredit?: unknown }).rewardCredit === true;

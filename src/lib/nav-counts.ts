@@ -1,17 +1,8 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { listDesignRecords } from "@/lib/stores/designs";
-import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
-import { getAll as allInspections } from "@/lib/stores/inspections";
-import { getAll as allSurveys } from "@/lib/stores/surveys";
-import { allVisits } from "@/lib/stores/site-visits";
 import { getPrefs } from "@/lib/stores/notif-prefs";
-import { countOpenImmediateFindings } from "@/lib/stores/findings";
-import { unseenCustomerDocuments } from "@/lib/stores/documents";
-import { nameFor as customerNameFor } from "@/lib/stores/customers";
-import { customerUploadBell } from "@/lib/document-rules";
 import { displayLeadNumber } from "@/lib/estimate-number";
-import { portalBellGroups } from "@/lib/portal-bell";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { quoteAwaitsApprovalBy, quoteBackFromReview, sameName } from "@/lib/quote-approval-rules";
 import { firstName } from "@/lib/team";
@@ -69,47 +60,20 @@ export function quoteApprovalBell(quotes: Quote[], me: string, canApprove: boole
   return { needs, back };
 }
 
-export async function navData(me: string, canApprove = false, meId: string | null = null): Promise<{
+export async function navData(me: string, canApprove = false): Promise<{
   counts: NavCounts;
   bell: BellGroup[];
   bellCount: number;
 }> {
-  const [
-    quotes,
-    designs,
-    inspections,
-    surveys,
-    visits,
-    leadFollowUps,
-    renewalRows,
-    prefs,
-    unseenDocs,
-    immediateFindingCount,
-  ] = await Promise.all([
+  const [quotes, designs, leadFollowUps, prefs] = await Promise.all([
     allQuotes(),
     // Fix wave 3 (I3): the badge needs review / owner only — a plain record
     // read, never live Grid pricing (a catalog load per Grid design) on
     // every page navigation.
     listDesignRecords(),
-    allInspections(),
-    allSurveys(),
-    allVisits(),
     followUps({ unownedOrMine: true, me }),
-    renewals({ dueOnly: true }),
     getPrefs(me),
-    // #218 — one SQL-filtered read (source = customer AND seenByTeamAt IS NULL), usually empty.
-    unseenCustomerDocuments(),
-    // #340 — open Immediate-attention findings: one SQL count, no documents read.
-    countOpenImmediateFindings().catch((error) => {
-      console.error("[assessments] nav badge: findings count failed", error);
-      return 0;
-    }),
   ]);
-  // Everything below is derived from the arrays already fetched above — no
-  // extra table scans. Previously these re-fetched inspections+repairs
-  // (flagged), leads (leadCount), and comms (unread) a second time, plus a
-  // serial round-trip for unread after the parallel batch. navData runs on
-  // every app page, so this is per-navigation overhead removed.
   const leadCount = leadFollowUps.length;
 
   const approvalBell = quoteApprovalBell(quotes, me, canApprove);
@@ -119,22 +83,9 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       d.review?.reviewer === me &&
       d.owner !== me
   );
-  const requestedInspections = inspections.filter(
-    (r) => (r.stage || "requested") === "requested"
-  );
-  const requestedSurveys = surveys.filter(
-    (s) => (s.stage || "requested") === "requested"
-  );
-  const openVisits = visits.filter((v) => v.stage === "requested" || v.stage === "open");
-  const myVisitsToSchedule = visits.filter((v) => v.stage === "claimed" && v.assignedTo === me);
-
   const counts: NavCounts = {
     leads: leadCount,
     reviews: approvalBell.needs.length + reviewDesigns.length,
-    flametests: renewalRows.length,
-    inspections: requestedInspections.length,
-    field: requestedSurveys.length,
-    assessments: immediateFindingCount,
   };
 
   const groups: BellGroup[] = [];
@@ -157,68 +108,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
   ]);
   push("reviewBack", "Back from review", approvalBell.back);
   push(
-    "surveys",
-    "Survey requests to schedule",
-    requestedSurveys.map((s) => ({
-      id: s.id,
-      title: (s.customer as string) || s.id,
-      sub: (s.venue as string) || "Site survey",
-      href: "/venue-assessments",
-      letter: "S",
-      color: "#1f7a52",
-    }))
-  );
-  push(
-    "visits",
-    "Site visit requests",
-    [...openVisits, ...myVisitsToSchedule].map((v) => ({
-      id: v.id,
-      title: v.customer || v.id,
-      sub:
-        v.stage === "claimed"
-          ? `${v.reason} · claimed — pick a time`
-          : `${v.reason} · open — claim it`,
-      href: "/venue-assessments",
-      letter: "V",
-      color: "#7b3f8a",
-    }))
-  );
-  push(
-    "inspections",
-    "Inspections to schedule",
-    requestedInspections.map((r) => ({
-      id: r.id,
-      title: (r.customer as string) || r.id,
-      sub: (r.venue as string) || "Rigging inspection",
-      href: "/inspections",
-      letter: "I",
-      color: "#7b3f8a",
-    }))
-  );
-  push(
-    "flame",
-    "Flame tests due for renewal",
-    renewalRows.map((r) => ({
-      id: r.id,
-      title: `${r.customer}${r.venues?.[0]?.label ? " — " + r.venues[0].label : ""}`,
-      sub: dueLabel(r._renewal.days, r._renewal.state),
-      href: "/flame-tests",
-      letter: "F",
-      color: "#b4543a",
-    }))
-  );
-  // #245 (spec §8.2) — derived groups over the same quotes already fetched
-  // above; no extra table scan, no writer, no Leads-queue record. #288: all
-  // three link the staff Portal quotes queue (/quotes/portal?focus=<id>).
-  const {
-    review: portalReviewItems,
-    generated: portalNewItems,
-    accepted: portalAcceptedItems,
-  } = portalBellGroups(quotes, me, Date.now());
-  push("portal", "Portal acceptances to confirm", portalAcceptedItems);
-  push("portalReview", "Portal quotes to review", portalReviewItems);
-  push("portalNew", "New portal quotes", portalNewItems);
-  push(
     "leads",
     "Leads needing follow-up",
     leadFollowUps.map((l) => {
@@ -233,21 +122,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       };
     })
   );
-
-  // #218 — one item per company with customer uploads nobody has opened;
-  // downloading one (or "Mark seen" on the card) clears it.
-  const docBell = customerUploadBell(unseenDocs);
-  // A company that no longer resolves has no page to clear it from, so its
-  // item is dropped rather than left sitting in the bell for good.
-  const docNames = await Promise.all(docBell.map((b) => customerNameFor(b.customerId)));
-  push("documents", "New documents from customers", docBell.flatMap((b, i) => (docNames[i] ? [{
-    id: "docs-" + b.customerId,
-    title: docNames[i],
-    sub: b.count === 1 ? "1 new document" : `${b.count} new documents`,
-    href: `/companies/${encodeURIComponent(b.customerId)}#documents`,
-    letter: "D",
-    color: "#3155a8",
-  }] : [])));
 
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
   return { counts, bell: groups, bellCount };

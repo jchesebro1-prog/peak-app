@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import CompanySearch from "@/components/parties/company-search";
 import type { BidderVM, BidPanelVM } from "@/lib/parties/bid-vm";
-import { BID_SEND_COPY } from "@/lib/parties/bid-send";
 import {
   addBidderAction,
   awardBidAction,
@@ -138,7 +137,6 @@ export function BiddersCard({ quoteId, refreshKey = 0 }: { quoteId: string; refr
     </div>
   );
   // #348 follow-up (Jeff 2026-10-15): why the owner sees no prices — read-only, and it stays after the bidders go.
-  const scopeOnlyLine = panel?.scopeOnly ? <div style={{ marginTop: 8, fontSize: 11.5, color: "#8c919c" }}>{BID_SEND_COPY.scopeOnlyNote}</div> : null;
   // No bidders and not adding one: a compact one-line card instead of the full empty block.
   if (panel && panel.bidders.length === 0 && !adding) {
     return (
@@ -155,7 +153,6 @@ export function BiddersCard({ quoteId, refreshKey = 0 }: { quoteId: string; refr
             </>
           )}
         </div>
-        {scopeOnlyLine}
         {errLine}
       </div>
     );
@@ -172,7 +169,6 @@ export function BiddersCard({ quoteId, refreshKey = 0 }: { quoteId: string; refr
           </button>
         )}
       </div>
-      {panel?.scopeOnly && <div style={{ marginBottom: 10, fontSize: 11.5, color: "#8c919c" }}>{BID_SEND_COPY.scopeOnlyNote}</div>}
       {!panel && !err && <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Loading…</div>}
       {!panel && err && (
         <button

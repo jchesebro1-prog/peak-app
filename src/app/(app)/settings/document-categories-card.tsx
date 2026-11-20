@@ -101,7 +101,7 @@ export function DocumentCategoriesCard({ categories }: { categories: DocumentCat
       <div style={{ padding: "14px 18px", borderBottom: "1px solid #ececf0" }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Document categories</div>
         <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 4, lineHeight: 1.5 }}>
-          How company, venue and project files are sorted — for the team and in the customer portal. Archive a
+          How company, venue and project files are sorted. Archive a
           category to stop new uploads using it; files already in it keep the label. Other can&apos;t be archived.
         </div>
       </div>

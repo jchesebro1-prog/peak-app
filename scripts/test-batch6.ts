@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./ok-type";
 import { sourcingReport, sourcingCsv, sortForNoCost, type SourcingPart } from "../src/lib/sourcing-report";
-import { todaysJobs, pagesToCache, readyCount, readyLine, isoDay } from "../src/lib/sync/today-jobs";
 import { iconSource, iconVersion, parseIconFile, iconHref, manifestIcons, iconCacheControl, ICON_LIGHT_BG, ICON_DARK_BG } from "../src/lib/app-icon";
 
 const ROOT = join(__dirname, "..");
@@ -124,18 +123,8 @@ function todayJobsChecks(ok: Ok) {
   const me = { id: "u7", name: "Nic Trapani" };
   const svc = (id: string, extra: Record<string, unknown> = {}) => ({ id, stage: "scheduled", assignedTo: "Nic Trapani", scheduledDate: day, customer: "Lincoln HS", venue: "Aud", ...extra });
   const mirrored = new Set(["surveys:FS-9", "inspections:IN-1", "repair_jobs:RP-1", "assessments:AS-1001"]);
-  ok(readyLine(5, 5) === "Ready offline: 5 jobs" && readyLine(1, 1) === "Ready offline: 1 job" && readyLine(5, 7).startsWith("Ready offline: 5 jobs (2 couldn") && readyLine(0, 0) === "No jobs for you today.",
-    "#65: the result line reads 'Ready offline: N jobs'");
-  ok(isoDay("2026-10-16") === day && isoDay("") === "" && isoDay("10/16/2026") === "", "#65: isoDay takes only YYYY-MM-DD");
-
-  const route = src("src/app/api/sync/today/route.ts");
-  ok(/if \(!mayPullFieldData\(me\.roles\)\) return NextResponse\.json\(\{ error: "forbidden" \}, \{ status: 403 \}\)/.test(route) && route.includes("getOptionalUser()"),
-    "#65: /api/sync/today has the pull's gate — signed in and `create` (#351)");
   const sw = src("public/sw.js");
   ok(sw.includes("const port = event.ports && event.ports[0]") && sw.includes(".then(() => reply(true))") && sw.includes(".catch(() => reply(false))"), "#65: the service worker answers a CACHE_ROUTE that carries a port");
-  const btn = src("src/components/sync/download-today.tsx");
-  ok(btn.includes('fetch("/api/sync/today"') && btn.includes("engine.pull({ force: true })") && btn.includes("readyLine(ready, jobs.length)") && !/from "@\/lib\/stores\//.test(btn.replace(/import type[^\n]*\n/g, "")),
-    "#65: the button lists, pulls into the mirror, caches pages and reports — and imports no store");
   ok(/async pull\(opts: \{ force\?: boolean \} = \{\}\): Promise<boolean>/.test(src("src/lib/sync/engine.ts")) && src("src/lib/sync/engine.ts").includes("this.pullForbidden) return false"),
     "#65: a forced pull still honours a 403 (pullForbidden) and reports success");
 }

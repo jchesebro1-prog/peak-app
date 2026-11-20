@@ -7,9 +7,6 @@ import {
 } from "@/db/doc-tables";
 import { getDb } from "@/db";
 import { eq, sql } from "drizzle-orm";
-import { pushAssessment } from "@/lib/stores/assessments";
-import { pushFinding } from "@/lib/stores/findings";
-import { pushSurvey } from "@/lib/stores/surveys";
 import { pushBoothCapture } from "@/lib/booth/capture-server";
 import { sanitizePushedDoc } from "@/lib/sync/server-owned";
 import { hydrateDoc } from "@/lib/markup/doc-basis";
@@ -83,28 +80,6 @@ export async function POST(req: Request) {
       }
       if (JSON.stringify(rec.doc).length > MAX_DOC_BYTES) {
         results[coll].push({ id: rec.id, status: "error" });
-        continue;
-      }
-      // Assessments engine (#340): never a whole-document replace. Each needs
-      // `create`; answers merge per key and findings get their printed id
-      // from the server (see the stores). Assessments are never created here
-      // and never reply conflict: ok + the stored rev (anything skipped is in
-      // the doc's server-written syncRejects), error + a message (a permanent
-      // refusal, parked in the outbox), or retry (a throw — the entry stays
-      // pending). Findings: ok, conflict + the server copy, error, or retry.
-      if (coll === "assessments" || coll === "findings") {
-        const user = { id: String(session.user.id ?? ""), roles: session.user.roles };
-        const one = { id: rec.id, rev: rec.rev, doc: rec.doc };
-        results[coll].push(coll === "assessments" ? await pushAssessment(one, user) : await pushFinding(one, user));
-        continue;
-      }
-      // Venue Assessment surveys (#344 C4): the same whole-document upsert as
-      // below, but under the survey's advisory lock and merged with the stored
-      // doc so a finished photo / sketch file is never replaced by the pushed
-      // copy's still-pending slot (the device photo queue may have finished it
-      // after this copy was made). A throw replies retry.
-      if (coll === "surveys") {
-        results[coll].push(await pushSurvey({ id: rec.id, rev: rec.rev, doc: rec.doc }));
         continue;
       }
       // Trade show booth captures: never the generic whole-document upsert. One idempotent

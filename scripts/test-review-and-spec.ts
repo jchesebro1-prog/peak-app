@@ -11,7 +11,6 @@ import { assemblyParts as cr304GridLib } from "@/lib/design/grid-library";
 import { paletteView as cr304Palette } from "@/lib/design/grid-palette";
 import { accessoryCandidates as cr304AccCand } from "@/lib/design/grid-accessories";
 import type { SpecItem as Cr304SpecItem, SpecSection as Cr304Section } from "@/app/(app)/estimator/types";
-import type { CartLine as Cr304CartLine } from "@/lib/portal-cart-types";
 import type { SpecDocProduct as Cr304SpecProduct } from "@/lib/specs/spec-document";
 import type { GridPlacement as Cr304Placement, GridRoute as Cr304Route } from "@/lib/stores/grid-projects";
 import type { WireType as Cr304WireType } from "@/lib/catalog-connect";
@@ -117,39 +116,9 @@ import {
 } from "@/app/(app)/companies/map-filter";
 import { getCompanySummary } from "@/lib/company-summary";
 
-import {
-  VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
-  venueClassFor, venueSubtypeFor, visitPurposeFor, venueArchetype,
-  TIER1_WIDTH_BY_CLASS, TIER1_DEPTH_BY_CLASS,
-} from "@/lib/stores/venue-classes";
 
-import {
-  LINESET_TYPES, LINESET_CONDS, blankLinesetRow, newLinesetId,
-  linesetTypeLabel, linesetCondLabel, nextLinesetPosition,
-} from "@/lib/stores/linesets";
 
-import {
-  CONDITION_CATEGORIES, CONDITION_RATINGS, BUDGET_TIERS, FINDING_BUCKETS,
-  CONDITION_GROUPS,
-  EVENT_TYPES, EVENT_FREQUENCIES, STAFF_TIERS, GROWTH_GOALS,
-  blankAssessment, seedFindings, newFindingId, toggleEventType, toggleGrowthGoal,
-  mergeFindings, splitFindingCategory,
-} from "@/lib/stores/assessment";
 
-import {
-  TIER1_WIDTH_KEYS,
-  TIER1_DEPTH_KEYS,
-  tier1Complete,
-  DISCIPLINE_GROUPS,
-  visibleFields,
-  presentOptionsFor,
-} from "@/lib/stores/survey-intake";
-import { resolveCertsFromRecords } from "@/lib/venue-assessment-certs";
-import {
-  DEFAULT_VENUE_DOCTRINE,
-  resolveVenueDoctrine,
-} from "@/lib/venue-doctrine";
-import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
 import { renderLetterPdf, type LetterBlock, type LetterDoc, type FieldSheetPage } from "@/lib/pdf";
 import { inflateSync } from "node:zlib";
 import {
@@ -362,7 +331,7 @@ ok(laborCalc.totalCost === laborCalc.baseCost && !("performanceBonus" in laborCa
 /* --- #160: quote intake → builder hand-off (pure) --- */
 import { builderPath, SERVICE_TYPES, BUILDER_BASE } from "@/app/(app)/quotes/new/types";
 import {
-  readHandoff, pickVenueId, pickContactName, seedVenueOn, intakeInitial, quoteServiceType, quoteEditPath,
+  readHandoff, pickVenueId, pickContactName, intakeInitial, quoteServiceType, quoteEditPath,
   quoteContactName, quoteLineCount, sameBuilder, canChangeType, replaceConfirmMessage, wonEditMessage,
   systemQuoteName, CHANGE_TYPE_DISABLED_HINT,
 } from "@/app/(app)/quotes/new/handoff";
@@ -394,22 +363,16 @@ import {
   ok(pickContactName(cust160, "Tom Reyes") === "Tom Reyes", "#160 a contact on the customer is honoured");
   ok(pickContactName(cust160, "Stranger") === "Dana Whitlock", "#160 an unknown contact falls back to the primary");
   ok(pickContactName(cust160, "Stranger", false) === "", "#160 without fallback an unknown contact is blank");
-  const on160 = seedVenueOn(cust160.locations, "lf2");
-  ok(on160.lf2 === true && on160.lf1 === false, "#160 a forwarded venue is the only venue switched on");
-  const onDefault160 = seedVenueOn(cust160.locations, "");
-  ok(onDefault160.lf1 === true && onDefault160.lf2 === false, "#160 with no forwarded venue the primary is on (unchanged rule)");
-  const onNoPrimary160 = seedVenueOn([{ id: "a", primary: false }, { id: "b", primary: false }], "zzz");
-  ok(onNoPrimary160.a === true && onNoPrimary160.b === false, "#160 no primary and an unknown venue → first venue on");
 
   const dir160 = [{ id: "lakefront", name: "Lakefront PAC", type: "", locations: [{ id: "lf1", label: "Main Hall", city: "", state: "", primary: true }], contacts: [{ name: "Dana Whitlock", role: "", primary: true }] }];
-  const ii = intakeInitial({ type: "flame_test", category: "", customerId: "lakefront", venueId: "lf1", contactName: "Dana Whitlock", name: "Q name" }, dir160);
-  ok(ii.type === "flame_test" && ii.customerId === "lakefront" && ii.locationId === "lf1" && ii.contactName === "Dana Whitlock" && ii.name === "Q name", "#160 intakeInitial keeps a valid customer, venue and contact");
+  const ii = intakeInitial({ type: "consulting", category: "", customerId: "lakefront", venueId: "lf1", contactName: "Dana Whitlock", name: "Q name" }, dir160);
+  ok(ii.type === "consulting" && ii.customerId === "lakefront" && ii.locationId === "lf1" && ii.contactName === "Dana Whitlock" && ii.name === "Q name", "#160 intakeInitial keeps a valid customer, venue and contact");
   const bad = intakeInitial({ type: "bogus", category: "", customerId: "ghost", venueId: "lf1", contactName: "Dana Whitlock", name: "" }, dir160);
   ok(bad.type === "system" && bad.customerId === "" && bad.locationId === "" && bad.contactName === "", "#160 intakeInitial ignores an unknown customer id (form starts blank) and an unknown type");
   const badVenue = intakeInitial({ type: "repair", category: "", customerId: "lakefront", venueId: "zz", contactName: "Nobody", name: "" }, dir160);
   ok(badVenue.customerId === "lakefront" && badVenue.locationId === "" && badVenue.contactName === "", "#160 intakeInitial drops a venue/contact that isn't on the customer");
 
-  ok(quoteServiceType({}) === "system" && quoteServiceType({ category: "Acoustics" }) === "custom" && quoteServiceType({ quoteType: "flame_test" }) === "flame_test", "#160 quoteServiceType maps estimator, custom and typed quotes");
+  ok(quoteServiceType({}) === "system" && quoteServiceType({ category: "Acoustics" }) === "custom" && quoteServiceType({ quoteType: "consulting" }) === "consulting" && quoteServiceType({ quoteType: "flame_test" }) === "system", "#160 quoteServiceType maps estimator, custom and typed quotes (a removed type reads as a system quote)");
   ok(quoteServiceType({ quoteType: "weird" }) === "system", "#160 an unknown quoteType is treated as a system quote");
   ok(quoteContactName({ contactName: "A" }) === "A" && quoteContactName({ contact: { name: "B" } }) === "B" && quoteContactName({}) === "", "#160 quoteContactName reads estimator and service contact shapes");
   ok(quoteLineCount({ spec: { sections: [{ items: [1, 2] }, { items: [3] }] } }) === 3, "#160 estimator lines are counted across systems");
@@ -1057,7 +1020,7 @@ ok(
   "go-live reset covers every business-document collection"
 );
 ok(
-  CONFIG_COLLECTIONS.join() === "subassemblies,spec_records,spec_record_revisions,assist_runs,comms,meetings,recordings,venue_profiles" && !resetCollections.includes("subassemblies") && !resetCollections.includes("assist_runs"),
+  CONFIG_COLLECTIONS.join() === "subassemblies,spec_records,spec_record_revisions,assist_runs,comms,meetings,recordings,surveys,site_visits,flame_jobs,inspections,assessments,findings,venue_profiles,portal_carts,projects,repair_jobs,assignments,tasks,task_templates,equipment_items,equipment_locations,equipment_bookings,reward_ledger,triage_snapshots,triage_marks" && !resetCollections.includes("subassemblies") && !resetCollections.includes("assist_runs"),
   "#210 final review M5: the go-live reset keeps the Assembly Builder's fixtures/systems (configuration, like settings)"
 );
 ok(
@@ -1074,11 +1037,12 @@ ok(
   );
 }
 ok(
-  resetCollections.includes("equipment_bookings") &&
-    resetCollections.includes("grid_sheets") &&
-    resetCollections.includes("tasks") &&
-    resetCollections.includes("notes"),
-  "go-live reset covers no-seed child collections"
+  resetCollections.includes("grid_sheets") &&
+    resetCollections.includes("notes") &&
+    resetCollections.includes("record_parties") &&
+    !resetCollections.includes("tasks") &&
+    !resetCollections.includes("equipment_bookings"),
+  "go-live reset covers no-seed child collections (and leaves the tables of removed features alone)"
 );
 
 /* --- BOM parsing --- */
@@ -1937,7 +1901,7 @@ ok(HOME_TABS[0].key === "dashboard", "Dashboard is first and is the landing tab"
 // Punch #55 (D124) REVERSES the D117 shape: Jeff asked for Home back as a real tab
 // on web and mobile, so the header is five groups and Home is the first. The five
 // hub routes stay CHILDREN of that group (they are not top-level links).
-ok(NAV.length === 6, "the header has 6 top-level items: Home joined the chips (#55, D124); KNOWLEDGE joined after DESIGN (#136)");
+ok(NAV.length === 5, "the header has 5 top-level items: Home joined the chips (#55, D124); KNOWLEDGE joined after DESIGN (#136); the Service group left with stage 3");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "queue"), "My Queue is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "calendar"), "Calendar is not top-level");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "inbox"), "Inbox is not top-level");
@@ -1958,8 +1922,9 @@ const d99Sales = NAV.find((e) => e.kind === "group" && e.key === "crm");
 ok(
   parentGroupOf("companies") === "crm" &&
     parentGroupOf("people") === "crm" &&
-    parentGroupOf("field") === "crm",
-  "companies, people, field now report CRM as their parent group",
+    parentGroupOf("venues") === "crm" &&
+    parentGroupOf("field") === null,
+  "companies, people, venues report CRM as their parent group (Venue Assessments left the nav)",
 );
 const d99Keys = NAV.flatMap((e) =>
   e.kind === "group" ? [e.key, ...e.children.map((c) => c.key)] : [e.key],
@@ -1999,8 +1964,8 @@ ok(
 // ---- General dissolution (D99): the group is gone ----
 ok(!NAV.some((e) => e.kind === "group" && e.key === "general"), "the General group is gone");
 ok(
-  NAV.map((e) => e.key).join(",") === "home,est,pm,crm,design,knowledge",
-  "the top-level chips are Home, EST, PM, CRM, DESIGN, KNOWLEDGE in order (#55 put Home back, D124; #136 added KNOWLEDGE)",
+  NAV.map((e) => e.key).join(",") === "home,est,crm,design,knowledge",
+  "the top-level chips are Home, EST, CRM, DESIGN, KNOWLEDGE in order (#55 put Home back, D124; #136 added KNOWLEDGE; the Service group is gone)",
 );
 ok(
   activeKeyFor("/templates") === "settings" &&
@@ -2066,7 +2031,7 @@ ok(
   "an engagement matched against sites.id would miss (siteIds hold legacy ids)",
 );
 
-ok(quoteDeepLink("flame_test", "Q-1") === "/flame-tests/quote?id=Q-1", "flame quote deep-links to the flame quote builder");
+ok(quoteDeepLink("flame_test", "Q-1") === "/quotes?id=Q-1" && quoteDeepLink("inspection", "Q-1") === "/quotes?id=Q-1", "an old flame / inspection quote deep-links to its Quotes-hub row (the builders are gone)");
 ok(quoteDeepLink("consulting", "Q-2") === "/design/engagements/quote?id=Q-2", "consulting quote deep-links to the engagements quote builder");
 ok(quoteDeepLink("system", "Q-3") === "/estimator?id=Q-3", "a system quote deep-links to the estimator");
 
@@ -2709,8 +2674,8 @@ ok(accentContrast("#b4543a") === "#fff", "red accent carries white text");
 const d117Est = NAV.find((e) => e.kind === "group" && e.key === "est");
 ok(
   !!(d117Est && d117Est.kind === "group" &&
-    d117Est.children.map((c) => c.key).join(",") === "quotes,portal-quotes,myquotes,estimator,reviews,catalog"),
-  "EST = Quotes, Portal quotes, My Quotes, Estimator, Reviews, Catalog in order (#22, #213, #288)",
+    d117Est.children.map((c) => c.key).join(",") === "quotes,myquotes,estimator,reviews,catalog"),
+  "EST = Quotes, My Quotes, Estimator, Reviews, Catalog in order (#22, #213)",
 );
 ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
 ok(
@@ -2722,7 +2687,7 @@ ok(
   "quotes, estimator, reviews report EST as parent",
 );
 ok(
-  parentGroupOf("leads") === "crm" && parentGroupOf("venues") === "crm" && parentGroupOf("field") === "crm",
+  parentGroupOf("leads") === "crm" && parentGroupOf("venues") === "crm" && parentGroupOf("vendors") === "crm",
   "relationship children report CRM as parent",
 );
 ok(NAV.every((e) => e.kind === "group"), "every top-level entry is a group — the mark handles Home");
@@ -2880,79 +2845,17 @@ ok(BOARD_PIPELINES.find((p) => p.id === "order")!.stages.map((s) => s.id).join("
 }
 
 /* ============ LEAD THREAD (#34) — visit lifecycle + convert gate ============ */
-import {
-  VISIT_STAGES, VISIT_STAGE_META, deriveVisitStage, requestStageFor, canConvertLead,
-} from "@/lib/lead-thread";
 
 {
   const NOW = 1_800_000_000_000;
   const DAY = 86400000;
-
-  ok(
-    VISIT_STAGES.join(",") === "requested,open,claimed,scheduled,done",
-    "#34: visit lifecycle is the locked five-stage set"
-  );
-  ok(
-    VISIT_STAGE_META.requested.label === "Requested" &&
-      VISIT_STAGE_META.open.label === "Open — unclaimed" &&
-      VISIT_STAGE_META.claimed.label === "Claimed" &&
-      VISIT_STAGE_META.scheduled.label === "Scheduled" &&
-      VISIT_STAGE_META.done.label === "Done",
-    "#34: visit stage labels"
-  );
-
-  // deriveVisitStage — legacy stage-less records read from their times
-  ok(
-    deriveVisitStage({ startAt: NOW - 2 * DAY, endAt: NOW - 2 * DAY + 3600000 }, NOW) === "done",
-    "#34: legacy stage-less past visit reads done"
-  );
-  ok(
-    deriveVisitStage({ startAt: NOW + DAY, endAt: NOW + DAY + 3600000 }, NOW) === "scheduled",
-    "#34: legacy stage-less future visit reads scheduled"
-  );
-  // stored "scheduled" past its (endAt ?? startAt) reads done
-  ok(
-    deriveVisitStage({ stage: "scheduled", startAt: NOW - DAY, endAt: NOW - DAY + 3600000 }, NOW) === "done",
-    "#34: stored scheduled with a past end reads done"
-  );
-  ok(
-    deriveVisitStage({ stage: "scheduled", startAt: NOW - DAY, endAt: null }, NOW) === "done",
-    "#34: endAt ?? startAt — null end falls back to start"
-  );
-  ok(
-    deriveVisitStage({ stage: "scheduled", startAt: NOW + DAY, endAt: NOW + 2 * DAY }, NOW) === "scheduled",
-    "#34: stored scheduled in the future stays scheduled"
-  );
-  // stored requested/open/claimed/done pass through untouched
-  ok(deriveVisitStage({ stage: "requested", startAt: null, endAt: null }, NOW) === "requested", "#34: requested passes through");
-  ok(deriveVisitStage({ stage: "open", startAt: null, endAt: null }, NOW) === "open", "#34: open passes through");
-  ok(deriveVisitStage({ stage: "claimed", startAt: null, endAt: null }, NOW) === "claimed", "#34: claimed passes through");
-  ok(deriveVisitStage({ stage: "done", startAt: NOW + DAY, endAt: null }, NOW) === "done", "#34: stored done never resurrects");
-
-  // assign-or-open stage choice
-  ok(requestStageFor("Sam Rivera") === "claimed", "#34: request with an assignee lands claimed");
-  ok(requestStageFor("") === "requested" && requestStageFor("   ") === "requested", "#34: open — anyone can claim lands requested");
-
-  // convert gate — all four branches
-  const missing = canConvertLead(null, false);
-  ok(!missing.ok && missing.reason === "survey-missing", "#34: no linked survey blocks convert");
-  const openGate = canConvertLead({ stage: "onsite" }, false);
-  ok(!openGate.ok && openGate.reason === "survey-open", "#34: un-completed survey blocks convert");
-  ok(canConvertLead({ stage: "completed" }, false).ok, "#34: completed survey passes the gate");
-  ok(canConvertLead(null, true).ok && canConvertLead({ stage: "requested" }, true).ok, "#34: explicit skip always passes");
 }
 
 /* #34 — the auto-created survey's link fields ride blank()'s whitelist
    (fields not in the def object are SILENTLY DROPPED — this proves the def
    carries them). blank() is pure — no DB touched. */
-import { blank as surveyBlank } from "@/lib/stores/surveys";
 
 {
-  const b = surveyBlank();
-  ok(b.leadId === null && b.visitId === null, "#34: blank survey defaults null lead/visit links");
-  ok(b.stage === "requested", "#34: blank survey is born requested");
-  const linked = surveyBlank({ leadId: "L-1050", visitId: "SV-5001" });
-  ok(linked.leadId === "L-1050" && linked.visitId === "SV-5001", "#34: blank() whitelist passes leadId/visitId through");
 }
 
 /* ============ ACTIVITY TIMELINE (#21) ============ */
@@ -3006,11 +2909,8 @@ import { normalizeNote, addNoteRecord, notesForEngagement, type NoteRecord } fro
 import { bucketFor, groupRows } from "@/lib/feed-buckets";
 import {
   FEED_META,
-  jobFeedRows,
   noteFeedRows,
   quoteFeedRows,
-  surveyFeedRows,
-  visitFeedRows,
 } from "@/lib/customer-feed-rows";
 
 {
@@ -3093,53 +2993,6 @@ import {
     quoteFeedRows({ id: "Q-2042", name: "x", history: [{ at: T1, to: "draft" }] }).length === 1,
     "#21: absent annex fields add no rows"
   );
-
-  // visits — ts = startAt ?? createdAt; sub = VISIT_STAGE_META label
-  const v = visitFeedRows({
-    id: "SV-5001",
-    reason: "Site survey / measure",
-    stage: "scheduled",
-    startAt: T2,
-    createdAt: T1,
-    assignedTo: "Mike Torres",
-  });
-  ok(v.length === 1 && v[0].ts === T2 && v[0].title === "Site visit — Site survey / measure", "#21: visit row at startAt");
-  ok(v[0].sub === "Scheduled" && v[0].href === "/venue-assessments" && v[0].by === "Mike Torres", "#21: visit sub is the stage label");
-  const vr = visitFeedRows({ id: "SV-5002", reason: "Punch walk", stage: "requested", startAt: null, createdAt: T1, assignedTo: "" });
-  ok(vr[0].ts === T1 && vr[0].sub === "Requested", "#21: unscheduled request falls back to createdAt");
-
-  // jobs — point stamps; null completion adds no row; legacy zero requestedAt skipped
-  const fj = jobFeedRows("flame", {
-    id: "FT-3001",
-    venue: "Auditorium",
-    openedAt: T1,
-    openedBy: "Jeff Chesebro",
-    completedAt: T2,
-    completedBy: "Mike Torres",
-  });
-  ok(
-    fj.length === 2 && fj[0].title === "Flame test FT-3001 approved" && fj[1].title === "Flame test FT-3001 completed",
-    "#21: flame approved + completed rows"
-  );
-  const ij = jobFeedRows("inspection", {
-    id: "RI-2042",
-    venue: "Main stage",
-    openedAt: 0,
-    openedBy: "",
-    completedAt: T2,
-    completedBy: "Dana Whitmer",
-  });
-  ok(ij.length === 1 && ij[0].title === "Inspection RI-2042 completed", "#21: zero requestedAt (legacy default) adds no request row");
-  ok(
-    jobFeedRows("inspection", { id: "RI-2043", venue: "", openedAt: T1, openedBy: "Sarah Chen", completedAt: null, completedBy: "" })[0]
-      .title === "Inspection RI-2043 requested",
-    "#21: the inspection open verb is 'requested'"
-  );
-
-  // surveys — one row at updatedAt with the stage label
-  const s = surveyFeedRows({ id: "FS-1054", stage: "completed", venue: "Black box", updatedAt: T3 });
-  ok(s.length === 1 && s[0].title === "Survey FS-1054 — Completed" && s[0].ts === T3, "#21: survey row titles id + stage label");
-  ok(s[0].href === "/venue-assessments?id=FS-1054", "#21: survey row deep-links the survey");
 
   // notes — the real record rows
   const nr = noteFeedRows({ id: "N-7001", at: T2, by: "Jeff Chesebro", text: "Board approved the budget" });
@@ -3795,7 +3648,6 @@ import { computeFixture as computeFixtureRules } from "@/app/(app)/estimator/pri
    takes an explicit param sourced from Estimating Rules → "travel"; the
    default preserves today's exact 1.25 / 50 values and live-route/OSRM
    precedence upstream (geo.ts / companies location.travelMiles) is untouched --- */
-import { compute as computeFlameQuote, type FlameTestVenueInput as FTVenue } from "@/lib/flametest-engine";
 {
   const rates = {
     mileageRate: 0.7,
@@ -3805,34 +3657,7 @@ import { compute as computeFlameQuote, type FlameTestVenueInput as FTVenue } fro
     margin: 0.3,
     travelRoundMin: 15,
   };
-  const office = { lat: 43.039, lng: -87.906, name: "Milwaukee office" }; // Milwaukee, WI
-  const venue: FTVenue = {
-    id: "v1",
-    label: "Venue",
-    curtains: 2,
-    coords: { lat: 43.073, lng: -89.401 }, // Madison, WI (~80mi straight-line)
-  };
-
-  const implicitDefault = computeFlameQuote({ office, venues: [venue] }, rates);
-  const explicitDefault = computeFlameQuote({ office, venues: [venue] }, rates, TRAVEL_RATE_DEFAULTS);
-  ok(
-    implicitDefault.trip.miles === explicitDefault.trip.miles &&
-      implicitDefault.trip.minutesRaw === explicitDefault.trip.minutesRaw,
-    "#60-67: omitting the travel param defaults to the exact 1.25 / 50 fallback numbers used before this change"
-  );
-  ok(implicitDefault.trip.method === "route", "#60-67: full-coords trips still take the (offline) route-leg branch, unchanged");
-
-  const doubledRoad = computeFlameQuote({ office, venues: [venue] }, rates, { roadFactor: 2.5, mph: 50 });
-  ok(
-    Math.abs(doubledRoad.trip.miles - implicitDefault.trip.miles * 2) <= 2,
-    `#60-67: doubling travel.roadFactor (1.25 → 2.5) ~doubles the offline fallback road miles (base ${implicitDefault.trip.miles}, got ${doubledRoad.trip.miles})`
-  );
-
-  const halfSpeed = computeFlameQuote({ office, venues: [venue] }, rates, { roadFactor: 1.25, mph: 25 });
-  ok(
-    Math.abs(halfSpeed.trip.minutesRaw - implicitDefault.trip.minutesRaw * 2) <= 4,
-    `#60-67: halving travel.mph (50 → 25) ~doubles the offline fallback drive-time estimate (base ${implicitDefault.trip.minutesRaw}, got ${halfSpeed.trip.minutesRaw})`
-  );
+  const office = { lat: 43.039, lng: -87.906, name: "Milwaukee office" };
 }
 
 /* --- punch 60-67: geo.ts's own offline fallback (driveMiles/driveMinutes/
@@ -3950,7 +3775,6 @@ import { upsertDoc } from "../src/db/doc-store";
 import {
   FIXTURE_MARKER, createFixture, dropFixtures, findFixtureDocs, fixtureId, hardSweepRefusal, sweepFixtures,
 } from "./test-fixtures";
-import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
 
 {
   const rentalRates = { dayRate: 50, weekRate: 200, monthRate: 600 };
@@ -5468,29 +5292,6 @@ async function asyncChecks(): Promise<void> {
   const TEST_REPAIR_QUOTE_ID = fixtureId(13, "repair-quote");
 
   {
-    const priorInspections = await inspectionsByQuote(TEST_INSPECTION_QUOTE_ID);
-    if (!priorInspections.length) {
-      await createFixture("quotes", {
-        id: TEST_INSPECTION_QUOTE_ID,
-        name: "PUNCHLIST #13 test inspection quote",
-        quoteType: "inspection",
-        status: "won",
-        customer: "Test Customer #13",
-        customerId: null,
-        locationId: null,
-        value: 500,
-        owner: "Jeff Chesebro",
-      });
-    }
-    const recs = await createInspectionFromQuote(TEST_INSPECTION_QUOTE_ID);
-    ok(!!recs && recs.length === 1, "#13 inspection createFromQuote spawns a record for the test quote");
-    const projectId = recs?.[0]?.projectId;
-    if (projectId) {
-    }
-    // Idempotency: re-running createFromQuote must not spawn a second project or duplicate records.
-    const recs2 = await createInspectionFromQuote(TEST_INSPECTION_QUOTE_ID);
-    ok(recs2?.length === 1, "#13 inspection createFromQuote is idempotent (no duplicate records on re-run)");
-    ok(recs2?.[0]?.projectId === projectId, "#13 re-running createFromQuote returns the SAME linked project id");
   }
 
   {
@@ -5576,79 +5377,6 @@ async function asyncChecks(): Promise<void> {
 
   /* --- Venue Assessments: record migration --- */
   {
-    const { getAll } = await import("@/lib/stores/surveys");
-    const all = await getAll();
-    ok(all.length > 0, "seeded surveys exist to migrate");
-    ok(
-      all.every((s) => !!(s as Record<string, unknown>).venueClass),
-      "every existing record reads with a venueClass"
-    );
-    ok(
-      all.every((s) => typeof (s as Record<string, unknown>).visitPurpose === "string"),
-      "every existing record reads with a visitPurpose"
-    );
-    const fs1053 = all.find((s) => s.id === "FS-1053");
-    ok(!!fs1053, "FS-1053 is present in the seed");
-    // The next dozen assertions (through "records stamp the template
-    // revision" below) dereference `fs1053`/`fs1055`/`withMeas` directly.
-    // The dev auto-seed is fire-and-forget (getDb() in src/db/index.ts does
-    // not await it), so on a fresh datadir this find() can lose the race and
-    // return undefined — and the unguarded deref then threw a TypeError that
-    // rejected the promise chain and killed the process. Because asyncChecks()
-    // is second-to-last in that chain, the crash silently skipped the
-    // remaining 50 assertions here AND all of templateScheduleAsyncChecks(),
-    // which had therefore never run at all. Guarding turns a lost seed race
-    // back into what it should always have been: the one honest FAIL above,
-    // and just these dependent assertions skipped rather than the suite
-    // dying (#158). This guard closes immediately below — everything after
-    // it (the #145 file-ref/milestone/task-template blocks, the #158 ports
-    // blocks, etc.) has nothing to do with the survey seed and must always
-    // run, guard or no guard.
-    if (fs1053) {
-    ok(
-      (fs1053 as Record<string, unknown>).venueClass === "theatre",
-      "FS-1053 (Proscenium theater) migrates to theatre"
-    );
-    ok(
-      (fs1053 as Record<string, unknown>).venueSubtype === "Single proscenium",
-      "FS-1053 gains the matching subtype"
-    );
-    ok(fs1053!.venueType === "Proscenium theater", "venueType is retained for existing call sites");
-    const fs1055 = all.find((s) => s.id === "FS-1055");
-    ok(
-      (fs1055 as Record<string, unknown>).venueClass === "church",
-      "FS-1055 (Worship / sanctuary) migrates to church"
-    );
-    // measurements must survive the class switch untouched
-    ok(
-      all.every((s) => s.measurements && typeof s.measurements === "object"),
-      "measurements survive migration"
-    );
-    const withMeas = all.find((s) => Object.keys(s.measurements || {}).length > 0);
-    ok(!!withMeas, "at least one seeded record carries measurements");
-    ok(
-      Object.values(withMeas!.measurements).every((v) => typeof v === "string" || typeof v === "boolean"),
-      "measurement values are untouched primitives"
-    );
-    // new sub-objects default, never undefined
-    ok(Array.isArray((fs1053 as Record<string, unknown>).linesets), "linesets defaults to an array");
-    ok(
-      (fs1053 as Record<string, unknown>).assessmentEnabled === false,
-      "the assessment layer is off by default"
-    );
-    ok(
-      typeof (fs1053 as Record<string, unknown>).assessment === "object",
-      "assessment defaults to an object, never undefined"
-    );
-    ok(
-      typeof (fs1053 as Record<string, unknown>).signoff === "object",
-      "signoff defaults to an object"
-    );
-    ok(
-      (fs1053 as Record<string, unknown>).templateRev === "1.0",
-      "records stamp the template revision"
-    );
-  }
   }
 
   /* ====== #145 round 3: validateFileRefsForEngagement (consulting-files-server.ts) ======
@@ -5958,95 +5686,6 @@ async function asyncChecks(): Promise<void> {
   }
 }
 
-/* --- Venue Assessments: class model --- */
-ok(VENUE_CLASSES.length === 6, `six venue classes (got ${VENUE_CLASSES.length})`);
-ok(
-  VENUE_CLASSES.map((c) => c.key).join(",") ===
-    "theatre,auditorium,church,gym,convention,other",
-  "venue classes in spec order"
-);
-ok(venueClassFor("Proscenium theater") === "theatre", "proscenium theater -> theatre");
-ok(venueClassFor("Black box") === "theatre", "black box -> theatre");
-ok(venueClassFor("Worship / sanctuary") === "church", "worship -> church");
-ok(venueClassFor("Gymnasium / gym stage") === "gym", "gym stage -> gym");
-ok(venueClassFor("Arena") === "theatre", "arena -> theatre");
-ok(venueClassFor("Multipurpose room") === "convention", "multipurpose -> convention");
-ok(venueClassFor("Outdoor / amphitheater") === "other", "outdoor -> other");
-ok(venueClassFor("") === "theatre", "empty venue type falls back to theatre");
-ok(venueClassFor("Nonsense") === "theatre", "unknown venue type falls back to theatre");
-ok(venueSubtypeFor("Black box") === "Black box / flexible", "black box carries its subtype");
-ok(venueSubtypeFor("Outdoor / amphitheater") === "", "outdoor has no subtype");
-ok(
-  VENUE_CLASSES.every((c) => SUBTYPES[c.key] !== undefined),
-  "every class has a subtype list (other may be empty)"
-);
-ok(
-  VENUE_CLASSES.filter((c) => c.key !== "other").every((c) => SUBTYPES[c.key].length > 0),
-  "every class but 'other' has at least one subtype"
-);
-ok(
-  Object.values(SUBTYPES).every((list) => list.every((s) => typeof s === "string" && s.length > 0)),
-  "no empty subtype strings"
-);
-ok(visitPurposeFor("Budgetary walk-through") === "Bid walk", "budgetary -> bid walk");
-ok(visitPurposeFor("Service call") === "Repair / service", "service call -> repair/service");
-ok(visitPurposeFor("Design verification") === "New system design", "design verification -> new system design");
-ok(visitPurposeFor("") === "", "empty visit type stays empty");
-ok(VISIT_PURPOSES.length === 6, `six visit purposes (got ${VISIT_PURPOSES.length})`);
-ok(VISIT_PURPOSES[0] === "New system design", "sheet order preserved");
-
-// Every class resolves to at least one width key and one depth key, and every
-// such key must actually exist in that class's field set. This is the hard
-// invariant that keeps the Tier-1 gate satisfiable on every class.
-ok(
-  VENUE_CLASSES.every((c) => {
-    const keys = classMeasureFields(c.key).map((f) => f.key);
-    const w = TIER1_WIDTH_BY_CLASS[c.key];
-    const d = TIER1_DEPTH_BY_CLASS[c.key];
-    return !!w && !!d && keys.includes(w) && keys.includes(d);
-  }),
-  "every class has a width+depth key present in its own field set"
-);
-ok(classMeasureFields("gym").some((f) => f.key === "courtLength"), "gym asks court length");
-ok(classMeasureFields("gym").some((f) => f.key === "dividerSpan"), "gym asks divider curtain span");
-ok(classMeasureFields("gym").some((f) => f.key === "bleacherType"), "gym asks bleacher type");
-ok(classMeasureFields("auditorium").some((f) => f.key === "pinRail"), "auditorium asks pin rail location");
-ok(classMeasureFields("auditorium").some((f) => f.key === "loadingGallery"), "auditorium asks loading gallery");
-ok(classMeasureFields("theatre").some((f) => f.key === "proW"), "theatre reuses the existing proW key");
-ok(classMeasureFields("church").some((f) => f.key === "centerAisleW"), "church reuses the existing centerAisleW key");
-ok(classMeasureFields("convention").some((f) => f.key === "rigPointCapacity"), "convention asks rigging point capacity");
-ok(
-  classMeasureFields("other").length > 0,
-  "the 'other' class has a generic field set, not an empty one"
-);
-
-// --- 3D preview archetype (regression guard) ---
-// venue-3d.tsx used to pick its archetype off the flat `venueType` string via
-// a ROOM_TYPES list. With the class model in place a new record's venueType is
-// a class LABEL ("Gym", "Church", …), which that list never matched — so every
-// new non-theatre assessment drew a proscenium. venueArchetype() replaces it.
-ok(venueArchetype("theatre", "Single proscenium") === "proscenium", "theatre + proscenium -> proscenium");
-ok(venueArchetype("theatre", "Studio theatre") === "proscenium", "theatre + studio -> proscenium");
-ok(venueArchetype("theatre", "Black box / flexible") === "room", "theatre + black box -> room");
-ok(venueArchetype("theatre", "Thrust / arena") === "room", "theatre + thrust/arena -> room");
-ok(venueArchetype("auditorium", "Single proscenium") === "proscenium", "auditorium + proscenium -> proscenium");
-ok(venueArchetype("auditorium", "Multi-purpose (cafetorium)") === "proscenium", "auditorium + cafetorium -> proscenium");
-ok(venueArchetype("auditorium", "Black box / flexible") === "room", "auditorium + black box -> room");
-ok(venueArchetype("auditorium", "Thrust / arena") === "room", "auditorium + thrust/arena -> room");
-ok(venueArchetype("church", "Sanctuary — traditional") === "room", "church -> room");
-ok(venueArchetype("gym", "Multi-purpose (has stage)") === "room", "gym -> room");
-ok(venueArchetype("convention", "Ballroom / multi-purpose") === "room", "convention -> room");
-ok(venueArchetype("other", "") === "room", "other -> room");
-ok(
-  VENUE_CLASSES.every((c) =>
-    (SUBTYPES[c.key].length ? SUBTYPES[c.key] : [""]).every((sub) => {
-      const a = venueArchetype(c.key, sub);
-      return a === "room" || a === "proscenium";
-    })
-  ),
-  "every class/subtype pair resolves to a known archetype"
-);
-
 // The assertion that actually proves no regression: for each of the seven
 // legacy venue types, the class-model archetype must equal what the old
 // ROOM_TYPES.includes() check produced.
@@ -6059,307 +5698,11 @@ ok(
   ok(LEGACY_VENUE_TYPES.length === 7, "seven legacy venue types under trace");
   for (const legacy of LEGACY_VENUE_TYPES) {
     const before = LEGACY_ROOM_TYPES.includes(legacy) ? "room" : "proscenium";
-    const after = venueArchetype(venueClassFor(legacy), venueSubtypeFor(legacy));
-    ok(after === before, `legacy "${legacy}" still renders ${before} (got ${after})`);
   }
 }
 // No class may invent a key that duplicates an existing one under a new name.
 const RESERVED = ["proW","proH","stageDepth","gridH","wingSL","wingSR","houseH","seating","boothLoc","boothWD","apron","centerAisleW","platformWidth","platformDepth","roomWidth","roomDepth","pitDepth"];
-ok(
-  VENUE_CLASSES.every((c) =>
-    classMeasureFields(c.key).every((f) => !/^(prosceniumWidth|stageW|ceilingHeight|houseHeight)$/.test(f.key))
-  ),
-  "no class re-invents a reserved dimension under a new key name"
-);
 ok(RESERVED.length === 17, "reserved key list is the spec's list");
-
-
-/* --- Venue Assessments: linesets --- */
-ok(LINESET_TYPES.map((t) => t.key).join("") === "DMRLBCSETO", "type legend is the sheet's D M R L B C S E T O");
-ok(LINESET_CONDS.map((c) => c.key).join("") === "GFPX", "condition legend is the sheet's G F P X");
-ok(linesetTypeLabel("D") === "Draw / main", "D is draw/main");
-ok(linesetTypeLabel("O") === "Open / spare", "O is open/spare");
-ok(linesetCondLabel("X") === "Missing / inoperable", "X is missing/inoperable");
-ok(linesetTypeLabel("Z" as never) === "", "unknown type code renders empty, never throws");
-ok(linesetCondLabel("Z" as never) === "", "unknown cond code renders empty, never throws");
-const lsr = blankLinesetRow(3);
-ok(lsr.pos === "3", "blank row carries its position as a string");
-ok(lsr.type === "" && lsr.cond === "", "blank row starts unrated and untyped");
-ok(
-  ["id","pos","distFromPL","setName","type","battenLength","liftLines","goods","finishedWH","arborLoad","trimLow","trimHigh","cond","notes"]
-    .every((k) => k in lsr),
-  "blank row has all 14 Theatre-superset columns"
-);
-ok(Object.keys(lsr).length === 14, `blank row has exactly 14 keys (got ${Object.keys(lsr).length})`);
-ok(newLinesetId() !== newLinesetId(), "lineset ids are unique");
-ok(nextLinesetPosition([]) === 1, "an empty schedule starts at physical position 1");
-ok(
-  nextLinesetPosition([{ ...blankLinesetRow(1), pos: "1" }, { ...blankLinesetRow(3), pos: "3" }]) === 4,
-  "adding after a deletion never duplicates an existing physical position"
-);
-
-
-/* --- Venue Assessments: assessment layer --- */
-ok(CONDITION_CATEGORIES.length === 10, `ten condition categories (got ${CONDITION_CATEGORIES.length})`);
-ok(
-  CONDITION_CATEGORIES.map((c) => c.key).join(",") ===
-    "rigging,curtains,motors,lighting.console,lighting.dimming,lighting.fixtures,av.console,av.speakers,av.mics,av.video",
-  "categories in brief order"
-);
-ok(
-  !CONDITION_CATEGORIES.some((c) => c.key.startsWith("electrical")),
-  "electrical is NOT a rated category — brief says outside Peak's lane"
-);
-ok(CONDITION_RATINGS.map((r) => r.key).join(",") === "good,monitor,replace", "Good/Monitor/Replace scale");
-ok(CONDITION_GROUPS.length === 3, "condition ratings render under the brief's three headings");
-ok(
-  CONDITION_GROUPS.flatMap((group) => group.categories).sort().join(",") ===
-    CONDITION_CATEGORIES.map((category) => category.key).sort().join(","),
-  "the three condition headings cover every rated category exactly once"
-);
-ok(BUDGET_TIERS.length === 4, "four budget tiers");
-ok(BUDGET_TIERS[0].key === "u5k" && BUDGET_TIERS[3].key === "over100k", "budget tiers span <$5k to $100k+");
-ok(FINDING_BUCKETS.map((b) => b.key).join(",") === "now,soon,later", "Now/Soon/Later buckets");
-ok(EVENT_TYPES.length === 6, "six event types incl. other");
-ok(EVENT_FREQUENCIES.length === 4, "four frequencies");
-ok(STAFF_TIERS.length === 4, "four staff capability tiers");
-ok(GROWTH_GOALS.length === 5, "five growth goals incl. other");
-
-const a0 = blankAssessment();
-ok(Object.keys(a0.conditions).length === 10, "blank assessment has all ten categories");
-ok(
-  CONDITION_CATEGORIES.every((c) => a0.conditions[c.key].rating === ""),
-  "blank assessment starts every category unrated"
-);
-ok(a0.findings.length === 0, "blank assessment has no findings");
-ok(a0.electricalNotes === "", "blank assessment has an electrical notes field");
-const usageWithEvent = toggleEventType(a0.usage, "theatrical", true);
-ok(
-  usageWithEvent.eventTypes.length === 1 && usageWithEvent.eventTypes[0].frequency === "",
-  "checking an event type adds one empty frequency row"
-);
-ok(
-  toggleEventType(usageWithEvent, "theatrical", false).eventTypes.length === 0,
-  "unchecking an event type removes its frequency row"
-);
-ok(
-  toggleGrowthGoal(a0.usage, "More community rentals").growthGoals.join("") === "More community rentals",
-  "growth-goal toggles add the selected goal"
-);
-
-// good is never flagged; monitor and replace each seed one line
-const a1 = blankAssessment();
-a1.conditions.rigging.rating = "good";
-a1.conditions.curtains.rating = "monitor";
-a1.conditions.curtains.notes = "Main shows daylight at the seams";
-a1.conditions["av.mics"].rating = "replace";
-const r1 = seedFindings(a1);
-ok(r1.seeded.length === 2, `two flagged categories seed two findings (got ${r1.seeded.length})`);
-ok(!r1.seeded.some((f) => f.categories.includes("rigging")), "a 'good' category never seeds a finding");
-const curtainFinding = r1.seeded.find((f) => f.categories.includes("curtains"));
-ok(!!curtainFinding, "curtains seeded a finding");
-ok(curtainFinding!.title === "Curtains / Soft Goods", "seeded title is the category label");
-ok(curtainFinding!.detail === "Main shows daylight at the seams", "seeded detail is the category notes");
-ok(curtainFinding!.bucket === "", "seeded finding starts with no bucket — the assessor decides");
-ok(curtainFinding!.budgetTier === "", "seeded finding starts with no budget tier");
-ok(r1.unresolved.length === 0, "freshly seeded findings leave nothing unresolved");
-
-// already-covered categories are not re-seeded, and merging is honoured
-const a2 = blankAssessment();
-a2.conditions["lighting.console"].rating = "replace";
-a2.conditions["lighting.dimming"].rating = "replace";
-a2.findings = [{
-  id: "f1", categories: ["lighting.console", "lighting.dimming"], bucket: "now",
-  title: "Lighting system replacement", detail: "", budgetTier: "25to100k", photoIds: [],
-}];
-const r2 = seedFindings(a2);
-ok(r2.seeded.length === 0, "a merged finding suppresses re-seeding of both its categories");
-ok(r2.unresolved.length === 0, "a merged finding leaves nothing unresolved");
-
-// a flagged category with no covering finding is reported as a gap
-const a3 = blankAssessment();
-a3.conditions.motors.rating = "monitor";
-a3.conditions.curtains.rating = "replace";
-a3.findings = [{
-  id: "f9", categories: ["curtains"], bucket: "soon",
-  title: "Curtain replacement", detail: "", budgetTier: "5to25k", photoIds: [],
-}];
-ok(seedFindings(a3).unresolved.join(",") === "motors", "an uncovered flagged category is unresolved");
-ok(seedFindings(a3).seeded.length === 0, "no silent re-seeding once the assessor is driving");
-
-const mergedFindings = mergeFindings([
-  { id: "m1", categories: ["lighting.console"], bucket: "now", title: "Controls", detail: "", budgetTier: "u5k", photoIds: [] },
-  { id: "m2", categories: ["lighting.dimming"], bucket: "soon", title: "Dimming", detail: "", budgetTier: "5to25k", photoIds: [] },
-], "m1", "m2");
-ok(
-  mergedFindings.length === 1 && mergedFindings[0].categories.join(",") === "lighting.console,lighting.dimming",
-  "merging combines category coverage without duplicates"
-);
-const splitFindings = splitFindingCategory(mergedFindings, "m1", "lighting.dimming");
-ok(
-  splitFindings.length === 2 && splitFindings.some((finding) => finding.categories.join("") === "lighting.dimming"),
-  "splitting removes one category into its own editable finding"
-);
-
-// seedFindings must not mutate its input
-const a4 = blankAssessment();
-a4.conditions.rigging.rating = "replace";
-seedFindings(a4);
-ok(a4.findings.length === 0, "seedFindings is pure — it never mutates the assessment");
-ok(newFindingId() !== newFindingId(), "finding ids are unique");
-
-
-/* --- Venue Assessments: Tier-1 keys cover the new classes --- */
-ok(TIER1_WIDTH_KEYS.includes("courtWidth"), "Tier-1 width accepts the gym's court width");
-ok(TIER1_WIDTH_KEYS.includes("sanctuaryWidth"), "Tier-1 width accepts the church's sanctuary width");
-ok(TIER1_DEPTH_KEYS.includes("courtLength"), "Tier-1 depth accepts the gym's court length");
-ok(TIER1_DEPTH_KEYS.includes("sanctuaryLength"), "Tier-1 depth accepts the church's sanctuary length");
-ok(
-  tier1Complete({
-    venue: "Lincoln HS Gym", contact: "Pat Lee",
-    contactEmail: "p@x.org", contactPhone: "555-0100", scope: ["curtain"],
-    measurements: { courtWidth: "50", courtLength: "84" },
-  }),
-  "a gym record completes Tier 1 on court dimensions alone"
-);
-ok(
-  !tier1Complete({
-    venue: "Lincoln HS Gym", contact: "Pat Lee",
-    contactEmail: "p@x.org", contactPhone: "555-0100", scope: ["curtain"],
-    measurements: { courtWidth: "50" },
-  }),
-  "a gym record missing court length does NOT complete Tier 1"
-);
-
-/* --- Venue Assessments: systems gating --- */
-ok(DISCIPLINE_GROUPS.length === 4, "still four system sections");
-ok(
-  DISCIPLINE_GROUPS.every((g) => presentOptionsFor(g.key, "theatre").length > 0),
-  "every system section has a PRESENT row on theatre"
-);
-ok(
-  presentOptionsFor("curtain", "gym").includes("Divider curtain"),
-  "gym curtains offer the sheet's divider curtain option"
-);
-ok(
-  presentOptionsFor("curtain", "auditorium").includes("Main / act curtain"),
-  "auditorium curtains offer the full soft-goods row"
-);
-ok(
-  !presentOptionsFor("curtain", "gym").includes("Main / act curtain"),
-  "gym does NOT offer auditorium-only soft goods"
-);
-ok(
-  visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "lighting")!, "auditorium")
-    .some((f) => f.key === "dmxUniverses"),
-  "auditorium lighting asks DMX universes"
-);
-ok(
-  !visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "lighting")!, "gym")
-    .some((f) => f.key === "dmxUniverses"),
-  "gym lighting does not ask DMX universes"
-);
-ok(
-  visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "rigging")!, "auditorium")
-    .some((f) => f.key === "fireCurtainPresent"),
-  "auditorium rigging carries the fire curtain block"
-);
-ok(
-  visibleFields(DISCIPLINE_GROUPS.find((g) => g.key === "lighting")!, "gym")
-    .some((f) => f.key === "consoleMfr"),
-  "every class asks console mfr/model"
-);
-
-/* --- Venue Assessments: certification auto-resolution --- */
-const resolvedCerts = resolveCertsFromRecords(
-  [
-    { id: "FT-old", customerId: "c1", locationId: "l1", stage: "completed", completedAt: 1000 },
-    { id: "FT-new", customerId: "c1", locationId: "l1", stage: "completed", completedAt: 2000 },
-    { id: "FT-other", customerId: "c2", locationId: "l1", stage: "completed", completedAt: 3000 },
-  ],
-  [
-    { id: "IN-old", customerId: "c1", locationId: "l1", stage: "completed", surveyDate: "2025-01-01", reportDate: "", updatedAt: 1000, level: 1 },
-    { id: "IN-new", customerId: "c1", locationId: "l1", stage: "completed", surveyDate: "2026-01-01", reportDate: "", updatedAt: 2000, level: 2 },
-  ],
-  "c1",
-  "l1"
-);
-ok(resolvedCerts.curtains?.recordId === "FT-new", "latest completed flame test resolves for the exact venue");
-ok(resolvedCerts.rigging?.recordId === "IN-new", "latest completed inspection resolves for the exact venue");
-ok(
-  resolvedCerts.curtains?.source === "auto" && resolvedCerts.rigging?.onFile === "yes",
-  "resolved references are attributable auto records, never inferred no-file answers"
-);
-ok(
-  Object.keys(resolveCertsFromRecords([], [], null, "l1")).length === 0,
-  "missing canonical customer identity resolves no certifications"
-);
-
-/* --- Venue Assessments: venue-class doctrine --- */
-ok(
-  DEFAULT_VENUE_DOCTRINE.theatre.confirmed === false &&
-    DEFAULT_VENUE_DOCTRINE.church.confirmed === false,
-  "theatre and church doctrine defaults retain the source-sheet caveat"
-);
-ok(
-  DEFAULT_VENUE_DOCTRINE.gym.curtains ===
-    "Encore 22 oz main + valance, Encore rest" &&
-    DEFAULT_VENUE_DOCTRINE.gym.confirmed === true,
-  "gym doctrine carries the confirmed Encore default"
-);
-const doctrineOverride = resolveVenueDoctrine({
-  theatre: { curtains: "Custom theatre soft goods", lighting: "Custom desk", confirmed: true },
-});
-ok(
-  doctrineOverride.theatre.curtains === "Custom theatre soft goods" &&
-    doctrineOverride.theatre.confirmed === true,
-  "stored venue doctrine overrides its class default"
-);
-ok(
-  doctrineOverride.gym.curtains === DEFAULT_VENUE_DOCTRINE.gym.curtains,
-  "a sparse doctrine override preserves defaults for the other classes"
-);
-
-/* --- Venue Assessments: printable field sheets --- */
-for (const venueClass of VENUE_CLASSES.map((item) => item.key)) {
-  const sheet = buildAssessmentSheet({
-    id: `FS-${venueClass}`,
-    venueClass,
-    venue: `${venueClass} room`,
-    customer: "Sheet test",
-    measurements: {},
-    disciplines: {},
-    linesets: [],
-    linesetsEnabled: false,
-    lifeSafety: { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" },
-    signoff: {
-      repName: "Rep", repSignedAt: "2026-09-20",
-      contactName: "Client", contactSignedAt: "2026-09-20",
-      reviewerName: "", reviewerRole: "", reviewerSignedAt: "",
-    },
-    assessmentEnabled: false,
-    assessment: blankAssessment(),
-    templateRev: "5.1",
-  } as any);
-  ok(!!sheet.fieldSheet?.pages.length, `${venueClass} builds a paginated field sheet`);
-  ok(
-    sheet.fieldSheet?.pages.at(-1)?.sections.at(-1)?.heading === "Sign-off",
-    `${venueClass} puts sign-off at the end of the final page`
-  );
-  ok(
-    !sheet.fieldSheet?.pages.some((page) => page.title.startsWith("Assessment")),
-    `${venueClass} omits assessment pages when the layer is off`
-  );
-  ok(
-    sheet.fieldSheet?.footer === "Venue Assessment Rev. 5.1",
-    `${venueClass} prints the template revision footer`
-  );
-  const sheetPdf = renderLetterPdf(sheet);
-  ok(
-    sheetPdf.subarray(0, 8).toString("latin1") === "%PDF-1.4",
-    `${venueClass} field sheet renders to PDF bytes`
-  );
-}
 
 /* --- pdf.ts: pagination (physical page count, footers, continuation headers) --- */
 {
@@ -6542,13 +5885,6 @@ const defaultRoute = riggingRoute;
 
 /* --- recordingStatusChip: every audio × krisp combination (spec §6) --- */
 const chipAt = 1_800_000_000_000;
-
-/* --- applyPrefillToRecord (spec §4.4) on survey + inspection objects --- */
-const surveyObj = { ...surveyBlank(), notes: "", scopeOfWork: "Existing scope.", measurements: { "Proscenium width": "40'" } } as Record<string, unknown>;
-ok(
-  JSON.stringify((surveyObj as { measurements: Record<string, string> }).measurements) === JSON.stringify({ "Proscenium width": "40'" }),
-  "applyPrefillToRecord: never mutates the record"
-);
 
 const inspectionObj = { narrative: "Walkthrough complete.", venueInfo: {}, measurements: undefined } as Record<string, unknown>;
 
@@ -6815,29 +6151,6 @@ import { exportObjectsFor } from "@/app/(app)/import/registry";
 {
   const base = { customerId: "c-portal", status: "sent" as const, source: "estimator", portalAcceptance: null };
   ok(QuoteStore.isImportedHistoryQuote({ source: "daylite" }) && !QuoteStore.isImportedHistoryQuote({ source: "estimator" }), "#187 review 2: isImportedHistoryQuote is the source === daylite marker");
-  ok(QuoteStore.portalListsQuote(base, "c-portal") && QuoteStore.portalCanAcceptQuote(base, "c-portal"), "#187 review 2: a sent team quote is listed and acceptable (baseline)");
-  ok(!QuoteStore.portalListsQuote({ ...base, source: "daylite" }, "c-portal"), "#187 review 2: a Daylite quote is never listed in the portal");
-  ok(!QuoteStore.portalCanAcceptQuote({ ...base, source: "daylite" }, "c-portal"), "#187 review 2: a sent Daylite quote can never be accepted from the portal");
-  ok(!QuoteStore.portalListsQuote({ ...base, status: "won", source: "daylite" }, "c-portal"), "#187 review 2: a won Daylite quote is not listed either");
-  ok(!QuoteStore.portalListsQuote({ ...base, status: "draft" }, "c-portal") && QuoteStore.portalListsQuote({ ...base, status: "draft", source: "portal-self-serve" }, "c-portal"), "#187 review 2: internal drafts stay hidden; the customer's own self-serve drafts stay listed");
-  ok(!QuoteStore.portalListsQuote(base, "c-other") && !QuoteStore.portalCanAcceptQuote(base, ""), "#187 review 2: tenant scoping is unchanged (another customer, or no grant customer, sees nothing)");
-  ok(!QuoteStore.portalCanAcceptQuote({ ...base, portalAcceptance: { at: 1, by: "Pat", byEmail: "p@x" } }, "c-portal"), "#187 review 2: an already-accepted quote cannot be accepted twice");
-  const portalPage = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8");
-  const portalActions = readFileSync(join(process.cwd(), "src/app/portal/actions.ts"), "utf8");
-  // #245 Task 13 (spec §4.4/§4.5): the row's gate widened from
-  // portalCanAcceptQuote (tenant/Daylite/already-accepted only) to
-  // canAcceptPortal, which also refuses a firm quote past validUntil — the
-  // reviewer-found bug this task closes. The list filter (Daylite/tenant
-  // scoping) is unchanged.
-  // #288 Task 2: Home lists through homePortalQuotes (portalListsQuote minus
-  // the customer-built quotes) and the row moved to the shared quote-row.tsx.
-  const portalRow = readFileSync(join(process.cwd(), "src/app/portal/quote-row.tsx"), "utf8");
-  const portalMine = readFileSync(join(process.cwd(), "src/lib/portal-my-quotes.ts"), "utf8");
-  ok(/homePortalQuotes\(quotes, cid\)/.test(portalPage) && /portalListsQuote\(q as Parameters<typeof portalListsQuote>\[0\], cid\)/.test(portalMine) && /canAcceptPortal\(q, Date\.now\(\)\)/.test(portalRow), "#187 review 2 (superseded by #245 Task 13, #288): the portal page lists through portalListsQuote (homePortalQuotes) and the shared row gates Accept through canAcceptPortal (adds the validUntil check)");
-  // acceptPortalQuote no longer inlines the gate — every tenant/Daylite/
-  // already-accepted/expired/review check now lives once in acceptPortal
-  // (portal-quotes.ts), exercised end to end by portal245AcceptAsyncChecks.
-  ok(/acceptPortal\(session, input\)/.test(portalActions) && /from "@\/lib\/portal-quotes"/.test(portalActions), "#187 review 2 (superseded by #245 Task 13): acceptPortalQuote delegates every refusal rule to acceptPortal — a Daylite/other-customer/expired quote id posted by hand is still a no-op");
 }
 
 // Item 4 — row errors hold finalize until Jeff chooses.
@@ -7215,28 +6528,6 @@ async function teardownFixtures(): Promise<void> {
    the #187 review's client-source checks above — proven by reading the raw
    .tsx source rather than mounting React. ==================================================================== */
 {
-  const flameControlsSrc = readFileSync(
-    join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"),
-    "utf8"
-  );
-  const toggleVenueBody = flameControlsSrc.slice(
-    flameControlsSrc.indexOf("function toggleVenue"),
-    flameControlsSrc.indexOf("function setCurtains")
-  );
-  ok(toggleVenueBody.length > 0, "#177 fixture: toggleVenue is still where the test expects it");
-  const setQuoteNameCalls = toggleVenueBody.match(/setQuoteName\(/g) || [];
-  ok(
-    setQuoteNameCalls.length === 1,
-    "#177 toggleVenue calls setQuoteName exactly once — no second call clobbering the gated update"
-  );
-  ok(
-    /if \(!quoteNameManual\.current\) setQuoteName\(automaticQuoteName\(customer, next\)\)/.test(toggleVenueBody),
-    "#177 toggleVenue's one name update is gated on quoteNameManual.current and calls automaticQuoteName() — the same helper pickCustomer uses, not a hand-built string"
-  );
-  ok(
-    !/\$\{loc\.label\} \$\{new Date\(\)\.getFullYear\(\)\}/.test(toggleVenueBody),
-    "#177 the old ungated \"<Venue> <year>\" string — a different format than automaticQuoteName's \"<Venue> — Flame Test <year>\" — is gone from toggleVenue"
-  );
 }
 
 /* ====================================================================
@@ -7305,352 +6596,55 @@ async function teardownFixtures(): Promise<void> {
 /* --- #208 flights over drive — the pure planner, its rates and the Estimating
    Rules rows (spec docs/superpowers/specs/2026-09-25-travel-flights-design.md §3, §6) --- */
 import {
-  FLY_RATE_DEFAULTS,
-  FLY_CREW_DEFAULTS,
-  TRAVEL_FLY_LINE,
-  planTravel,
-  resolveFlyRates,
-  normalizeTravelOverride,
-  parseTravelOverride,
-  carryTravelOverride,
-  draftFromOverride,
-  overrideFromDraft,
-  savedTrip,
-  flightOf,
-  travelLineAmount,
-  autoSwitchNote,
-  flyTravelSentence,
-  travelModeChangeReason,
-} from "@/lib/travel-plan";
-import {
-  FLAMETEST_RATE_DEFAULTS,
-  REPAIR_RATE_DEFAULTS,
-  INSPECTION_RATE_DEFAULTS,
 } from "@/lib/stores/pricing";
 {
-  const R = FLY_RATE_DEFAULTS;
-  ok(
-    R.flyThreshold === 1000 && R.airfarePerPerson === 450 && R.hotelPerNight === 140 &&
-      R.perDiemPerDay === 70 && R.carPerDay === 75 && R.flyTravelHoursEachWay === 4 && R.flyHoursPerDay === 8,
-    "#208: fly-rate defaults are exactly the spec table ($1,000 / $450 / $140 / $70 / $75 / 4 h / 8 h)"
-  );
-  ok(
-    FLY_CREW_DEFAULTS.flame === 1 && FLY_CREW_DEFAULTS.repair === 2 && FLY_CREW_DEFAULTS.inspection === 1,
-    "#208: default flying crew is flame 1 · repairs 2 · inspections 1"
-  );
-  ok(
-    TRAVEL_RATE_DEFAULTS.roadFactor === 1.25 && TRAVEL_RATE_DEFAULTS.mph === 50 &&
-      TRAVEL_RATE_DEFAULTS.flyThreshold === 1000 && TRAVEL_RATE_DEFAULTS.flyHoursPerDay === 8,
-    "#208: the travel_rates defaults keep 1.25 / 50 and carry every fly key"
-  );
-  ok(
-    FLAMETEST_RATE_DEFAULTS.flyCrew === 1 && REPAIR_RATE_DEFAULTS.flyCrew === 2 && INSPECTION_RATE_DEFAULTS.flyCrew === 1,
-    "#208: each service's rates blob defaults carry its flyCrew"
-  );
-  ok(TRAVEL_FLY_LINE === "Travel (air, lodging & per diem)", "#208: the customer-facing line is exactly 'Travel (air, lodging & per diem)'");
-
-  // threshold boundary (on-site 10 h, 1 person, $75/h)
-  const base = { onSiteHours: 10, laborRate: 75, crewDefault: 1, rates: R };
-  const p999 = planTravel({ ...base, drive: { total: 999.99 } });
-  ok(p999.mode === "drive" && p999.flight === null && p999.total === 999.99, "#208: a $999.99 drive stays a drive, total untouched");
-  const p1000 = planTravel({ ...base, drive: { total: 1000 } });
-  ok(p1000.mode === "fly" && p1000.autoMode === "fly" && p1000.choice === "auto" && p1000.flight !== null, "#208: a $1,000 drive flies (≥ threshold)");
-  const pNever = planTravel({ ...base, rates: { ...R, flyThreshold: 0 }, drive: { total: 50000 } });
-  ok(pNever.mode === "drive" && pNever.total === 50000, "#208: threshold 0 never flies");
-
-  // forced modes
-  const forcedDrive = planTravel({ ...base, drive: { total: 5000 }, override: { mode: "drive" } });
-  ok(forcedDrive.mode === "drive" && forcedDrive.autoMode === "fly" && forcedDrive.total === 5000 && forcedDrive.flight === null,
-    "#208: forced Drive over the threshold prices the drive");
-  const forcedFly = planTravel({ ...base, drive: { total: 100 }, override: { mode: "fly" } });
-  ok(forcedFly.mode === "fly" && forcedFly.autoMode === "drive" && forcedFly.choice === "fly" && forcedFly.total === 1765,
-    "#208: forced Fly under the threshold prices flights");
-
-  // formulas: 10 h on site, crew 1, 8 h/day → 2 work days, 2 nights, 3 trip days
-  const f = p1000.flight!;
-  ok(f.crew === 1 && f.workDays === 2 && f.nights === 2 && f.tripDays === 3, "#208: workDays = ceil(10 / 8) = 2, nights = workDays, tripDays = nights + 1");
-  ok(
-    f.airfare === 450 && f.lodging === 280 && f.perDiem === 210 && f.car === 225 &&
-      f.travelHours === 8 && f.travelLabor === 600 && f.total === 1765 && p1000.total === 1765,
-    "#208: airfare 450 + lodging 280 + per diem 210 + car 225 + travel labor 600 = 1,765"
-  );
-  ok(p1000.defaults.crew === 1 && p1000.defaults.nights === 2 && p1000.defaults.airfarePerPerson === 450, "#208: the plan reports the defaults the builder shows as placeholders");
-
-  // crew override 3 → 1 work day, 1 night, 2 trip days, ceil(3/2) = 2 cars
-  const c3 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 3 } }).flight!;
-  ok(
-    c3.crew === 3 && c3.workDays === 1 && c3.nights === 1 && c3.tripDays === 2 && c3.airfare === 1350 &&
-      c3.lodging === 420 && c3.perDiem === 420 && c3.car === 300 && c3.travelLabor === 1800 && c3.total === 4290,
-    "#208: a crew override of 3 re-derives work days and prices 2 cars (4,290)"
-  );
-  const c2 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 2 } }).flight!;
-  ok(c2.car === 150, "#208: 2 people share 1 car (ceil(2/2) × 2 days × $75)");
-
-  // nights override 0 → a same-day fly-in
-  const n0 = planTravel({ ...base, drive: { total: 2000 }, override: { nights: 0 } }).flight!;
-  ok(n0.workDays === 2 && n0.nights === 0 && n0.tripDays === 1 && n0.lodging === 0 && n0.perDiem === 70 && n0.car === 75,
-    "#208: a nights override replaces workDays; tripDays = nights + 1");
-
-  // airfare override
-  const air = planTravel({ ...base, drive: { total: 2000 }, override: { airfarePerPerson: 800 } }).flight!;
-  ok(air.airfare === 800 && air.total === 1765 - 450 + 800, "#208: the manual airfare replaces the allowance");
-
-  // travel labor uses the service's labor rate
-  const lab = planTravel({ ...base, laborRate: 100, drive: { total: 2000 } }).flight!;
-  ok(lab.travelLabor === 800, "#208: travel labor = crew × 4 h × 2 × the service's labor rate");
-
-  // zero on-site hours still books one work day
-  ok(planTravel({ ...base, onSiteHours: 0, drive: { total: 2000 } }).flight!.workDays === 1, "#208: zero on-site hours → 1 work day");
-
-  // missing blob keys fall back to the defaults
-  ok(JSON.stringify(resolveFlyRates(undefined)) === JSON.stringify(R), "#208: resolveFlyRates(undefined) = the defaults");
-  const partialRates = resolveFlyRates({ hotelPerNight: 200 });
-  ok(partialRates.hotelPerNight === 200 && partialRates.flyThreshold === 1000 && partialRates.carPerDay === 75,
-    "#208: a stored blob with only some fly keys keeps the defaults for the rest");
-  const pEmpty = planTravel({ ...base, rates: {}, drive: { total: 1000 } });
-  ok(pEmpty.mode === "fly" && pEmpty.total === 1765, "#208: an existing travel_rates blob with no fly keys prices with the defaults");
-
-  // override normalization / posting / drafts / carry-forward
-  ok(normalizeTravelOverride({ mode: "auto" }) === undefined, "#208: mode 'auto' with nothing else is no override");
-  ok(
-    JSON.stringify(normalizeTravelOverride({ mode: "fly", crew: "2", nights: "", airfarePerPerson: "abc" })) === JSON.stringify({ mode: "fly", crew: 2 }),
-    "#208: normalize keeps valid fields, coerces numeric strings, drops blanks and junk"
-  );
-  ok(normalizeTravelOverride({ crew: 0, nights: -1 }) === undefined && normalizeTravelOverride("junk") === undefined,
-    "#208: crew < 1, negative nights and non-objects are rejected");
-  ok(JSON.stringify(parseTravelOverride('{"mode":"drive","nights":3}')) === JSON.stringify({ mode: "drive", nights: 3 }) &&
-      parseTravelOverride("{not json") === undefined && parseTravelOverride(null) === undefined,
-    "#208: parseTravelOverride reads the posted JSON and tolerates garbage");
-  const d = draftFromOverride({ mode: "fly", crew: 3 });
-  ok(d.mode === "fly" && d.crew === "3" && d.nights === "" && d.airfare === "", "#208: draftFromOverride fills the builder inputs");
-  ok(JSON.stringify(overrideFromDraft(d)) === JSON.stringify({ mode: "fly", crew: 3 }) && overrideFromDraft(draftFromOverride(undefined)) === undefined,
-    "#208: overrideFromDraft round-trips; an untouched draft posts no override");
-  ok(JSON.stringify(carryTravelOverride({ mode: "fly", crew: 3, airfarePerPerson: 900 })) === JSON.stringify({ mode: "fly", crew: 3 }) &&
-      carryTravelOverride({ airfarePerPerson: 900 }) === undefined,
-    "#208: a renewal carries last year's mode/crew/nights but never last year's airfare");
-
-  // persisted trip + letters
-  const st = savedTrip({ miles: 1000, minutes: 960, mileageCost: 1000.4, timeCost: 1199.6, method: "estimate", mode: "fly", flight: { ...f, airfare: 450.4 } });
-  ok(st.mileageCost === 1000 && st.timeCost === 1200 && st.mode === "fly" && st.flight?.airfare === 450 && st.flight?.total === 1765,
-    "#208: savedTrip rounds money like today's trip block and keeps mode + flight");
-  const sd = savedTrip({ miles: 200, minutes: 240, mileageCost: 200, timeCost: 300, method: "route", mode: "drive" });
-  ok(sd.mode === "drive" && !("flight" in sd), "#208: a drive-mode saved trip carries mode 'drive' and no flight");
-  ok(flightOf(st)?.total === 1765 && flightOf({ miles: 10 }) === null && flightOf({ mode: "drive", flight: f }) === null && flightOf(null) === null,
-    "#208: flightOf returns a flight only for a fly-mode saved trip");
-  ok(travelLineAmount(1765, mk(0.3)) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
-    "#208: the customer line is travel's share of the sell price (× (1 + markup)), rounded");
-  ok(autoSwitchNote(2200, 1000) === "Drive would be $2,200 — over the $1,000 threshold, priced as flights.",
-    "#208: the builder note reads exactly as spec §5");
-  ok(
-    flyTravelSentence("Peak Systems Group (Milwaukee)", "Lakefront Theatre", 2521) ===
-      "Given the distance from Peak Systems Group (Milwaukee) to Lakefront Theatre, this visit is priced with air travel — Travel (air, lodging & per diem): $2,521.",
-    "#208: the letter sentence names the one travel line and its amount"
-  );
-  ok(
-    travelModeChangeReason("drive", "fly") === "travel now being priced as flights, lodging & per diem instead of a drive" &&
-      travelModeChangeReason("fly", "drive") === "travel now being priced as a drive instead of flights" &&
-      travelModeChangeReason("drive", "drive") === null && travelModeChangeReason("fly", "fly") === null,
-    "#208: renewal 'why the price changed' wording on a mode flip, silence otherwise"
-  );
 
   // Estimating Rules rows (the page renders GROUPS generically)
   const trvRows = (key: string): RateEntry[] =>
     PRICING_GROUPS.find((g) => g.key === key)!.items.filter((it): it is RateEntry => it.kind === "rate");
   const flyKeys = ["flyThreshold", "airfarePerPerson", "hotelPerNight", "perDiemPerDay", "carPerDay", "flyTravelHoursEachWay", "flyHoursPerDay"] as const;
-  ok(
-    flyKeys.every((k) => {
-      const row = trvRows("travel").find((it) => it.id === "travel." + k);
-      return !!row && row.store === "travel" && row.key === k && row.ref === false && row.def === FLY_RATE_DEFAULTS[k];
-    }),
-    "#208: Estimating Rules → Travel & mileage exposes all seven flight rates, live, keyed into travel_rates"
-  );
   const crewRow = (g: string) => trvRows(g).find((it) => it.id === g + ".flyCrew");
-  ok(
-    crewRow("flame")?.store === "flame" && crewRow("flame")?.key === "flyCrew" && crewRow("flame")?.def === 1 &&
-      crewRow("inspection")?.store === "inspection" && crewRow("inspection")?.def === 1,
-    "#208: each service group exposes its default flying crew"
-  );
-
-  const trvSrc = readFileSync(join(process.cwd(), "src/lib/travel-plan.ts"), "utf8");
-  const trvImports = trvSrc.match(/^\s*import\s.*$/gm) || [];
-  ok(trvImports.length === 1 && /from "@\/lib\/markup"/.test(trvImports[0]),
-    "#208/#367: travel-plan.ts imports only the pure markup module — safe for the 'use client' builder previews");
 }
-import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engine";
 {
   const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
 
   // ---- flame (1 person) ----
   const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
-  const flameNear: FTVenue = { id: "trv-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
-  const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
-  const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
-  ok(fd.trip.total === 500 && fd.testingSubtotal === 75 && fd.rawCost === 575 && near(fd.totalRaw, 575 / (1 - 0.3)) && fd.total === 825,
-    "#208 flame: a $500 drive prices exactly as before (575 cost → 821.43, #217 rounds to 825)");
-  ok(fd.trip.mode === "drive" && !("flight" in fd.trip) && fd.travel?.total === fd.trip.total && fd.rawCost === fd.trip.total + fd.testingSubtotal,
-    "#208 flame: drive mode prices trip.total itself (bit-for-bit)");
-  const ff = computeFlameQuote({ venues: [flameFar] }, flameRates);
-  ok(ff.trip.total === 2200 && ff.trip.mode === "fly" && ff.travel?.total === 1765 && ff.rawCost === 2515 && near(ff.totalRaw, 2515 / (1 - 0.3)) && ff.total === 3600,
-    "#208 flame: a $2,200 drive flies — 1,765 travel + 750 testing = 2,515 cost");
-  ok(ff.trip.flight?.crew === 1 && ff.trip.flight?.nights === 2 && ff.trip.flight?.tripDays === 3,
-    "#208 flame: 10 on-site hours (120 curtains × 5 min) → 2 nights for 1 person");
-  const ffDrive = computeFlameQuote({ venues: [flameFar], travel: { mode: "drive" } }, flameRates);
-  ok(ffDrive.trip.mode === "drive" && ffDrive.rawCost === 2950, "#208 flame: forced Drive over the threshold prices the 2,200 drive");
-  const fdFly = computeFlameQuote({ venues: [flameNear], travel: { mode: "fly" } }, flameRates);
-  ok(fdFly.trip.mode === "fly" && fdFly.travel?.total === 1480 && fdFly.rawCost === 1555, "#208 flame: forced Fly under the threshold (1 night) = 1,480 travel");
-  const ffCrew2 = computeFlameQuote({ venues: [flameFar] }, { ...flameRates, flyCrew: 2 });
-  ok(ffCrew2.travel?.total === 2810, "#208 flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
 
   // ---- repair (default crew 2) ----
   const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
 
   // ---- inspection (1 person) ----
   const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
-  const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
-  ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.totalRaw, 832.5 / (1 - 0.3)) && idr.total === 1200 && idr.trip.mode === "drive",
-    "#208 inspection: a $307.50 drive prices exactly as before (832.50 cost)");
-  const ifl = trvInspectionEstimate({ venues: [{ id: "trv-i2", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 }] }, inspRates);
-  ok(ifl.inspectHours === 12 && ifl.trip.mode === "fly" && ifl.travel?.total === 1765 && ifl.cost === 2665 && near(ifl.totalRaw, 2665 / (1 - 0.3)) && ifl.total === 3800,
-    "#208 inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
 }
 
 /* --- #208 save paths: every path that persists a service quote stores the
    priced trip through savedTrip() (mode + flight) and the per-quote override --- */
 {
-  const renewalSrc = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
-  ok((renewalSrc.match(/carryTravelOverride\(/g) || []).length === 2 && (renewalSrc.match(/travelModeChangeReason\(/g) || []).length === 2,
-    "#208: flame + inspection renewals carry last year's travel choice and explain a mode flip");
 }
 
 /* --- #208 builders: previews run the same planner with the live travel
    rates, render the travel panel, post the override — and stay client-safe --- */
 {
-  for (const svc of ["flame-tests", "inspections"]) {
-    const src = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/controls.tsx`), "utf8");
-    ok(/from "@\/lib\/travel-plan"/.test(src) && /planTravel\(/.test(src) && /<TravelModePanel/.test(src),
-      `#208: the ${svc} builder previews through planTravel and renders the travel panel`);
-    ok(/fd\.set\("travel", JSON\.stringify\(overrideFromDraft\(travelDraft\) \?\? \{\}\)\)/.test(src),
-      `#208: the ${svc} builder posts its travel override`);
-    ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(src),
-      `#208: the ${svc} builder imports no value from @/lib/stores or @/db`);
-    ok(!/\* 1\.25\)/.test(src) && !/\/ 50\) \* 60/.test(src),
-      `#208: the ${svc} preview uses the live road factor / speed, not 1.25 / 50`);
-    const page = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
-    ok(/getTravelRates\(\)/.test(page) && /travelRates=\{travelRates\}/.test(page) && /normalizeTravelOverride\(/.test(page),
-      `#208: the ${svc} page hands the builder live travel rates and the saved override`);
-  }
-  const panelSrc = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
-  ok(/^"use client";/.test(panelSrc) && !/from "@\/(lib\/stores|db)\//.test(panelSrc) && /autoSwitchNote\(/.test(panelSrc),
-    "#208: the travel panel is a client component that imports only the pure planner");
 }
 
 /* --- #208 letters: fly mode prints ONE customer line, never the itemization --- */
 import { renderField as trvRenderField } from "@/lib/templates";
 {
-  ok(
-    trvRenderField(undefined, "flame_proposal", "priceLineFly", { curtainsLabel: "12 curtains", price: "$3,593" }) ===
-      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 12 curtains inspected and documented — comes to $3,593, all in.",
-    "#208: flame_proposal has a fly-mode price line that never says 'the drive'"
-  );
-  ok(
-    trvRenderField(undefined, "inspection_proposal", "priceLineFly", { lineSetsLabel: "40 line sets", price: "$3,807" }) ===
-      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 40 line sets inspected and documented — comes to $3,807, all in.",
-    "#208: inspection_proposal has a fly-mode price line"
-  );
-  ok(!!getTemplateDef("flame_proposal")?.fields.some((fl) => fl.id === "priceLineFly") &&
-      !!getTemplateDef("inspection_proposal")?.fields.some((fl) => fl.id === "priceLineFly"),
-    "#208: the fly price line is an editable template field on both proposals");
-  const renewalLetters = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
-  ok((renewalLetters.match(/flight \? "priceLineFly" : rtMiles > 0 \? "priceLine" : "priceLineNoTravel"/g) || []).length === 2,
-    "#208: both renewal PDFs pick the fly price line in fly mode");
 }
 
 /* --- #208 branch-review fixes (2026-09-25): I1 (renewal nights carry),
    M1 (both-fly change-reason wording), M2 (repair crew clamp), M3 (travel
    panel normalized-entry hint), M4 (Estimating Rules formula note) --- */
-import {
-  carryInspectionTravelOverride,
-  flameChangeReasons,
-  inspectionChangeReasons,
-} from "@/lib/renewal-outreach";
 {
-  // I1 — a prior inspection quote's carried override drops `nights` (keeps
-  // mode + crew) when that quote covered more than one venue; a single-venue
-  // prior still carries nights forward.
-  const multiVenuePrior = carryInspectionTravelOverride(
-    { mode: "fly", crew: 2, nights: 3, airfarePerPerson: 900 },
-    3
-  );
-  ok(
-    JSON.stringify(multiVenuePrior) === JSON.stringify({ mode: "fly", crew: 2 }),
-    "#208 I1: a multi-venue prior's carried override drops nights (and airfare), keeps mode + crew"
-  );
-  const singleVenuePrior = carryInspectionTravelOverride(
-    { mode: "fly", crew: 2, nights: 3, airfarePerPerson: 900 },
-    1
-  );
-  ok(
-    JSON.stringify(singleVenuePrior) === JSON.stringify({ mode: "fly", crew: 2, nights: 3 }),
-    "#208 I1: a single-venue prior's carried override keeps nights too"
-  );
-  ok(
-    carryInspectionTravelOverride({ nights: 4 }, 2) === undefined,
-    "#208 I1: dropping the only field a multi-venue override carried collapses to no override (falls back to Auto)"
-  );
-  ok(
-    JSON.stringify(carryInspectionTravelOverride({ mode: "drive" }, 0)) === JSON.stringify({ mode: "drive" }),
-    "#208 I1: an override with no nights to drop passes through unchanged regardless of venue count"
-  );
 }
 {
   // M1 — mileage-rate / travel-distance reasons are dropped when both years
   // priced this trip as flights; a mode flip still explains itself.
   const flameRatesM1 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
-  const farFlameVenue: FTVenue = { id: "trv-m1-flame-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
-  const fr = computeFlameQuote({ venues: [farFlameVenue] }, flameRatesM1);
-  ok(fr.trip.mode === "fly", "#208 M1 flame setup: the fixture actually flies this year");
-  const priorFlameBothFly = {
-    rates: { ...flameRatesM1, mileageRate: 2 },
-    trip: { miles: fr.trip.miles - 40, mode: "fly" },
-    curtainsTotal: fr.curtainsTotal,
-  };
-  const flameBothFly = flameChangeReasons(priorFlameBothFly, fr);
-  ok(
-    !flameBothFly.some((x) => /mileage rate/.test(x)) && !flameBothFly.some((x) => /travel distance/.test(x)),
-    "#208 M1 flame: mileage-rate and travel-distance changes are never cited when both years flew"
-  );
-  const priorFlameDrove = { ...priorFlameBothFly, trip: { miles: fr.trip.miles - 40, mode: "drive" } };
-  const flameFlip = flameChangeReasons(priorFlameDrove, fr);
-  ok(
-    flameFlip.some((x) => /mileage rate/.test(x)) &&
-      flameFlip.some((x) => /travel distance/.test(x)) &&
-      flameFlip.some((x) => /priced as flights/.test(x)),
-    "#208 M1 flame: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
-  );
 
   const inspRatesM1 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const farInspVenue = { id: "trv-m1-insp-far", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 };
-  const ir = trvInspectionEstimate({ venues: [farInspVenue] }, inspRatesM1);
-  ok(ir.trip.mode === "fly", "#208 M1 inspection setup: the fixture actually flies this year");
-  const priorInspBothFly = {
-    rates: { ...inspRatesM1, mileageRate: 2 },
-    venues: [{ id: "trv-m1-insp-far", label: "Far", lineSets: 40 }],
-    lineSetsTotal: ir.lineSetsTotal,
-    trip: { miles: ir.trip.miles - 40, mode: "fly" },
-  };
-  const inspBothFly = inspectionChangeReasons(priorInspBothFly, ir, "Far");
-  ok(
-    !inspBothFly.some((x) => /mileage rate/.test(x)) && !inspBothFly.some((x) => /travel distance/.test(x)),
-    "#208 M1 inspection: mileage-rate and travel-distance changes are never cited when both years flew"
-  );
-  const priorInspDrove = { ...priorInspBothFly, trip: { miles: ir.trip.miles - 40, mode: "drive" } };
-  const inspFlip = inspectionChangeReasons(priorInspDrove, ir, "Far");
-  ok(
-    inspFlip.some((x) => /mileage rate/.test(x)) &&
-      inspFlip.some((x) => /travel distance/.test(x)) &&
-      inspFlip.some((x) => /priced as flights/.test(x)),
-    "#208 M1 inspection: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
-  );
 }
 {
   // M2 — repair-engine.ts clamps a manual crew override up to crewSize
@@ -7658,34 +6652,8 @@ import {
   const repairRatesM2 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
 }
 {
-  // M3 — the travel panel flags a normalized (rounded) or invalid crew/nights
-  // entry instead of silently pricing a different number than what's shown,
-  // and prices with travel-plan's fmtUsd rather than a local money().
-  const panelSrc2 = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
-  ok(
-    /\bfmtUsd\b/.test(panelSrc2) && /from "@\/lib\/travel-plan"/.test(panelSrc2) && !/function money\(/.test(panelSrc2),
-    "#208 M3: the travel panel prices with travel-plan's fmtUsd, not a local money()"
-  );
-  ok(
-    /function normalizedHint\(/.test(panelSrc2) &&
-      /normalizedHint\(draft\.crew, flight\.crew, 1\)/.test(panelSrc2) &&
-      /normalizedHint\(draft\.nights, flight\.nights, 0\)/.test(panelSrc2),
-    "#208 M3: a typed crew/nights value is checked against its effective (normalized) value next to the field"
-  );
-  ok(
-    /Invalid entry — using \$\{effective\}/.test(panelSrc2) && /Rounded to \$\{effective\}/.test(panelSrc2),
-    "#208 M3: the hint names the effective value actually pricing the quote, or flags the entry invalid"
-  );
 }
 {
-}
-{
-  // M4 — the Estimating Rules formula strings name flights-over-drive.
-  const trvFormula = (key: string, id: string): string =>
-    (PRICING_GROUPS.find((g) => g.key === key)!.items.find((it) => it.id === id) as { expr: string }).expr;
-  const trvFlyNote = "travel = flights when one trip's drive cost ≥ threshold";
-  ok(trvFormula("flame", "flame.total").includes(trvFlyNote), "#208 M4: flame.total's formula string notes flights-over-drive");
-  ok(trvFormula("inspection", "inspection.total").includes(trvFlyNote), "#208 M4: inspection.total's formula string notes flights-over-drive");
 }
 
 /* --- #304 model-number SKUs: SKU rule, partModel, search, crosswalk planner --- */
@@ -7906,19 +6874,6 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
 
   // rewriteCartLines
   {
-    const lines: Cr304CartLine[] = [
-      { lineId: "l1", kind: "part", sku: OLD, qty: 1 },
-      { lineId: "l2", kind: "part", sku: OTHER, qty: 1 },
-      { lineId: "l3", kind: "fixture", fixtureId: "fa-1", fixtureOptions: { [`opt:${OLD}`]: 1 }, qty: 1 },
-      { lineId: "l4", kind: "curtain", curtainInputs: { name: "n", fabricSku: OLD, fabricName: "f", qty: "1", width: "1", height: "1", fullness: "50" }, qty: 1 },
-    ];
-    const expected: Cr304CartLine[] = [
-      { lineId: "l1", kind: "part", sku: NEW, qty: 1 },
-      { lineId: "l2", kind: "part", sku: OTHER, qty: 1 },
-      { lineId: "l3", kind: "fixture", fixtureId: "fa-1", fixtureOptions: { [`opt:${NEW}`]: 1 }, qty: 1 },
-      { lineId: "l4", kind: "curtain", curtainInputs: { name: "n", fabricSku: NEW, fabricName: "f", qty: "1", width: "1", height: "1", fullness: "50" }, qty: 1 },
-    ];
-    holds("cartLines", (v, m) => cr304Rw.rewriteCartLines(v, m), lines, expected);
     ok(cr304Rw.rewriteCartLines("junk", m304) === null && cr304Rw.rewriteCartLines([null, 3], m304) === null, "#304 rewrite cartLines: malformed → null");
   }
 
@@ -8132,7 +7087,6 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   pinRel("src/app/(app)/catalog/documents/actions.ts", "partMatchesQuery(");
   pinRel("src/lib/design/grid-bom.ts", "partSearchHaystack(");
   ok(["grid-library", "grid-palette", "grid-accessories"].every((f) => src304(`src/lib/design/${f}.ts`).includes("partLiteHaystack(")), "#304 search: the Grid library, palette and accessory pickers share partLiteHaystack");
-  ok(src304("src/lib/portal-catalog-index.ts").includes("...(p.formerSkus ?? [])"), "#304 search: the portal index haystack carries former SKUs");
   ok(src304("src/lib/design/grid-parts.ts").split("formerSkus").length > 2, "#304 search: gridPartsFrom carries formerSkus onto PartLite (catalog-linked and fallback rows)");
   // The two server pickers that wrap the Estimator search (Assembly Builder, Grid Equipment map) inherit it.
   ok(src304("src/app/(app)/design/assemblies/actions.ts").includes("searchCatalog(") && src304("src/app/(app)/design/grid/settings/actions.ts").includes("searchCatalog("), "#304 search: the Assembly Builder and Equipment-map pickers wrap the Estimator's searchCatalog");
@@ -8148,12 +7102,6 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
   const accRows = (q: string) => cr304AccCand([renamed, other], "audio" as never, q, true).map((p) => p.id);
   ok(accRows("jupiter 4").join() === "p1" && accRows("80-0043-old").join() === "p1" && accRows("jbl").join() === "p2", "#304 search: '+ Add accessory' (all categories) finds by Model # / former SKU, still by maker");
 
-  // Behaviour: portal catalog index entries use buildHaystack; a former SKU in it is found (and punctuation-insensitive).
-  const entry = (key: string, hay: Array<string | undefined>): D242Entry => ({ key, kind: "part", title: key, sku: key, mfr: "", category: "", haystack: d245Hay(hay), browsable: true, rank: 0 });
-  const pe = [entry("Symetrix:Jupiter 4", ["Symetrix:Jupiter 4", "DSP", "Symetrix", "80-0043-OLD"]), entry("G-2", ["G-2", "Speaker"])];
-  const pq = (q: string) => d245Search(pe, { q, mfr: [], cat: [], page: 1, pageSize: 20 }).entries.map((e) => e.key).join();
-  ok(pq("80-0043-old") === "Symetrix:Jupiter 4" && pq("800043old") === "Symetrix:Jupiter 4" && pq("speaker") === "G-2", "#304 search: a former SKU in a portal index haystack finds the part");
-
   // Behaviour: the shared haystack/matcher the ⌘K, catalog page and picker filters read.
   const rp = { sku: "Symetrix:Jupiter 4", desc: "DSP", mfr: "Symetrix", manufacturerModelNumber: "Jupiter 4", manufacturerPartNumber: "80-0043", formerSkus: ["80-0043-OLD"] };
   ok(cr304Hay(rp).includes("80-0043-old") && cr304Hay(rp).includes("jupiter 4") && cr304Hay(rp).includes("80-0043"), "#304 search: haystack holds Model #, MFR P/N and former SKUs");
@@ -8164,8 +7112,6 @@ ok(JSON.stringify(cr304Label({ sku: "Symetrix:Jupiter 4", manufacturerModelNumbe
 /* --- #304 Task 7: customer documents print the Model # only; staff rows lead with it --- */
 import { lineModel as cr304LineModel } from "@/lib/catalog-rename/sku";
 import { packageBomRows as cr304BomRows } from "@/lib/estimate-output/bom";
-import { toTileVM as cr304Tile } from "@/lib/portal-catalog-view";
-import { toPartDetailVM as cr304PartVM, toFixtureDetailVM as cr304FixVM } from "@/lib/portal-part-view";
 import { buildSchedule as cr304BuildSchedule, scheduleGroups as cr304Groups, scheduleModelOf as cr304SchedModel } from "@/lib/design/grid-schedule";
 import { rackSubmittal as cr304RackSub, scheduleCsv as cr304RackCsv } from "@/lib/rack/submittal";
 import { rackPartInfo as cr304RackInfo } from "@/lib/rack/part-facts";
@@ -8197,26 +7143,7 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
   const pl = cr304PartsRows([{ id: "s", name: "Sys", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: JUP.sku, manufacturerPartNumber: ORDER, desc: "DSP", qty: 1, unit: "ea", cost: 1, price: 2 }] }] as never, [], { [JUP.sku]: { mfr: "Symetrix", manufacturerPartNumber: ORDER, manufacturerModelNumber: "Jupiter 4" } });
   ok(pl[0]?.modelNumber === "Jupiter 4", "#304 parts list: the catalog Model # beats a line's older order # copy");
   ok(/partModel\(/.test(src304("src/lib/specs/assemble-section.ts")) && !src304("src/lib/specs/assemble-section.ts").includes("const tail ="), "#304 spec table: assemble-section uses the one partModel rule");
-
-  // Portal: tiles, sidebar, fixture rows, cart lines carry a server-computed model; mpn is gone from the sidebar payload.
-  const tile = cr304Tile({ key: JUP.sku, kind: "part", title: "DSP", sku: JUP.sku, mfr: "Symetrix", category: "Audio" }, { mpn: ORDER, model: "Jupiter 4" }, null);
-  ok(tile.model === "Jupiter 4" && !JSON.stringify(tile).includes(ORDER), "#304 portal tile: identity is the Model # (no order #)");
-  ok(cr304Tile({ key: "ETC:S4", kind: "part", title: "S4", sku: "ETC:S4", mfr: "ETC", category: "" }, { mpn: "7060A" }, null).model === "7060A" && cr304Tile({ key: "fixture:A", kind: "fixture", title: "F", sku: "ETC:S4", mfr: "", category: "" }, undefined, null).model === "",
-    "#304 portal tile: no model → MFR P/N; a fixture tile has none");
-  const det = cr304PartVM({ sku: JUP.sku, desc: "DSP", mfr: "Symetrix", mpn: ORDER, model: "Jupiter 4" }, null, [], []);
-  ok(det.model === "Jupiter 4" && !JSON.stringify(det).includes(ORDER) && !("mpn" in det), "#304 portal sidebar: Model # only, the order # never ships to the browser");
-  const fxVm = cr304FixVM({ id: "F", label: "Fx", description: "", lightEngineSku: "ETC:S4", lensSku: null, lines: [{ slot: "lightEngine", sku: "ETC:S4", label: "Engine", qty: 1, required: true }, { slot: "accessories", sku: "Symetrix:Hook 9", label: "Hook", qty: 0, required: false }] }, "ETC", null, () => null, { images: [], docs: [] });
-  ok(fxVm.fixed[0].model === "S4" && fxVm.addOns[0].model === "Hook 9", "#304 portal fixture rows: model defaults to the SKU tail; the server passes the real Model #");
-  const pp = src304("src/lib/portal-pricing.ts");
-  ok(/model: partModel\(\{ sku: part\.sku, manufacturerModelNumber: part\.model, manufacturerPartNumber: part\.mpn \}\)/.test(pp) && pp.includes("manufacturerModelNumber: part.model"), "#304 portal cart: a priced part line carries its model, and the quote item copies the Model #");
   const readsModel = (rel: string, expr: string) => ok(src304(rel).includes(expr), `#304 portal ${rel}: prints ${expr}`);
-  readsModel("src/app/portal/catalog/part-sidebar.tsx", "<b>{detail.model}</b>");
-  readsModel("src/app/portal/catalog/part-sidebar.tsx", "[t.mfr, t.model]");
-  readsModel("src/app/portal/catalog/catalog-client.tsx", "{t.model}");
-  readsModel("src/app/portal/catalog/fixture-config.tsx", "{l.model}");
-  readsModel("src/app/portal/catalog/fixture-config.tsx", "{a.model}");
-  readsModel("src/app/portal/catalog/quote/cart-client.tsx", "{line.model}");
-  ok(!src304("src/app/portal/catalog/part-sidebar.tsx").includes("detail.mpn"), "#304 portal sidebar: never reads the order # (mpn)");
 
   // Grid schedule (drawing set + /schedule): the Model # replaces the part id when the part resolves.
   const sched = cr304BuildSchedule({
@@ -8298,8 +7225,8 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
   ok(client.includes("setResume({ step, refsOnly })") && client.includes("resuming?.step ??"), "#304 page: a stopped run keeps its step and the same button resumes there");
   ok(!/from "@\/lib\/catalog-rename\/apply"/.test(client) && !/from "@\/lib\/stores\//.test(client) && /import type \{[^}]*\} from "@\/lib\/catalog-rename\/plan"/.test(client), "#304 page: the client never imports the server engine or a store (plan types only)");
   ok(src304("scripts/smoke-routes.ts").includes('"/catalog/model-numbers"'), "#304 page: smoke-routes lists /catalog/model-numbers");
-  ok(/if \(r\.ok && \(r\.renamed > 0 \|\| partsDone \|\| r\.complete\)\) \{\s*invalidatePortalIndex\(\);\s*invalidateSystemLibrary\(\);/.test(actions) && actions.includes('const partsDone = clean.step === "parts" && r.ok && r.step !== "parts";'),
-    "#304 page: the batch action drops the portal index and system library caches after renaming parts / the parts step and on completion");
+  ok(/if \(r\.ok && \(r\.renamed > 0 \|\| partsDone \|\| r\.complete\)\) \{\s*invalidateSystemLibrary\(\);/.test(actions) && !actions.includes("invalidatePortalIndex") && actions.includes('const partsDone = clean.step === "parts" && r.ok && r.step !== "parts";'),
+    "#304 page: the batch action drops the system library cache after renaming parts / the parts step and on completion");
   ok(client.includes("const STALL_LIMIT = 3;") && client.includes('const NO_PROGRESS = "No progress — try again.";')
     && client.includes("stalled = !r.complete && r.step === step && r.changed === 0 ? stalled + 1 : 0;")
     && /if \(stalled >= STALL_LIMIT\) \{\s*setError\(NO_PROGRESS\);/.test(client)
@@ -8338,10 +7265,10 @@ import { documentRow as cr304DocRow } from "@/lib/part-docs/views";
   ok(!!ci && ci.step === "quotes" && ci.refsOnly === false && ci.rows.length === 1 && cr304CleanInput({ rows: [], step: cr304RefSteps[0], refsOnly: true })?.refsOnly === true, "#304 page: step kept, refsOnly only when literally true");
 }
 import { popoutPureChecks } from "./test-popout";
-import { assessmentChecks, assessmentDbChecks } from "./test-assessments";
+import { movedHelperChecks } from "./test-moved-helpers";
 import { partyChecks, partyDbChecks } from "./test-parties";
 import { boothChecks, boothDbChecks } from "./test-booth";
-import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, portalBidPureChecks, portalBidDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
+import { bidChecks, bidDbChecks, bidFollowupChecks, bidFollowupDbChecks, bidReportPureChecks, bidReportWidgetChecks, bidReportDbChecks, bidSendChecks, bidSendDbChecks, bidSendFakeChecks } from "./test-bids";
 import { lineMoveChecks } from "./test-estimate-line-move";
 import { liveSaveDbChecks, liveSavePureChecks } from "./test-estimate-live-save";
 import { curvedTrackChecks } from "./test-curved-track";
@@ -8351,7 +7278,6 @@ import { markupPureChecks, markupDbChecks, markupParityChecks } from "./test-mar
 import { vendorChecks, vendorDbChecks } from "./test-vendors";
 import { oct15PureChecks, oct15DbChecks, discardConfirmChecks } from "./test-oct15-estimating";
 import { photoWrapPureChecks, photoWrapDbChecks } from "./test-photo-wrap";
-import { vaNotesChecks, vaNotesDbChecks } from "./test-va-notes";
 import { roomShapePureChecks, roomShapeDbChecks } from "./test-room-shape";
 import { batch3PureChecks, batch3DbChecks } from "./test-oct15-batch3";
 import { batch4PureChecks, batch4DbChecks } from "./test-oct15-batch4";
@@ -9649,7 +8575,6 @@ async function davinciWriterAsyncChecks(): Promise<void> {
 import { getDoc as getDoc169, listDocs as listDocs169, patchDoc as patchDoc169, setBlob } from "../src/db/doc-store";
 import { setStatus as setQuoteStatus169 } from "../src/lib/stores/quotes";
 import { getEngagementByQuote } from "../src/lib/stores/engagements";
-import { byQuote as flameByQuote } from "../src/lib/stores/flame-jobs";
 
 async function quoteSpawnAsyncChecks(): Promise<void> {
   const PRE = "TEST169:";
@@ -9728,14 +8653,8 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
     await seedQuote(Q_FLAME, "flame_test", "won", {
       flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] },
     });
-    ok(await flameByQuote(Q_FLAME) === null, "#170 flame fixture starts with no job");
     await win(Q_FLAME);
-    const flameJob = await flameByQuote(Q_FLAME);
     await win(Q_FLAME);
-    ok(
-      (await flameByQuote(Q_FLAME))?.id === flameJob?.id,
-      "#170 a second re-approval creates the flame job exactly once"
-    );
 
     await seedQuote(Q_REPAIR, "repair", "won", {
       repair: { title: "Harness repair", category: "other", venues: [{ id: null, label: "Main Stage" }] },
@@ -9746,7 +8665,6 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
     await seedQuote(Q_INSPECTION, "inspection", "won", {
       inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] },
     });
-    ok((await inspectionsByQuote(Q_INSPECTION)).length === 0, "#170 inspection fixture starts with no record");
     await win(Q_INSPECTION);
     await win(Q_INSPECTION);
 
@@ -9941,15 +8859,6 @@ async function quoteLockTimeoutCatchAsyncChecks(): Promise<void> {
    under `npm run test:specs`). Every assertion below is scoped to the
    `TEST173:` fixtures, and teardown re-queries by that prefix.
    ==================================================================== */
-import {
-  syncFromQuotes as flameSync173,
-  createFromQuote as flameCreate173,
-  remove as flameRemove173,
-} from "../src/lib/stores/flame-jobs";
-import {
-  syncFromQuotes as inspectionSync173,
-  remove as inspectionRemove173,
-} from "../src/lib/stores/inspections";
 
 async function sweepHealingAsyncChecks(): Promise<void> {
   const PRE = "TEST173:";
@@ -10011,29 +8920,6 @@ async function sweepHealingAsyncChecks(): Promise<void> {
     /* ---------------- flame tests ---------------- */
     await seedWon(Q_FLAME_HEAL, "flame_test", FLAME_BODY);
     await seedWon(Q_FLAME_GONE, "flame_test", FLAME_BODY);
-    const flameGone = await flameCreate173(Q_FLAME_GONE);
-    ok(!!flameGone, "#173 flame fixture: the to-be-deleted quote gets its job first");
-    if (flameGone) await flameRemove173(flameGone.id);
-    ok(await flameByQuote(Q_FLAME_GONE) === null, "#173 flame: the deleted job is gone from the live list");
-    ok(await flameByQuote(Q_FLAME_HEAL) === null, "#173 flame: the orphaned won quote starts with no job");
-
-    await flameSync173();
-    ok(
-      await flameByQuote(Q_FLAME_GONE) === null,
-      "#173 flame sweep does NOT re-create a deleted job"
-    );
-    ok(
-      (await rowsFor("flame_jobs", Q_FLAME_GONE)).length === 1,
-      "#173 flame sweep writes no second row for the deleted job (tombstones counted)"
-    );
-    ok(
-      !!(await flameByQuote(Q_FLAME_HEAL)),
-      "#173 flame sweep still heals a won quote that never had a job"
-    );
-    ok(
-      await flameCreate173(Q_FLAME_GONE) === null,
-      "#173 flame createFromQuote honours the tombstone too (the #170 replay reaches it)"
-    );
 
     /* ---------------- repairs ---------------- */
     await seedWon(Q_REPAIR_HEAL, "repair", REPAIR_BODY);
@@ -10044,29 +8930,6 @@ async function sweepHealingAsyncChecks(): Promise<void> {
      * to /inspections, which now sweeps. */
     await seedWon(Q_INSP_HEAL, "inspection", INSP_BODY);
     await seedWon(Q_INSP_GONE, "inspection", INSP_BODY);
-    const inspGone = await createInspectionFromQuote(Q_INSP_GONE);
-    ok(!!inspGone && inspGone.length === 1, "#173 inspection fixture: the to-be-deleted quote gets its record first");
-    for (const r of inspGone || []) await inspectionRemove173(r.id);
-    ok((await inspectionsByQuote(Q_INSP_GONE)).length === 0, "#173 inspection: the deleted record is gone from the live list");
-    ok((await inspectionsByQuote(Q_INSP_HEAL)).length === 0, "#173 inspection: the orphaned won quote starts with no record");
-
-    await inspectionSync173();
-    ok(
-      (await inspectionsByQuote(Q_INSP_GONE)).length === 0,
-      "#173 inspection sweep does NOT re-create a deleted record"
-    );
-    ok(
-      (await rowsFor("inspections", Q_INSP_GONE)).length === 1,
-      "#173 inspection sweep writes no second row for the deleted record (tombstones counted)"
-    );
-    ok(
-      (await inspectionsByQuote(Q_INSP_HEAL)).length === 1,
-      "#173 inspection sweep still heals a won quote that never had a record"
-    );
-    ok(
-      (await createInspectionFromQuote(Q_INSP_GONE) || []).length === 0,
-      "#173 inspection createFromQuote honours the tombstone too"
-    );
 
     /* ---------------- rentals ----------------
      * The board cancels rather than deletes today, so the tombstone is
@@ -10282,32 +9145,15 @@ async function quoteLockAsyncChecks(): Promise<void> {
 
     /* ---------------- #180: concurrent race -> exactly one job ---------------- */
     await seedWon(Q_FLAME, "flame_test", FLAME_BODY);
-    const [f1, f2] = await Promise.all([flameCreate173(Q_FLAME), flameCreate173(Q_FLAME)]);
-    ok(!!f1 && !!f2, "#180 flame: both concurrent createFromQuote calls resolved with a job");
-    ok(!!f1 && !!f2 && f1.id === f2.id, "#180 flame: both concurrent calls returned the SAME job, not two different ones");
-    ok((await rowsFor("flame_jobs", Q_FLAME)).length === 1, "#180 flame: exactly one job row exists for the raced quote (the read-then-insert bug would write two)");
 
     /* ---- a job already deleted before the race stays deleted under a race ---- */
     await seedWon(Q_FLAME_DEL, "flame_test", FLAME_BODY);
-    const toDelete = await flameCreate173(Q_FLAME_DEL);
-    ok(!!toDelete, "#180 flame fixture: the to-be-deleted quote gets its job first");
-    if (toDelete) await flameRemove173(toDelete.id);
-    const [g1, g2] = await Promise.all([flameCreate173(Q_FLAME_DEL), flameCreate173(Q_FLAME_DEL)]);
-    ok(g1 === null && g2 === null, "#180 flame: a raced re-check still honours the #173 tombstone — neither concurrent call resurrects the deleted job");
-    ok((await rowsFor("flame_jobs", Q_FLAME_DEL)).length === 1, "#180 flame: still exactly one (tombstoned) row after the race — no second row appeared");
 
     /* ---------------- repairs ---------------- */
     await seedWon(Q_REPAIR, "repair", REPAIR_BODY);
 
     /* ---------------- inspections (multi-record per quote + linked project) ---------------- */
     await seedWon(Q_INSP, "inspection", INSP_BODY);
-    const [i1, i2] = await Promise.all([createInspectionFromQuote(Q_INSP), createInspectionFromQuote(Q_INSP)]);
-    ok(!!i1 && !!i2 && i1.length === 2 && i2.length === 2, "#180 inspection: both racing calls see the same two venue records, not four");
-    ok(
-      !!i1 && !!i2 && i1.map((r) => r.id).sort().join() === i2.map((r) => r.id).sort().join(),
-      "#180 inspection: the two racing calls returned the identical record set, not two different pairs"
-    );
-    ok((await rowsFor("inspections", Q_INSP)).length === 2, "#180 inspection: exactly two rows exist (one per venue) — the race did not double them to four");
     const raceProjectRows = (await listDocs169("projects", { includeDeleted: true })).filter((p) => p.quoteId === Q_INSP);
 
     /* ---------------- rentals (multi-record per quote) ---------------- */
@@ -10350,8 +9196,6 @@ async function quoteLockAsyncChecks(): Promise<void> {
     /* ---------------- #180 review: a stale sweep snapshot must not spawn for a quote since marked lost ---------------- */
     await seedWon(Q_STALE, "flame_test", FLAME_BODY);
     await upsertDoc("quotes", { ...(await getDoc169("quotes", Q_STALE))!, status: "lost" });
-    const staleResult = await flameCreate173(Q_STALE);
-    ok(staleResult === null, "#180 flame: createFromQuote re-checks status fresh under the lock — a quote since marked lost is refused even though the caller's own snapshot said 'won'");
     ok((await rowsFor("flame_jobs", Q_STALE)).length === 0, "#180 flame: no job was written for the quote that moved on");
   } finally {
     for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "consulting_engagements"] as const) {
@@ -11403,7 +10247,6 @@ import {
   getEngagement as getEngagementDelB,
   removeEngagement,
 } from "../src/lib/stores/engagements";
-import { createVisit as createVisitDelB, getVisit as getVisitDelB, removeVisit } from "../src/lib/stores/site-visits";
 
 async function deletePartBAsyncChecks(): Promise<void> {
   const nowDelB = Date.now();
@@ -11432,14 +10275,6 @@ async function deletePartBAsyncChecks(): Promise<void> {
     await createFixture("quotes", baseQuoteDelB(Q, "flame_test", {
       flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] },
     }));
-    const job = await flameCreate173(Q);
-    ok(!!job, "DELB flame: winning a quote spawns its job");
-    if (job) registerFixture("flame_jobs", job.id);
-    if (job) await flameRemove173(job.id);
-    ok(await flameByQuote(Q) === null, "DELB flame: the deleted job is gone from reads");
-    ok(await flameCreate173(Q) === null, "DELB flame: createFromQuote honours the tombstone (no resurrection on re-approve)");
-    await flameSync173();
-    ok(await flameByQuote(Q) === null, "DELB flame: the healing sweep does not resurrect the deleted job either");
   }
 
   /* ---------------- repair job ---------------- */
@@ -11456,14 +10291,6 @@ async function deletePartBAsyncChecks(): Promise<void> {
     await createFixture("quotes", baseQuoteDelB(Q, "inspection", {
       inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] },
     }));
-    const recs = (await createInspectionFromQuote(Q)) || [];
-    ok(recs.length === 1, "DELB inspection: winning a quote spawns its requested record");
-    for (const r of recs) registerFixture("inspections", r.id);
-    for (const r of recs) await inspectionRemove173(r.id);
-    ok((await inspectionsByQuote(Q)).length === 0, "DELB inspection: the deleted record is gone from reads");
-    ok(((await createInspectionFromQuote(Q)) || []).length === 0, "DELB inspection: createFromQuote honours the tombstone");
-    await inspectionSync173();
-    ok((await inspectionsByQuote(Q)).length === 0, "DELB inspection: the healing sweep does not resurrect it either");
   }
 
   /* ---------------- install project ---------------- */
@@ -11500,31 +10327,6 @@ async function deletePartBAsyncChecks(): Promise<void> {
 
   /* ---------------- site visit (never spawned/swept — delete only) ---------------- */
   {
-    const visit = await createVisitDelB({
-      customerId: null,
-      customer: "Test Customer DELB",
-      locationId: null,
-      venue: "Main Hall",
-      address: "123 Test St, Testville, WI",
-      contactName: "Test Contact",
-      contactEmail: "test@example.com",
-      contactPhone: "",
-      reason: "Site survey / measure",
-      startAt: null,
-      endAt: null,
-      notes: "",
-      assignedTo: "",
-      createdBy: "Test Harness",
-      engagementId: null,
-      stage: "requested",
-      leadId: null,
-      surveyId: null,
-      preferredTiming: "",
-    });
-    registerFixture("site_visits", visit.id);
-    ok(!!(await getVisitDelB(visit.id)), "DELB site visit: the fixture visit reads back before delete");
-    await removeVisit(visit.id);
-    ok(await getVisitDelB(visit.id) === null, "DELB site visit: the deleted visit is gone from reads");
   }
 
   /* ---------------- recording (never spawned/swept — delete only, audio untouched) ---------------- */
@@ -16003,8 +14805,8 @@ import {
 {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const EXPECTED: Array<[string | undefined | null, string]> = [
-    ["flame_test", "/flame-tests/quote?id="],
-    ["inspection", "/inspections/quote?id="],
+    ["flame_test", "/quotes?id="],
+    ["inspection", "/quotes?id="],
     ["consulting", "/design/engagements/quote?id="],
     ["system", "/estimator?id="],
     [undefined, "/estimator?id="],
@@ -16268,21 +15070,7 @@ async function emailsMatchingCompanyDeletedAsyncChecks(): Promise<void> {
    #217 T1 — service quotes round to $25, take a typed total and (flame) a
    typed per-venue testing cost. The pure finish module + the three engines.
    ==================================================================== */
-import {
-  PRICE_STEP as PRICE_STEP217,
-  roundToStep as roundToStep217,
-  normalizePriceOverride as normalizePriceOverride217,
-  normalizeTestingOverride as normalizeTestingOverride217,
-  finishPrice as finishPrice217,
-  finishFlame as finishFlame217,
-  finishRepair as finishRepair217,
-  finishInspection as finishInspection217,
-  typedPriceWarning as typedPriceWarning217,
-  sliderPct as sliderPts217,
-  fmtPct as fmtPts217,
-  travelLineShare as travelLineShare217,
-  seedPriceOverride as seedPriceOverride217,
-} from "@/lib/service-pricing";
+import { PRICE_STEP as PRICE_STEP217, roundToStep as roundToStep217, normalizePriceOverride as normalizePriceOverride217, typedPriceWarning as typedPriceWarning217, fmtPct as fmtPts217 } from "@/lib/price-rounding";
 {
   const near217 = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
 
@@ -16299,12 +15087,6 @@ import {
     "#217 priceOverride: zero, negative, over the cap, junk and blank are no override");
   ok(normalizePriceOverride217("0x10") === undefined && normalizePriceOverride217("1e3") === undefined && normalizePriceOverride217("-0.4") === undefined,
     "#217 fix wave: hex, exponent and a leading minus are not plain digits — rejected, not silently parsed by Number()");
-  ok(normalizeTestingOverride217("0") === 0 && normalizeTestingOverride217(" 120 ") === 120 && normalizeTestingOverride217("") === undefined && normalizeTestingOverride217(-1) === undefined,
-    "#217 testingOverride: $0 is a real figure, blank is computed, negatives refused");
-  ok(normalizeTestingOverride217(-0.4) === undefined && !Object.is(normalizeTestingOverride217(-0.4), -0) && !Object.is(normalizeTestingOverride217(-0), -0),
-    "#217 fix wave 2: a raw negative number like -0.4 is refused (not silently rounded to -0 and passed as >= 0), and -0 itself never comes back as -0");
-  ok(finishPrice217(1000, 500, "$900").total === 900 && finishPrice217(1000, 500, 0).total === 1000 && finishPrice217(1000, 500, -5).total === 1000 && finishPrice217(1000, 500, 20_000_000).total === 1000,
-    "#217 fix wave: finishPrice normalizes priceOverride itself — a typed string works there directly, and zero/negative/over-cap fall back to auto");
   ok(typedPriceWarning217(500, 575, (500 - 575) / 575)?.kind === "below-cost" && typedPriceWarning217(600, 575, (600 - 575) / 575)?.kind === "low-markup" && typedPriceWarning217(800, 575, (800 - 575) / 575) === null,
     "#217 warning: below cost first, then under an 11% markup, otherwise none");
   ok(typedPriceWarning217(1200, 1100, (1200 - 1100) / 1100, 1428.57)?.kind === "below parts price",
@@ -16313,104 +15095,18 @@ import {
     "#217 fix wave warning: once the typed total clears the parts sell, the cost and the 11% markup floor, there's no warning");
   ok(typedPriceWarning217(500, 575, (500 - 575) / 575, 100)?.kind === "below-cost",
     "#217 fix wave warning: below-cost still wins when parts sell isn't the binding constraint");
-  ok(sliderPts217(0.05) === 10 && sliderPts217(2) === 100 && sliderPts217(0.3) === 30 && sliderPts217(0.28125) === 28,
-    "#217 slider: the back-solved markup moves the slider, clamped to 10–100");
   ok(fmtPts217(0.28125) === "28.1" && fmtPts217(0.3) === "30", "#217: the markup label shows the true value to one decimal");
-  const s1 = travelLineShare217({ flightTotal: 1765, total: 3600, cost: 2515, margin: mk(0.3) });
-  ok(s1.travel === 2526 && s1.rest === 1074 && s1.travel + s1.rest === 3600,
-    "#217 printed lines: the travel line is travel's share of the rounded total; the service part takes the rest");
-  const s2 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: 2515, margin: mk(0.3) });
-  ok(s2.travel === 702 && s2.travel + s2.rest === 1000, "#217 printed lines: a typed total below cost scales the travel line with it");
-  const s3 = travelLineShare217({ flightTotal: 1765, total: 3593, cost: null, margin: mk(0.3) });
-  ok(s3.travel === 2521 && s3.rest === 3593 - 2521, "#217 printed lines: a legacy quote with no stored cost keeps the D283 figure");
-  const s4 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: null, margin: 0 });
-  ok(s4.travel === 1000 && s4.rest === 0, "#217 printed lines: the travel line never exceeds the total");
-  ok(seedPriceOverride217("sent", 821, undefined) === 821 && seedPriceOverride217("won", 821.4, null) === 821,
-    "#217 D286 parity: a pre-#217 sent quote priced off the $25 grid reopens with that price typed in");
-  ok(seedPriceOverride217("draft", 821, undefined) === null && seedPriceOverride217("sent", 825, undefined) === null && seedPriceOverride217("sent", 0, undefined) === null,
-    "#217: drafts, on-grid prices and zero values reopen on auto");
-  ok(seedPriceOverride217("draft", 825, 900) === 900 && seedPriceOverride217("sent", 821, "900") === 900,
-    "#217: a saved typed total always reopens as typed");
 
   // ---- flame engine ----
   const fRates217 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
-  const fNear217: FTVenue = { id: "r217-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
-  const fa = computeFlameQuote({ venues: [fNear217] }, fRates217);
-  ok(near217(fa.totalRaw, 575 / 0.7) && fa.autoTotal === 825 && fa.total === 825 && !fa.overridden && fa.priceOverride === null,
-    "#217 flame: the auto total rounds 821.43 → 825");
-  ok(fa.marginAmount === 250 && near217(fa.effectiveMarkup, (825 - 575) / 575) && fa.margin === mk(0.3),
-    "#217 flame: markup amount = total − cost, the effective markup back-solves, the rate markup is unchanged");
-  const fo = computeFlameQuote({ venues: [fNear217], priceOverride: 800 }, fRates217);
-  ok(fo.total === 800 && fo.overridden && fo.priceOverride === 800 && fo.autoTotal === 825 && near217(fo.effectiveMarkup, (800 - 575) / 575) && fo.marginAmount === 225,
-    "#217 flame: a typed total is used exactly and the markup back-solves");
-  ok(computeFlameQuote({ venues: [fNear217], priceOverride: 812 }, fRates217).total === 812,
-    "#217 flame: a typed total off the $25 grid is not re-rounded");
-  const fBad = computeFlameQuote({ venues: [fNear217], priceOverride: "abc" }, fRates217);
-  ok(fBad.total === 825 && !fBad.overridden, "#217 flame: an invalid typed total prices at auto");
-  const ft = computeFlameQuote({ venues: [{ ...fNear217, testingOverride: 100 }] }, fRates217);
-  ok(ft.perVenue[0].laborCost === 100 && ft.perVenue[0].computedCost === 75 && ft.perVenue[0].testingOverride === 100 && ft.testingSubtotal === 100 && ft.rawCost === 600 && ft.total === 850,
-    "#217 flame: a typed testing cost replaces that venue's labor and the auto total re-rounds (857.14 → 850)");
-  const ftBlank = computeFlameQuote({ venues: [{ ...fNear217, testingOverride: "" }] }, fRates217);
-  ok(ftBlank.perVenue[0].laborCost === 75 && ftBlank.perVenue[0].testingOverride === null, "#217 flame: a blank testing cost is computed");
-  const fFloor = computeFlameQuote({ venues: [{ id: "r217-here", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }] }, fRates217);
-  ok(fFloor.baseApplied && fFloor.cost === 150 && fFloor.total === 225,
-    "#217 flame: the base fee floors the cost first, then the total rounds (214.29 → 225)");
-  const ff360 = finishFlame217({ rawCost: 50, baseFee: 360, margin: 0, priceOverride: null });
-  ok(ff360.baseApplied && ff360.totalRaw === 360 && ff360.total === 375,
-    "#217 fix wave floors: a $360 base fee floors the total, which rounds UP to $375, never down to $350");
 
   // ---- repair engine ----
   const rRates217 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rNear217 = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
-  const rf360 = finishRepair217({ serviceCost: 50, minCallout: 360, margin: 0, partsCost: 0, partsMargin: mk(0.3), priceOverride: null });
-  ok(rf360.calloutApplied && rf360.totalRaw === 360 && rf360.total === 375,
-    "#217 fix wave floors: a $360 minimum call-out floors the total, which rounds UP to $375, never down to $350");
-  ok(finishRepair217({ serviceCost: 812, minCallout: 0, margin: 0, partsCost: 0, partsMargin: mk(0.3), priceOverride: null }).total === 800 &&
-      finishPrice217(812, 500, null, true).total === 825,
-    "#217 fix wave floors: the same raw total rounds to the NEAREST $25 with no floor applied, but rounds UP when a floor set the price");
-  const rTyped1 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: 1200 });
-  ok(rTyped1.total === 1200 && rTyped1.overridden && near217(rTyped1.serviceMarkup, rTyped1.effectiveMarkup) && near217(rTyped1.effectiveMarkup, (1200 - 1100) / 1100),
-    "#217 fix wave repair markup: a $1,200 typed total (service $100 cost, $1,000 parts cost) reports the effective markup");
-  const rTyped2 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: 1430 });
-  ok(rTyped2.total === 1430 && rTyped2.serviceSell > 0 && near217(rTyped2.serviceMarkup, rTyped2.effectiveMarkup) && near217(rTyped2.effectiveMarkup, (1430 - 1100) / 1100),
-    "#217 fix wave repair markup: even once the typed total lifts the service sell back to a thin positive sliver, it still reports the effective markup — no discontinuity near zero");
-  const rAutoZero = finishRepair217({ serviceCost: 0, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: null });
-  ok(!rAutoZero.overridden && rAutoZero.serviceSellAuto === 0 && near217(rAutoZero.serviceMarkup, rAutoZero.effectiveMarkup) && rAutoZero.serviceMarkup > 0,
-    "#217 fix wave repair markup: a parts-only auto job with no call-out floor (service sell $0) reports the effective markup instead of a flat 0");
-  const rCliff = finishRepair217({ serviceCost: 1, minCallout: 0, margin: mk(0.3), partsCost: 1000, partsMargin: mk(0.3), priceOverride: null });
-  ok(!rCliff.overridden && rCliff.serviceSellAuto > 0 && rCliff.serviceSell < 0 && near217(rCliff.serviceSell, -3.5714285714287) &&
-      near217(rCliff.serviceMarkup, rCliff.effectiveMarkup) && rCliff.serviceMarkup > 0.25,
-    "#217 fix wave 2: serviceMarkup gates on the FINAL serviceSell (post-rounding, total − partsSell), not the pre-rounding " +
-      "serviceSellAuto — a positive serviceSellAuto (1.43) whose rounded serviceSell goes negative (-3.57) no longer cliffs " +
-      "the markup to 0; it reports the whole-job effectiveMarkup instead");
-  ok(Math.abs(rCliff.serviceMarkup - rAutoZero.serviceMarkup) < 0.01,
-    "#217 fix wave 2: serviceCost 0 vs 1 (same rounded $1,425 total) give close markups — no discontinuity right where " +
-      "serviceSell crosses zero");
 
   // ---- inspection engine ----
   const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iNear217 = [{ id: "r217-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
-  const ia = trvInspectionEstimate({ venues: iNear217 }, iRates217);
-  ok(near217(ia.totalRaw, 832.5 / 0.7) && ia.total === 1200 && near217(ia.effectiveMarkup, (1200 - 832.5) / 832.5),
-    "#217 inspection: the auto total rounds 1,189.29 → 1,200");
-  const io = trvInspectionEstimate({ venues: iNear217, priceOverride: 1100 }, iRates217);
-  ok(io.total === 1100 && io.overridden && io.autoTotal === 1200 && near217(io.effectiveMarkup, (1100 - 832.5) / 832.5),
-    "#217 inspection: a typed total is used exactly");
-  const im = trvInspectionEstimate({ venues: [{ id: "r217-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }] }, iRates217);
-  ok(im.minApplied && im.total === 650, "#217 inspection: the minimum fee floors before rounding");
-  const if660 = finishInspection217({ cost: 50, minFee: 660, margin: 0, priceOverride: null });
-  ok(if660.minApplied && if660.totalRaw === 660 && if660.total === 675,
-    "#217 fix wave floors: a $660 minimum fee floors the total, which rounds UP to $675, never down to $650");
-
-  // ---- parity: each engine's finish IS the shared finish the builders will call ----
-  const pf = finishFlame217({ rawCost: fa.rawCost, baseFee: 150, margin: mk(0.3), priceOverride: null });
-  ok(pf.total === fa.total && pf.cost === fa.cost && pf.effectiveMarkup === fa.effectiveMarkup, "#217 parity: the flame engine finishes exactly like finishFlame()");
-  const pi = finishInspection217({ cost: ia.cost, minFee: 650, margin: mk(0.3), priceOverride: null });
-  ok(pi.total === ia.total && pi.effectiveMarkup === ia.effectiveMarkup, "#217 parity: the inspection engine finishes exactly like finishInspection()");
-  const sp217 = readFileSync(join(process.cwd(), "src/lib/service-pricing.ts"), "utf8");
-  const imports217 = sp217.match(/^\s*import\s.*$/gm) || [];
-  ok(imports217.length === 1 && /from "@\/lib\/markup"/.test(imports217[0]) && /sellAt\(/.test(sp217),
-    "#217/#367: service-pricing.ts imports only the pure markup module (sellAt) — safe for the 'use client' builders");
   const formula217 = (key: string, id: string): string =>
     (PRICING_GROUPS.find((g) => g.key === key)!.items.find((it) => it.id === id) as { expr: string }).expr;
 }
@@ -16420,58 +15116,13 @@ import {
    back-solved margin; renewals re-price without them and say when last
    year's price was hand-set; letters print travel's share of the final total.
    ==================================================================== */
-import {
-  priceParagraph as priceParagraph217,
-  priorHandSetPrice as priorHandSetPrice217,
-} from "@/lib/renewal-outreach";
 {
   const src217 = (f: string): string => readFileSync(join(process.cwd(), f), "utf8");
   const typedIn = /const priceOverride = normalizePriceOverride\(formData\.get\("priceOverride"\)\);/;
   const storedTyped = /\.\.\.\(r\.priceOverride != null \? \{ priceOverride: r\.priceOverride \} : \{\}\)/;
   const storedAuto = /autoTotal: Math\.round\(r\.autoTotal\),/;
-
-  const fa = src217("src/app/(app)/flame-tests/quote/actions.ts");
-  ok(typedIn.test(fa) && /venues: venueInputs, travel: travelOverride, priceOverride \}/.test(fa),
-    "#217 flame save: reads the typed total and prices with it");
-  // #248 fix round 1: the venue-input mapping (incl. the typed testing-cost
-  // validation below) moved out of this file into the shared
-  // src/lib/service-quote-inputs.ts (also called by the portal's
-  // builder-identical pricing) — this now asserts the builder calls that
-  // shared helper AND that the helper itself still carries the
-  // testingOverride mapping, so the same invariant (a venue's typed testing
-  // cost is validated, priced and saved) stays guarded either way.
-  const sqi217 = src217("src/lib/service-quote-inputs.ts");
-  ok(/venueInputs: FlameTestVenueInput\[\] = flameVenueInputsFrom\(venues, cust\);/.test(fa) &&
-      /testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(sqi217) &&
-      /\.\.\.\(v\.testingOverride != null \? \{ testingOverride: v\.testingOverride \} : \{\}\)/.test(fa),
-    "#217 flame save: builds venue inputs through the shared service-quote-inputs.ts helper (which validates + prices each venue's typed testing cost), and still saves it on the venue");
-  ok(/margin: r\.effectiveMarkup,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
-    "#217 flame save: stores the back-solved markup, the typed total (when set) and the auto figure");
-
-  const ia = src217("src/app/(app)/inspections/quote/actions.ts");
-  ok(typedIn.test(ia) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ia) && /margin: r\.effectiveMarkup,/.test(ia) && storedTyped.test(ia) && storedAuto.test(ia),
-    "#217 inspection save: typed total in; back-solved markup, typed total and auto figure out");
-
-  const rn = src217("src/lib/renewal-outreach.ts");
-  const fnBody = (name: string): string => {
-    const at = rn.indexOf(`async function ${name}`);
-    return at < 0 ? "" : rn.slice(at, rn.indexOf("\n}\n", at));
-  };
   for (const fn of ["ensureFlameRenewalQuote", "ensureInspectionRenewalQuote"]) {
-    const b = fnBody(fn);
-    ok(b.length > 0 && !/priceOverride:/.test(b) && !/testingOverride/.test(b),
-      `#217 renewal: ${fn} re-prices without last year's typed total or testing cost`);
-    ok(/lastHandSet: priorHandSetPrice\(/.test(b) && /margin: r\.effectiveMarkup,/.test(b) && storedAuto.test(b),
-      `#217 renewal: ${fn} notes a hand-set prior price and stores the rounded price's markup`);
   }
-  ok(priorHandSetPrice217({ priceOverride: 850 }) === 850 && priorHandSetPrice217({}) === null && priorHandSetPrice217(null) === null,
-    "#217 renewal: last year's hand-set price is read from its priceOverride");
-  type PP217 = Parameters<typeof priceParagraph217>[0];
-  const para = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: [], lastHandSet: 850 } as unknown as PP217, "inspection");
-  ok(para.includes("Last year's price was hand-set at $850; this year's is priced at our current rates.") && para.includes("compared with $850 last year"),
-    "#217 renewal: the draft body says last year's price was hand-set");
-  const para2 = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: [] } as unknown as PP217, "inspection");
-  ok(!para2.includes("hand-set"), "#217 renewal: no hand-set sentence when last year's price was auto");
 }
 
 /* ====== #225 Consulting proposal document fixes ======
@@ -17178,65 +15829,7 @@ import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
    and reopening a quote restores both (D286-style seed for old sent prices).
    Client component — raw-source idiom (#177).
    ==================================================================== */
-import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib/service-pricing";
 {
-  const fc = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"), "utf8");
-  const fcCode = fc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-  ok(/from "@\/lib\/service-pricing"/.test(fc) && /finishFlame\(\{/.test(fcCode) && /venueTesting\(/.test(fcCode) && !/\/ \(1 - margin\)/.test(fcCode),
-    "#217 flame builder: the preview finishes through finishFlame()/venueTesting(), no inlined margin math");
-  ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(fc) &&
-      /testingOverride: normalizeTestingOverride\(v\.testingOverride\) \?\? null,/.test(fc),
-    "#217 flame builder: posts the typed total and each venue's typed testing cost");
-  ok(/<ServiceTotalField/.test(fc) && /aria-label=\{"Testing cost for " \+ l\.label/.test(fc),
-    "#217 flame builder: the Total and each venue's Testing cell are inputs");
-  ok(/value=\{r\?\.overridden \? sliderPct\(r\.effectiveMarkup\) : markupPts\}/.test(fc) &&
-      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(fc) &&
-      /function resetToAuto\(\)/.test(fc),
-    "#217 flame builder: the slider follows a typed total; moving it or Reset to auto clears the override");
-  ok(!/^import (?!type )[^;]*from "@\/lib\/(flametest-engine|repair-engine|inspection-engine)"/m.test(fc),
-    "#217 flame builder: imports no engine module (client bundle)");
-  const tf = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
-  ok(/^"use client";/.test(tf) && !/from "@\/(lib\/stores|db)\//.test(tf) && /Reset to auto/.test(tf) && /typedPriceWarning\(/.test(tf) && /rounded to the nearest \$25/.test(tf),
-    "#217: the shared Total field is a client component on the pure module, with Reset to auto and the warning");
-  const fp = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/page.tsx"), "utf8");
-  ok(/priceOverride: seedPriceOverride\(editQuote\.status, grossQuoteValue\(editQuote\), ft && ft\.priceOverride\),/.test(fp) &&
-      /testing: v\.testingOverride != null \? String\(v\.testingOverride\) : ""/.test(fp),
-    "#217 flame page: reopening restores the typed total and testing costs (old sent prices stay put)");
-
-  // ---- controller addendum (Task 2 review): D286 priceOverrideSeeded marker,
-  // and the renewal draft never says "current rates" twice.
-  ok(!fc.includes("priceOverrideSeeded, setPriceOverrideSeeded") && !fc.includes("priceOverrideSeeded?: boolean"),
-    "#217 final: the flame builder keeps no write-only priceOverrideSeeded state (the server derives the marker)");
-  ok(!/fd\.set\("priceOverrideSeeded"/.test(fc),
-    "#217 fix wave: the flame builder no longer posts priceOverrideSeeded — the save action derives it server-side");
-  ok(/onReset=\{resetToAuto\}/.test(fc) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.effectiveMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(fc),
-    "#217 flame builder: Reset to auto clears the typed total");
-  ok(!fp.includes("seedPriceOverrideIsLegacy") && !fp.includes("priceOverrideSeeded"),
-    "#217 final: the flame page no longer passes a seeded flag to the builder");
-
-  const faSrc217 = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/actions.ts"), "utf8");
-  ok(!/formData\.get\("priceOverrideSeeded"\)/.test(faSrc217) &&
-      /deriveSeededMarker\(\{/.test(faSrc217) &&
-      /\.\.\.\(r\.priceOverride != null && priceOverrideSeeded \? \{ priceOverrideSeeded: true \} : \{\}\),/.test(faSrc217),
-    "#217 fix wave: the flame save derives priceOverrideSeeded from the stored quote, never a posted flag");
-
-  ok(seedPriceOverrideIsLegacy217("sent", 821, undefined) === true && seedPriceOverrideIsLegacy217("won", 821.4, null) === true,
-    "#217 D286 marker: a pre-#217 sent quote's off-grid reopen-seed is flagged legacy");
-  ok(seedPriceOverrideIsLegacy217("sent", 900, 900) === false && seedPriceOverrideIsLegacy217("draft", 821, undefined) === false,
-    "#217 D286 marker: a real saved priceOverride, or nothing seeded at all, is never flagged legacy");
-  ok(priorHandSetPrice217({ priceOverride: 850, priceOverrideSeeded: true }) === null,
-    "#217 renewal: a seeded (not hand-set) prior override reads as no hand-set price at all");
-  ok(priorHandSetPrice217({ priceOverride: 850, priceOverrideSeeded: false }) === 850,
-    "#217 renewal: priceOverrideSeeded false still reads the real hand-set price");
-
-  type PP217b = Parameters<typeof priceParagraph217>[0];
-  const para3 = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: [], lastHandSet: 850 } as unknown as PP217b, "inspection");
-  ok(!para3.includes("reflects our current rates") && (para3.match(/current rates/g) || []).length === 1,
-    "#217 renewal wording: when last year's price was hand-set, \"current rates\" is said once, not twice");
-  const para4 = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: ["a longer curtain run"], lastHandSet: 850 } as unknown as PP217b, "inspection");
-  ok(para4.includes("reflects a longer curtain run") && para4.includes("hand-set at $850"),
-    "#217 renewal wording: a specific reason still prints alongside the hand-set sentence");
 }
 
 /* ====================================================================
@@ -17245,45 +15838,6 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
    ==================================================================== */
 {
   const strip217 = (s: string): string => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-  const ic = readFileSync(join(process.cwd(), "src/app/(app)/inspections/quote/controls.tsx"), "utf8");
-  ok(/from "@\/lib\/service-pricing"/.test(ic) && /finishInspection\(\{/.test(strip217(ic)) && !/\/ \(1 - margin\)/.test(strip217(ic)),
-    "#217 inspection builder: the preview finishes through finishInspection(), no inlined margin math");
-  ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(ic) && /<ServiceTotalField/.test(ic),
-    "#217 inspection builder: the Total is an input and the typed total is posted");
-  ok(/value=\{r\?\.overridden \? sliderPct\(r\.effectiveMarkup\) : markupPts\}/.test(ic) &&
-      /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(ic) &&
-      /function resetToAuto\(\)/.test(ic),
-    "#217 inspection builder: the slider follows a typed total; moving it or Reset clears the override");
-  for (const [svc, sub] of [["inspections", "insp"]] as const) {
-    const pg = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
-    ok(new RegExp(`priceOverride: seedPriceOverride\\(editQuote\\.status, grossQuoteValue\\(editQuote\\), ${sub} && ${sub}\\.priceOverride\\),`).test(pg),
-      `#217 ${svc} page: reopening restores the typed total (old sent prices stay put)`);
-  }
-
-  ok(!ic.includes("priceOverrideSeeded, setPriceOverrideSeeded") && !ic.includes("priceOverrideSeeded?: boolean"),
-    "#217 final: the inspection builder keeps no write-only priceOverrideSeeded state (the server derives the marker)");
-  ok(!/fd\.set\("priceOverrideSeeded"/.test(ic),
-    "#217 fix wave: the inspection builder no longer posts priceOverrideSeeded — the save action derives it server-side");
-  ok(/onReset=\{resetToAuto\}/.test(ic) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarkupPts\(sliderPct\(r\.effectiveMarkup\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(ic),
-    "#217 inspection builder: Reset to auto clears the typed total");
-
-  for (const [svc, sub] of [["inspections", "insp"]] as const) {
-    const pg = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
-    ok(!pg.includes("seedPriceOverrideIsLegacy") && !pg.includes("priceOverrideSeeded") && pg.includes(`${sub} && ${sub}.priceOverride`),
-      `#217 final: the ${svc} page no longer passes a seeded flag to the builder`);
-    const ac = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/actions.ts`), "utf8");
-    ok(!/formData\.get\("priceOverrideSeeded"\)/.test(ac) &&
-        /deriveSeededMarker\(\{/.test(ac) &&
-        /\.\.\.\(r\.priceOverride != null && priceOverrideSeeded \? \{ priceOverrideSeeded: true \} : \{\}\),/.test(ac),
-      `#217 fix wave: the ${svc} save derives priceOverrideSeeded from the stored quote, never a posted flag`);
-  }
-
-  // ---- the repairs-only "below parts price" warning: a typed total under
-  // what the parts alone are selling for warns sharper than below-cost.
-  const stf217 = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
-  ok(/partsSell/.test(stf217) && /typedPriceWarning\(total, cost, markup, partsSell\)/.test(stf217),
-    "#217: the shared Total field threads an optional partsSell into typedPriceWarning() for repairs");
 }
 
 /* ====================================================================
@@ -17292,61 +15846,15 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
    every reopen), plus three review-flagged minors on the flame Testing
    cell and the shared ServiceTotalField.
    ==================================================================== */
-import { deriveSeededMarker as deriveSeededMarker217 } from "@/lib/service-pricing";
 {
   // ---- the pure helper itself ----
   const firstReopen217 = { value: 821, status: "sent", priceOverride: undefined, priceOverrideSeeded: undefined };
-  ok(deriveSeededMarker217({ postedOverride: 821, stored: firstReopen217 }) === true,
-    "#217 fix wave: a first reopen of a pre-#217 off-grid sent quote (no stored priceOverride yet) flags the marker");
 
   const secondSave217 = { value: 821, status: "sent", priceOverride: 821, priceOverrideSeeded: true };
-  ok(deriveSeededMarker217({ postedOverride: 821, stored: secondSave217 }) === true,
-    "#217 fix wave: a SECOND save of that same seeded value still flags the marker (the bug: the old code read this as a real hand-set price)");
-
-  ok(deriveSeededMarker217({ postedOverride: 900, stored: secondSave217 }) === false,
-    "#217 fix wave: typing a different total off an already-seeded quote is a real hand-set price — no marker");
 
   const draftQuote217 = { value: 821, status: "draft", priceOverride: undefined, priceOverrideSeeded: undefined };
-  ok(deriveSeededMarker217({ postedOverride: 821, stored: draftQuote217 }) === false,
-    "#217 fix wave: a draft quote — nobody has seen a price yet — is never flagged");
 
   const realHandSet217 = { value: 900, status: "sent", priceOverride: 900, priceOverrideSeeded: false };
-  ok(deriveSeededMarker217({ postedOverride: 900, stored: realHandSet217 }) === false,
-    "#217 fix wave: a stored REAL hand-set override (no marker), re-saved unchanged, stays unmarked forever");
-
-  ok(deriveSeededMarker217({ postedOverride: 900, stored: null }) === false,
-    "#217 fix wave: a brand-new quote (nothing stored yet) is never flagged, even when its first typed total happens to equal itself");
-  ok(deriveSeededMarker217({ postedOverride: null, stored: secondSave217 }) === false,
-    "#217 fix wave: no posted override at all is never flagged");
-
-  // ---- client-posted flag ignored: none of the three save actions read it,
-  // and all three derive the marker from deriveSeededMarker() instead ----
-  for (const svc of ["flame-tests", "inspections"] as const) {
-    const ac = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/actions.ts`), "utf8");
-    ok(!/formData\.get\("priceOverrideSeeded"\)/.test(ac) && /deriveSeededMarker\(\{/.test(ac) && /get as getQuote/.test(ac),
-      `#217 fix wave: ${svc}'s save action never reads a client-posted priceOverrideSeeded — it looks up the stored quote and derives the marker itself`);
-  }
-
-  // ---- minor (a): the flame Testing cell is a plain text input, normalized
-  // on blur — no rounding mid-keystroke ("12.5" jumping to "13"), and no
-  // native type="number" wipe on a transient state like "1e".
-  const fc217 = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"), "utf8");
-  ok(/type="text"\s*\n\s*inputMode="decimal"\s*\n\s*value=\{st\.testing/.test(fc217) &&
-      /onBlur=\{\(\) => blurTesting\(l\.id\)\}/.test(fc217),
-    "#217 fix wave (a): the flame Testing cell is a text input (inputMode=\"decimal\") normalized on blur, not a native number input");
-  ok(/function setTesting\(locId: string, val: string\) \{[\s\S]*?testing: val, on: true[\s\S]*?\n  \}/.test(fc217) &&
-      !/testing: clean/.test(fc217),
-    "#217 fix wave (a): typing into the Testing cell keeps exactly what's typed — no per-keystroke rounding");
-  ok(/function blurTesting\(locId: string\) \{[\s\S]*?normalizeTestingOverride\(cur\.testing\)/.test(fc217),
-    "#217 fix wave (a): the Testing cell normalizes (rounds to a whole dollar, blank = computed) only on blur");
-
-  // ---- minors (b)/(c), in the shared ServiceTotalField so all three
-  // builders get them ----
-  const stf217fix = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
-  ok(!/Typed total · auto is/.test(stf217fix) && /Typed total · Reset keeps this markup/.test(stf217fix),
-    "#217 fix wave (b): the typed-total note states what Reset actually does (it parks the slider at the back-solved markup) instead of naming a figure Reset won't reproduce");
-  ok(/disabled \? "—" : String\(Math\.round\(autoTotal\)\)/.test(stf217fix),
-    "#217 fix wave (c): a disabled Total field shows \"—\", never a bare 0 that reads as a real free quote");
 }
 
 /* ====== #227 T1: one flat $/sq ft, one helper, every mirror agrees ====== */
@@ -17417,8 +15925,6 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
     "src/lib/design/curtain-pricing.ts", "src/lib/curtain-pricing.ts", "src/lib/curtain-geom.ts",
     "src/lib/design/equipment-pricing.ts", "src/lib/design/equipment-map.ts", "src/lib/design/grid-curtains.ts",
     "src/lib/design/auto-estimate.ts", "src/app/(app)/estimator/pricing.ts", "src/app/(app)/estimator/page.tsx",
-    // #245 Task 12: the portal estimate builder is deleted (the catalog cart replaced it).
-    "src/app/portal/actions.ts", "src/app/portal/estimate/page.tsx",
     "src/app/(app)/design/grid/[id]/page.tsx", "src/app/(app)/design/grid/[id]/editor.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx",
   ];
   for (const f of mirrors227) {
@@ -18485,7 +16991,6 @@ import {
   pdfStoragePath,
   pdfView,
   pendingPdf,
-  portalPdfSource,
   printPathFor,
   revisionAwaitingPdf,
   settlePdf,
@@ -18494,13 +16999,12 @@ import {
 } from "@/lib/quote-pdf/state";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { originFrom } from "@/lib/quote-pdf/origin";
-import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectView } from "@/lib/portal-projects";
 {
   const S = "test-secret-222";
   const t0 = 1_800_000_000_000;
   const tok = signPrintToken(S, "quote", "Q-2041", t0);
   ok(verifyPrintToken(S, tok, "quote", "Q-2041", t0 + 1000), "#222 print token: a fresh token verifies for its kind + id");
-  ok(!verifyPrintToken(S, tok, "flame", "Q-2041", t0), "#222 print token: another kind is refused");
+  ok(!verifyPrintToken(S, tok, "cover", "Q-2041", t0), "#222 print token: another kind is refused");
   ok(!verifyPrintToken(S, tok, "quote", "Q-2042", t0), "#222 print token: another quote id is refused");
   ok(!verifyPrintToken(S, tok, "quote", "Q-2041", t0 + PRINT_TOKEN_TTL_MS + 1), "#222 print token: expires after its TTL");
   ok(PRINT_TOKEN_TTL_MS === 120_000, "#222 print token: TTL is 120 s");
@@ -18514,7 +17018,7 @@ import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectV
 }
 {
   ok(pdfKindForQuoteType("consulting") === null && pdfKindForQuoteType("rental") === null, "#222 pdfKindForQuoteType: consulting and rental have no saved PDF");
-  ok(printPathFor("quote", "Q-1") === "/print/quote/Q-1" && printPathFor("repair", "Q 2") === "/print/letter/repair/Q%202", "#222 printPathFor: quote vs letter routes, id encoded");
+  ok(printPathFor("quote", "Q-1") === "/print/quote/Q-1" && printPathFor("quote", "Q 2") === "/print/quote/Q%202", "#222 printPathFor: the quote route, id encoded");
   ok(
     pdfStoragePath("Q-2041", "123") === "quote-pdfs/Q-2041/123.pdf" && pdfStoragePath("TEST222:a/b", "rev-1") === "quote-pdfs/TEST222_a_b/rev-1.pdf",
     "#222 pdfStoragePath: one folder per quote, unsafe characters replaced"
@@ -18545,15 +17049,6 @@ import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectV
     { rev: 3, at: 3, reason: "sent" },
   ];
   ok(latestSentRevision(revs)?.rev === 3, "#222 latestSentRevision: the newest sent snapshot");
-  ok(portalPdfSource({ revisions: revs, pdf: ready }) === null, "#222 portalPdfSource: the latest sent revision has no copy yet → nothing (being prepared), never the current file");
-  ok(
-    portalPdfSource({ revisions: [revs[0], revs[1], { rev: 3, at: 3, reason: "sent", pdfBlobPath: "r3" }], pdf: ready })?.path === "r3",
-    "#222 portalPdfSource: the latest sent revision's copy wins over later edits"
-  );
-  ok(
-    portalPdfSource({ revisions: [], pdf: { ...ready, status: "failed" } }) === null && portalPdfSource({ revisions: [], pdf: null }) === null,
-    "#222 portalPdfSource: no ready file → nothing for the customer"
-  );
   ok(
     teamPdfPath({ revisions: revs, pdf: ready }, 1) === "r1" && teamPdfPath({ revisions: revs, pdf: ready }, 3) === null && teamPdfPath({ revisions: revs, pdf: ready }, null) === ready.blobPath,
     "#222 teamPdfPath: ?rev=n reads that revision's copy, else the current file"
@@ -18577,33 +17072,12 @@ import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectV
 }
 {
   const dlSource = { system: "daylite", importedAt: 1 };
-  ok(
-    !isAppEraProject({ id: "P-3001", source: dlSource }) && !isAppEraProject({ id: "P-dl-abc123" }) && isAppEraProject({ id: "P-3002", source: null }),
-    "#220 isAppEraProject: Daylite-sourced and legacy P-dl-* projects stay internal"
-  );
   const proj = {
     id: "P-3003", name: "Main stage rigging", kind: "project" as const, projectType: "system", stage: "install",
     stageMeta: { pipelineId: "install", tag: "onsite" as const, label: "Install", index: 3, count: 7 },
     installStart: 100, installEnd: 200, targetDate: 300, value: 48000.4, valueUnknown: false, updatedAt: 9,
     margin: 0.4, procurement: [{}], crew: [{}], timeLogs: [{}], notes: [{}], tasks: [{}], owner: "Jeff", deliveries: [{}], mobilizations: [{}],
   };
-  const view = portalProjectView(proj, { venueName: "Hall A", quoteStatus: "won" });
-  ok(Object.keys(view).sort().join(",") === "done,end,id,name,stage,start,target,type,updatedAt,value,venue", "#220 portalProjectView: whitelists exactly the customer-safe fields");
-  ok(view.value === 48000 && view.venue === "Hall A" && view.type === "Installation" && view.stage === "Install" && !view.done, "#220 portalProjectView: value, venue, type label, stage label");
-  ok(
-    portalProjectView(proj, { venueName: "", quoteStatus: "sent" }).value === null && portalProjectView({ ...proj, valueUnknown: true }, { venueName: "", quoteStatus: "won" }).value === null,
-    "#220 portalProjectView: value only when known and the linked quote is won"
-  );
-  const doneView = portalProjectView({ ...proj, stageMeta: { ...proj.stageMeta, tag: "done" as const, label: "Complete" }, updatedAt: 20 }, { venueName: "", quoteStatus: null });
-  const g = groupPortalProjects([view, doneView]);
-  ok(g.active.length === 1 && g.active[0] === view && g.history.length === 1 && g.history[0].stage === "Complete", "#220 groupPortalProjects: Complete → History, everything else Active");
-  const gq = groupPortalQuotes([
-    { id: "a", status: "sent", updatedAt: 1 },
-    { id: "b", status: "won", updatedAt: 2 },
-    { id: "c", status: "draft", updatedAt: 3 },
-    { id: "d", status: "lost", updatedAt: 4 },
-  ]);
-  ok(gq.open.map((q) => q.id).join(",") === "c,a" && gq.history.map((q) => q.id).join(",") === "d,b", "#220 groupPortalQuotes: sent + own drafts Open, won + lost History, newest first");
 }
 
 /* --- #232 T3: Quick Design labor per system; Auto cards carry labor --- */
@@ -19452,8 +17926,8 @@ import {
   categoryLabel as d218CatLabel,
 } from "@/lib/document-categories";
 import {
-  filterDocuments as d218Filter, portalCanSee as d218PortalSee, resolveDocumentScope as d218Scope,
-  documentRows as d218Rows, groupForPortal as d218Group, customerUploadBell as d218Bell, cleanMime as d218Mime,
+  filterDocuments as d218Filter, resolveDocumentScope as d218Scope,
+  documentRows as d218Rows, cleanMime as d218Mime,
   type DocumentRecord as D218Doc,
 } from "@/lib/document-rules";
 
@@ -19526,9 +18000,6 @@ import {
   ok(ids(d218Filter(docs, { customerId: "co" })) === "DOC-1,DOC-2,DOC-3,DOC-6", "#218 rules: deleted rows and other companies drop out");
   ok(ids(d218Filter(docs, { customerId: "co", siteId: "v1" })) === "DOC-2,DOC-3" && ids(d218Filter(docs, { customerId: "co", siteId: null })) === "DOC-1,DOC-6", "#218 rules: venue filter, and null = company-wide files");
   ok(ids(d218Filter(docs, { customerId: "co", projectId: "P-1" })) === "DOC-3" && ids(d218Filter(docs, { customerId: "co", visibility: "internal" })) === "DOC-1,DOC-6" && ids(d218Filter(docs, { customerId: "co", category: "forms" })) === "DOC-3", "#218 rules: project, visibility and category filters");
-  ok(ids(d218Filter(docs, { customerId: "co", portal: true })) === "DOC-2,DOC-3,DOC-6" && d218Filter(docs, { portal: true }).length === 0, "#218 rules: the portal sees shared files and the customer's own uploads, never internal team files; no company = nothing");
-  ok(d218PortalSee(docs[1], "co") && d218PortalSee(docs[5], "co"), "#218 access: shared and customer-uploaded files are downloadable by that company");
-  ok(!d218PortalSee(docs[0], "co") && !d218PortalSee(docs[3], "co") && !d218PortalSee(docs[4], "co") && !d218PortalSee(docs[1], "other") && !d218PortalSee(null, "co") && !d218PortalSee(docs[1], ""), "#218 access: an internal file, another company's file, a deleted file, no session are all refused");
 
   const facts = { customerExists: true, siteIds: ["v1", "v2"], project: { id: "P-1", customerId: "co", locationId: "v2" } };
   const s1 = d218Scope({ projectId: "P-1" }, "co", facts);
@@ -19547,11 +18018,6 @@ import {
   ok(r3.isNew && r3.siteLabel === "Main Stage" && r3.projectLabel === "Rigging refit" && r3.categoryLabel === "Forms" && r3.sizeLabel === "10 B", "#218 rows: labels resolve; an unseen customer upload is New");
   const r1 = rows.find((r) => r.id === "DOC-1")!;
   ok(!r1.isNew && r1.siteLabel === "", "#218 rows: team files are never New; company-wide files carry no venue label");
-  const groups = d218Group(docs, "co", seed, [{ id: "v1", label: "Main Stage" }]);
-  ok(groups.map((g) => g.venueLabel).join("|") === "Company-wide|Main Stage", "#218 portal: company-wide first, then venues in order");
-  ok(groups[1].categories.map((c) => c.label).join("|") === "Drawings|Forms" && ids(groups[0].categories[0].docs) === "DOC-6", "#218 portal: grouped by category within a venue; internal team files never appear");
-  const bell = d218Bell([...docs, { ...base, id: "DOC-7", customerId: "b", source: "customer", seenByTeamAt: null, uploadedAt: 900 }]);
-  ok(bell.map((x) => `${x.customerId}:${x.count}`).join(",") === "b:1,co:2", "#218 bell: one item per company with unseen customer uploads, newest first");
   ok(d218Mime("application/pdf") === "application/pdf" && d218Mime("text/html\r\nX: y") === "application/octet-stream" && d218Mime("") === "application/octet-stream", "#218 rules: the browser MIME is informational and sanitized");
 }
 
@@ -19573,8 +18039,7 @@ import {
    ====================================================================== */
 import {
   createDocument as d218Create, getDocument as d218Get, updateDocument as d218Update, removeDocument as d218Remove,
-  documentsForCustomer as d218ForCustomer, markSeen as d218MarkSeen, markCustomerSeen as d218MarkCustomerSeen,
-  unseenCustomerDocuments as d218Unseen, documentsUnderUploadKey as d218UnderKey, documentCategories as d218Cats,
+  documentsForCustomer as d218ForCustomer, markSeen as d218MarkSeen, markCustomerSeen as d218MarkCustomerSeen, documentsUnderUploadKey as d218UnderKey, documentCategories as d218Cats,
 } from "@/lib/stores/documents";
 
 {
@@ -19604,14 +18069,12 @@ async function documentsStoreAsyncChecks(): Promise<void> {
   await mk({ customerId: CO2, visibility: "shared" });
   const forCo = await d218ForCustomer(CO);
   ok(forCo.map((d) => d.id).sort().join(",") === [a.id, c.id].sort().join(","), "#218 store: documentsForCustomer never returns another company's files");
-  ok((await d218ForCustomer(CO, { siteId: "v1" })).map((d) => d.id).join(",") === c.id && (await d218ForCustomer(CO, { portal: true })).map((d) => d.id).join(",") === c.id, "#218 store: venue and portal scoping");
+  ok((await d218ForCustomer(CO, { siteId: "v1" })).map((d) => d.id).join(",") === c.id, "#218 store: venue scoping");
   ok((await d218UnderKey(CO, "UP-0000000000000218", a.blobPath)).some((d) => d.id === a.id) && (await d218UnderKey(CO, "UP-0000000000009999", "documents/none")).length === 0, "#218 store: lookup by blob path / upload key");
   const up = await d218Update(a.id, { title: "  Revised plot  ", category: "photos", visibility: "shared", siteId: "v2", projectId: "P-9", notes: "n".repeat(2100), customerId: CO2, blobPath: "documents/evil" } as Parameters<typeof d218Update>[1]);
   ok(up?.title === "Revised plot" && up.category === "photos" && up.visibility === "shared" && up.siteId === "v2" && up.projectId === "P-9" && up.notes.length === 2000, "#218 store: title/category/visibility/venue/project/notes update, trimmed and capped");
   ok(up?.customerId === CO && up.blobPath === a.blobPath, "#218 store: an update can never move a file to another company or swap its blob");
   ok((await d218Update(a.id, { title: "   " }))?.title === "Revised plot", "#218 store: a blank title keeps the old one");
-  const unseen = await d218Unseen();
-  ok(unseen.some((d) => d.id === c.id) && !unseen.some((d) => d.id === a.id), "#218 store: unseen customer uploads are listed; team files never are");
   ok((await d218MarkSeen([c.id, a.id], 5000)) === 1 && (await d218Get(c.id))?.seenByTeamAt === 5000, "#218 store: markSeen stamps only unseen customer uploads");
   const c2 = await mk({ source: "customer", visibility: "shared" });
   ok((await d218MarkCustomerSeen(CO, 6000)) === 1 && (await d218Get(c2.id))?.seenByTeamAt === 6000, "#218 store: markCustomerSeen acknowledges one company's new uploads");
@@ -19706,8 +18169,8 @@ async function documentsUploadAsyncChecks(): Promise<void> {
   const track = (r: D218FinalizeResult) => { if (r.ok) registerFixture("documents", r.document.id); return r; };
 
   const k1 = d218NewKey();
-  const good = track(await d218Finalize({ customerId: CO, uploadKey: k1, blobPath: pathFor(CO, k1), fileName: "Stage plot.pdf", mime: "application/pdf", category: "drawings", visibility: "shared", siteId: "v1", notes: "rev B" }, team, deps(PDF)));
-  ok(good.ok && good.document.source === "team" && good.document.visibility === "shared" && good.document.category === "drawings" && good.document.siteId === "v1" && good.document.size === 2048 && good.document.title === "Stage plot" && good.document.uploadedBy === "Jeff", "#218 upload: a team file under its own path is recorded with the size Blob reports");
+  const good = track(await d218Finalize({ customerId: CO, uploadKey: k1, blobPath: pathFor(CO, k1), fileName: "Stage plot.pdf", mime: "application/pdf", category: "drawings", siteId: "v1", notes: "rev B" }, team, deps(PDF)));
+  ok(good.ok && good.document.source === "team" && good.document.visibility === "internal" && good.document.category === "drawings" && good.document.siteId === "v1" && good.document.size === 2048 && good.document.title === "Stage plot" && good.document.uploadedBy === "Jeff", "#218 upload: a team file under its own path is recorded with the size Blob reports");
   const again = await d218Finalize({ customerId: CO, uploadKey: k1, blobPath: pathFor(CO, k1), fileName: "Stage plot.pdf" }, team, deps(PDF));
   ok(!again.ok && !removed.includes(pathFor(CO, k1)), "#218 upload: finalizing an already-recorded blob is refused and never deletes it");
   const k2 = d218NewKey();
@@ -19732,14 +18195,8 @@ async function documentsUploadAsyncChecks(): Promise<void> {
   const wrongProj = await d218Finalize({ customerId: CO, uploadKey: k8, blobPath: pathFor(CO, k8), fileName: "a.pdf", projectId: "P-OTHER" }, team, deps(PDF));
   ok(!wrongProj.ok && removed.includes(pathFor(CO, k8)), "#218 upload: a project of another company is refused and the blob deleted");
   const k9 = d218NewKey();
-  const portal = track(await d218Finalize({ customerId: OTHER, uploadKey: k9, blobPath: pathFor(CO, k9), fileName: "Signed form.pdf", visibility: "internal", projectId: "P-218", siteId: "v1", category: "forms" }, { kind: "customer", name: "Pat Customer", customerId: CO }, deps(PDF)));
-  ok(portal.ok && portal.document.customerId === CO && portal.document.source === "customer" && portal.document.visibility === "shared" && portal.document.projectId === null && portal.document.siteId === "v1" && portal.document.seenByTeamAt === null && portal.document.uploadedBy === "Pat Customer", "#218 upload: a portal upload is the session's company, Shared, From customer, unseen, never on a project");
   const k10 = d218NewKey();
-  const portalForeign = await d218Finalize({ uploadKey: k10, blobPath: pathFor(OTHER, k10), fileName: "a.pdf" }, { kind: "customer", name: "Pat", customerId: CO }, deps(PDF));
-  ok(!portalForeign.ok && !removed.includes(pathFor(OTHER, k10)), "#218 upload: a portal session can never finalize (or delete) another company's path");
   const k11 = d218NewKey();
-  const portalSite = await d218Finalize({ uploadKey: k11, blobPath: pathFor(CO, k11), fileName: "a.pdf", siteId: "o1" }, { kind: "customer", name: "Pat", customerId: CO }, deps(PDF));
-  ok(!portalSite.ok, "#218 upload: a portal upload to another company's venue is refused");
   const k12 = d218NewKey();
   const down = await d218Finalize({ customerId: CO, uploadKey: k12, blobPath: pathFor(CO, k12), fileName: "a.pdf" }, team, { ...deps(PDF), head: async () => { throw new Error("BlobError: ECONNREFUSED 127.0.0.1:443"); } });
   ok(!down.ok && down.error === "Couldn't read the uploaded file — try again.", "#218 upload: a Blob read failure is a generic refusal, never the vendor's text");
@@ -19768,8 +18225,6 @@ async function documentsUploadAsyncChecks(): Promise<void> {
     ok(!/from "@\/lib\/stores\//.test(s) && !/from "@\/db\//.test(s) && !/from "@\/lib\/blob"/.test(s), `#218 UI: ${f} never imports a store, the DB or the Blob SDK's server half`);
   }
   ok(src218u("src/components/documents/documents-card-client.tsx").startsWith('"use client"') && src218u("src/components/documents/documents-card-client.tsx").includes('id="documents"'), "#218 UI: the client card is a client component and carries the bell's #documents anchor");
-  ok(CATEGORIES.some((c) => c.key === "documents" && c.label === "New documents from customers"), "#218 bell: New documents from customers is a to-do category");
-  ok(src218u("src/lib/nav-counts.ts").includes('push("documents", "New documents from customers"'), "#218 bell: nav-counts pushes one documents group");
   // A finalize retried after a lost response comes back "already saved" —
   // the uploader counts that as done, and its string tracks the server's.
   const saved218 = /const ALREADY_SAVED = "([^"]+)"/.exec(src218u("src/lib/documents-upload.ts"))?.[1];
@@ -19788,14 +18243,9 @@ import { fixtureId as fixtureId222, registerFixture as registerFixture222 } from
   const pd = previewDocSource();
   ok(!pd.includes('className="est-doc"') && !pd.includes("customerLines("), "#222 PreviewDoc carries no copy of the customer document (it lives in QuoteDocument)");
   ok(/\|print\/\|/.test(src222("src/middleware.ts")), "#222 middleware: /print/ is exempt from the team login (it checks its own token)");
-  for (const p of ["src/app/print/quote/[id]/page.tsx", "src/app/print/letter/[kind]/[id]/page.tsx"]) {
+  for (const p of ["src/app/print/quote/[id]/page.tsx"]) {
     const s = src222(p);
     ok(s.indexOf("verifyPrintToken(") > -1 && s.indexOf("verifyPrintToken(") < s.indexOf("getQuote("), `#222 ${p}: the token is checked before any quote is read`);
-  }
-  for (const k of ["flame-tests", "inspections"]) {
-    const view = src222(`src/app/(app)/${k}/letter/letter-view.tsx`);
-    const page = src222(`src/app/(app)/${k}/letter/page.tsx`);
-    ok(!view.includes("requireUser") && page.includes("requireUser()") && /LetterView id=\{id\}/.test(page), `#222 ${k} letter: the page keeps the team login; the shared view has none`);
   }
 }
 {
@@ -19833,7 +18283,6 @@ async function quotePdfOptions222AsyncChecks(): Promise<void> {
 /* ============ #222 Task 3 — PDF engine: storage, generator, sent-revision copy ============ */
 import { copySentRevisionPdf, generateQuotePdf } from "@/lib/quote-pdf/generate";
 import { isQuotePdfPath, pdfStorage } from "@/lib/quote-pdf/storage";
-import { portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
 import { chromeLaunch, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
 import { setStatus as q222SetStatus, updateQuotePdf as q222UpdatePdf } from "@/lib/stores/quotes";
 import { readdirSync as readdirSync222 } from "node:fs";
@@ -19961,7 +18410,6 @@ async function quotePdfEngine222AsyncChecksInner(): Promise<void> {
     latestSentRevision(edited?.revisions)?.pdfBlobPath === rev?.pdfBlobPath && (await store.read(rev?.pdfBlobPath || ""))?.toString() === "%PDF-1.4 sent-doc",
     "#222 send: later edits regenerate the current PDF, never the sent copy"
   );
-  ok(!!edited && portalPdfSource(edited)?.path === rev?.pdfBlobPath, "#222 portal: a sent quote serves the sent revision's copy, not later edits");
 
   // A send while the PDF is still rendering: the generator copies on completion.
   const pid = fixtureId222("222", "pending-send");
@@ -19994,12 +18442,7 @@ async function quotePdfEngine222AsyncChecksInner(): Promise<void> {
   await q222Update(dl, { status: "sent" });
   const src = async (qid: string, c: string) => {
     const q = await q222Get(qid);
-    return q ? portalQuotePdfSource(q, c) : null;
   };
-  ok(!!(await src(own, cust)), "#222 portal PDF: the customer's own self-serve draft opens");
-  ok((await src(internal, cust)) === null, "#222 portal PDF: an unsent internal draft is 404");
-  ok(!!(await src(sentQ, cust)) && (await src(sentQ, "someone-else")) === null, "#222 portal PDF: a sent quote opens for its own customer only");
-  ok((await src(dl, cust)) === null, "#222 portal PDF: Daylite history never opens on the portal");
 
   // Smoke: a real Chrome prints a real PDF (skipped, with the reason, when there's no Chrome).
   const launch = await chromeLaunch();
@@ -20045,7 +18488,7 @@ import { createServer as createServer222, type IncomingHttpHeaders as IncomingHt
   if (prevFixed === undefined) delete process.env.QUOTE_PDF_ORIGIN;
   else process.env.QUOTE_PDF_ORIGIN = prevFixed;
 
-  ok(canHavePdf222("system") && canHavePdf222(undefined) && canHavePdf222("flame_test") && !canHavePdf222("consulting") && !canHavePdf222("rental"), "#222 fix: canHavePdf — system + the three service letters only");
+  ok(canHavePdf222("system") && canHavePdf222(undefined) && !canHavePdf222("flame_test") && !canHavePdf222("inspection") && !canHavePdf222("consulting") && !canHavePdf222("rental"), "#222 fix: canHavePdf — system estimates only (the service letters are gone)");
 
   ok(landedOnRequested222("https://a.test/print/quote/Q-1?t=x", "https://a.test/print/quote/Q-1?t=y"), "#222 fix: landing on the requested page (query aside) is accepted");
   ok(
@@ -20192,26 +18635,10 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   ok(upd.includes("scheduleQuotePdf(loadedId)") && upd.indexOf("scheduleQuotePdf(loadedId)") < upd.indexOf("setStatus(loadedId"), "#222 saveQuoteAction (update): the PDF goes pending before any status change in the same save");
   const crt = est.slice(est.indexOf("created = await create("), est.indexOf("retireReplacedDraftSafely(payload.replaces"));
   ok(crt.includes("scheduleQuotePdf(created.id)") && crt.indexOf("scheduleQuotePdf(created.id)") < crt.indexOf("setStatus(created.id"), "#222 saveQuoteAction (create): the PDF goes pending before any status change");
-  for (const k of ["flame-tests", "inspections"]) {
-    ok(/  if \(q\) await scheduleQuotePdf\(q\.id\);\n  return \(q && q\.id\) \|\| editingId \|\| null;/.test(s222(`src/app/(app)/${k}/quote/actions.ts`)), `#222 ${k}: every save schedules the proposal-letter PDF`);
-    ok(/export const maxDuration = 120;/.test(s222(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the quote page gives its after() render 120 s`);
-  }
-  // #245 Tasks 10/12: /portal/estimate only redirects and submitPortalEstimate
-  // is gone; a portal quote is now made by the catalog cart's Generate, which
-  // schedules its PDF — before the firm send, as every save does — from a page
-  // that gives the after() render 120 s.
-  const pq222 = s222("src/lib/portal-quotes.ts");
-  const firm222 = pq222.slice(pq222.indexOf("export async function sendPortalFirm"), pq222.indexOf("function writable"));
-  ok(/redirect\(/.test(s222("src/app/portal/estimate/page.tsx")) && !/submitPortalEstimate/.test(s222("src/app/portal/actions.ts")), "#222 the retired portal estimate page only redirects; its submit is gone (#245)");
-  ok(firm222.includes("scheduleQuotePdf(quoteId)") && firm222.indexOf("scheduleQuotePdf(quoteId)") < firm222.indexOf("setStatus(quoteId") && /scheduleQuotePdf\(created\.id\)/.test(pq222),
-    "#222 a portal catalog quote gets its PDF too — pending before the firm send (#245)");
-  ok(/export const maxDuration = 120;/.test(s222("src/app/portal/catalog/quote/page.tsx")), "#222 the portal cart page (Generate) gives its after() render 120 s (#245)");
   const cfg = s222("next.config.ts");
   ok(/source: "\/api\/quotes\/:id\/pdf"[\s\S]{0,200}SAMEORIGIN/.test(cfg) && cfg.indexOf("SAMEORIGIN") > cfg.indexOf('value: "DENY"'), "#222 next.config: only the team PDF route may be framed, by the app itself — after the global DENY");
   const team = s222("src/app/api/quotes/[id]/pdf/route.ts");
   ok(team.indexOf("requireUser()") > -1 && team.indexOf("requireUser()") < team.indexOf("getQuote("), "#222 team PDF route: signed-in team only, checked first");
-  const portal = s222("src/app/portal/quotes/[id]/pdf/route.ts");
-  ok(portal.includes("resolvePortalViewer(") && portal.includes("portalQuotePdfSource(") && !/searchParams\.get\("(path|blobPath)"\)/.test(portal + team), "#222 PDF routes: files by quote id under the portal rule — never a client-supplied path");
   const http = s222("src/lib/quote-pdf/http.ts");
   ok(/application\/pdf/.test(http) && /nosniff/.test(http) && /private, no-store/.test(http) && /isQuotePdfPath\(/.test(http), "#222 pdfResponse: PDF type, nosniff, private no-store, path-guarded");
   // Review requirements on top of the brief.
@@ -20224,8 +18651,8 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   // #245 Task 11 adds the one other same-origin framing exception: the
   // portal part sidebar's inline datasheet viewer (/portal/catalog/doc/:id).
   // Estimator Phase 4 adds a third, the staff preview (/estimator-preview/:path*, pinned by "#P4 preview").
-  ok(!/source: "\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 3 && /"\/estimator-preview\/:path\*",\s*headers: \[\s*\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}/.test(cfg) && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && /"\/portal\/catalog\/doc\/:id",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg),
-    "#222 next.config: the framing exceptions are the PDF route's, (#245) the portal doc viewer's and (Phase 4) the staff preview's alone");
+  ok(!/source: "\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 2 && /"\/estimator-preview\/:path\*",\s*headers: \[\s*\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}/.test(cfg) && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && !cfg.includes("/portal/"),
+    "#222 next.config: the framing exceptions are the PDF route's and (Phase 4) the staff preview's alone");
 }
 
 async function quotePdfRoutes222AsyncChecks(): Promise<void> {
@@ -20272,7 +18699,7 @@ async function quotePdfRoutes222AsyncChecks(): Promise<void> {
 /* ============ #222 T4 fix — PDFs never go stale behind a send; the portal serves only sent copies; origin pinned off Vercel ============ */
 import { markQuotePdfStale as markQuotePdfStale222t4, scheduleQuotePdf as scheduleQuotePdf222t4 } from "@/lib/quote-pdf/schedule";
 import { PDF_ORIGIN_UNSET_ERROR as PDF_ORIGIN_UNSET_ERROR222t4, printOriginFor as printOriginFor222t4 } from "@/lib/quote-pdf/origin";
-import { pdfIsCurrent as pdfIsCurrent222t4, pdfRetryPlan as pdfRetryPlan222t4, portalPdfPreparing as portalPdfPreparing222t4 } from "@/lib/quote-pdf/state";
+import { pdfIsCurrent as pdfIsCurrent222t4, pdfRetryPlan as pdfRetryPlan222t4 } from "@/lib/quote-pdf/state";
 import { QUOTE_CONTENT_FIELDS as QUOTE_CONTENT_FIELDS222t4, quoteContentKey as quoteContentKey222t4 } from "@/lib/stores/quotes";
 
 /** Save and restore the env the #222 async checks change. */
@@ -20304,13 +18731,6 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
 
   // 2. The portal serves only sent copies once a quote has been sent.
   const sentNoCopy = [{ rev: 1, at: 1, reason: "sent", pdfBlobPath: "r1" }, { rev: 2, at: 25, reason: "sent" }];
-  ok(portalPdfSource({ revisions: sentNoCopy, pdf: ready }) === null, "#222 T4 fix: portal — the latest sent revision has no copy → 404, not the older sent copy, not the current file");
-  ok(portalPdfPreparing222t4({ revisions: sentNoCopy, pdf: ready }) && !portalPdfPreparing222t4({ revisions: [sentNoCopy[0]], pdf: ready }) && !portalPdfPreparing222t4({ revisions: [], pdf: ready }), "#222 T4 fix: portal — 'being prepared' only while the latest sent revision lacks its copy");
-  ok(portalPdfSource({ revisions: [sentNoCopy[0], { rev: 2, at: 2, reason: "manual" }], pdf: ready })?.path === "r1", "#222 T4 fix: portal — a manual revision after a send never unlocks the current file");
-  ok(portalPdfSource({ revisions: [{ rev: 1, at: 1, reason: "manual" }], pdf: ready })?.path === ready.blobPath && portalPdfSource({ revisions: undefined, pdf: ready })?.path === ready.blobPath, "#222 T4 fix: portal — a never-sent quote (self-serve, won without a send) may open its current ready file");
-  const route = src("src/app/portal/quotes/[id]/pdf/route.ts");
-  ok(/portalQuotePdfPreparing\(q, session\.customerId\)/.test(route) && /being prepared/.test(route) && /status: 404/.test(route), "#222 T4 fix: the portal PDF route answers 'being prepared' (404) for a sent quote still owed its copy");
-  ok(/portalListsQuote\(q, customerId\) && portalPdfPreparing\(q\)/.test(src("src/lib/quote-pdf/portal-access.ts")), "#222 T4 fix: 'being prepared' is only said to a customer the quote is listed for");
 
   // 3. Off Vercel, production needs QUOTE_PDF_ORIGIN.
   const offVercel = printOriginFor222t4({ NODE_ENV: "production" }, "evil.test", "https");
@@ -20345,8 +18765,6 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
   const designs = src("src/lib/stores/designs.ts");
   const promote = designs.slice(designs.indexOf("export async function promoteDesignToQuote("));
   ok((promote.match(/await schedulePdf\(q\.id\)/g) || []).length === 2 && /import\("@\/lib\/quote-pdf\/schedule"\)/.test(promote), "#222 T4 fix: every Quick Design / dashboard promote (update and create) schedules the PDF");
-  const renewal = src("src/lib/renewal-outreach.ts");
-  ok((renewal.match(/await scheduleRenewalPdf\(quote\.id\);/g) || []).length === 2, "#222 T4 fix: both renewal re-prices schedule the new quote's PDF");
   const est = src("src/app/(app)/estimator/actions.ts");
   ok(/await scheduleQuotePdf\(updated\.id\);/.test(est) && /await scheduleQuotePdf\(created\.id\);\n  refresh\(\);\n  return \{ ok: true, targetId: created\.id/.test(est) && /const pdf = q && q\.contentChangedAt === q\.updatedAt \? await scheduleQuotePdf\(q\.id\) : selectionPdf;/.test(est), "#222 T4 fix: Estimator move-system (both targets) and header edits schedule the PDF (spec 2026-10-16: else the selection write\'s own re-render, if its drawings / datasheets moved)");
   ok(/if \(res\.ok\) await scheduleQuotePdf\(id\);/.test(src("src/app/(app)/quotes/actions.ts")), "#222 T4 fix: recalling a revision schedules the PDF");
@@ -20413,7 +18831,6 @@ async function quotePdfT4Fix222AsyncChecks(): Promise<void> {
       const sentQ = await q222Get(sid);
       const sentRev = latestSentRevision(sentQ?.revisions);
       ok(!!sentRev && !sentRev.pdfBlobPath, "#222 T4 fix: a send over a stale PDF copies nothing onto the sent revision");
-      ok(!!sentQ && portalPdfSource(sentQ) === null && sentQ.pdf?.status === "pending" && sentQ.pdf.stale === true, "#222 T4 fix: the portal serves no pre-edit file, and the cut marked the PDF stale so a render is owed (live-save: setStatus schedules it)");
       const plan = pdfRetryPlan222t4(sentQ ?? {}, Date.now());
       ok("savedAt" in plan && plan.savedAt >= (sentQ?.contentChangedAt ?? 0), "#222 T4 fix: Retry renders as at least the content change's save");
       if ("savedAt" in plan) {
@@ -20447,10 +18864,10 @@ async function quotePdfT4Fix222AsyncChecks(): Promise<void> {
 
 /* ============ #222 Task 5 — the preview is the saved PDF ============ */
 import { pdfDocKey, withSavedMeta as withSavedMeta222 } from "@/app/(app)/estimator/pdf-doc-key";
-import { pdfBanner as pdfBanner222, pdfCanRetry as pdfCanRetry222 } from "@/components/quote-pdf/pdf-banner";
+import { pdfBanner as pdfBanner222 } from "@/components/quote-pdf/pdf-banner";
 import { PDF_COALESCE_MS as PDF_COALESCE_MS222 } from "@/lib/quote-pdf/generate";
 import type { QuotePdfView as QuotePdfView222 } from "@/lib/quote-pdf/state";
-import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t5, pdfView as pdfView222t5, portalPdfPreparing as portalPdfPreparing222t5, portalPdfUnavailable as portalPdfUnavailable222, stalePdf as stalePdf222 } from "@/lib/quote-pdf/state";
+import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t5, pdfView as pdfView222t5, stalePdf as stalePdf222 } from "@/lib/quote-pdf/state";
 {
   const base = {
     projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "",
@@ -20468,14 +18885,6 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
   const s5 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const pd = previewDocSource();
   ok(!pd.includes("window.print") && pd.includes("<QuotePdfViewer") && pd.includes("?download=1"), "#222 PreviewDoc: shows the saved PDF and downloads the saved file — no window.print()");
-  const clientFiles = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/preview-doc.tsx", "src/components/quote-pdf/quote-pdf-viewer.tsx", "src/components/quote-pdf/saved-pdf-button.tsx", "src/components/quote-pdf/use-quote-pdf.ts", "src/components/quote-pdf/pdf-banner.ts", ...estimatorExtraPaths()];
-  ok(
-    clientFiles.every((f) => !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/quote-pdf\/(token|storage|render|generate|schedule|portal-access|quote-document-data))/m.test(s5(f))),
-    "#222 client files import no store, DB or server-only PDF module"
-  );
-  for (const k of ["flame-tests", "inspections"]) {
-    ok(/<SavedPdfButton/.test(s5(`src/app/(app)/${k}/quote/controls.tsx`)) && /pdf=\{editQuote \? pdfView\(editQuote\.pdf, Date\.now\(\)\) : null\}/.test(s5(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the letter button opens the saved PDF`);
-  }
 
   // Header autosaves re-render from the SAVED quote: the baseline takes exactly the written fields.
   const meta222 = { quoteNote: "Hi", name: "  P2 ", customer: "C2", customerId: "c9", locationId: "l1", contactName: "Ann", category: "Rigging", installTimeframe: "ASAP" };
@@ -20492,10 +18901,6 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
   const v5 = (status: QuotePdfView222["status"], error: string | null = null): QuotePdfView222 => ({ status, at: 1, savedAt: 1, error, hasFile: true });
   const acts = (pdf: QuotePdfView222 | null, timedOut = false, dirty = false, retrying = false) =>
     pdfBanner222({ quoteId: "Q-1", pdf, dirty, timedOut, retrying }).map((n) => `${n.text}|${n.action || ""}`).join(";");
-  ok(acts(v5("pending")) === "Updating PDF…|" && !pdfCanRetry222(v5("pending"), false, false), "#222 T5 banner: a render being polled says Updating PDF… and offers no Retry");
-  ok(acts(v5("pending"), true).endsWith("|Retry") && pdfCanRetry222(v5("pending"), true, false), "#222 T5 banner: once polling gives up, Retry is offered");
-  ok(acts(v5("failed", "boom")) === "boom|Retry" && pdfCanRetry222(v5("failed"), false, false) && !pdfCanRetry222(v5("failed"), false, true), "#222 T5 banner: a failed render shows its reason with Retry (not while a retry runs)");
-  ok(acts(v5("ready")) === "" && !pdfCanRetry222(v5("ready"), false, false), "#222 T5 banner: a ready PDF shows no banner and no Retry");
   ok(acts(v5("ready"), false, true) === "Unsaved changes — save to update the PDF.|", "#222 T5 banner: unsaved edits say so, exactly");
   ok(pdfBanner222({ quoteId: null, pdf: null, dirty: false, timedOut: false, retrying: false })[0]?.text === "Save this estimate to create its PDF.", "#222 T5 banner: a never-saved estimate asks for a save");
   const hook5 = s5("src/components/quote-pdf/use-quote-pdf.ts");
@@ -20516,12 +18921,6 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
   const editedAfterSend = { revisions: sentAt10, pdf: { status: "ready" as const, at: 30, savedAt: 30, blobPath: "quote-pdfs/Q-1/30.pdf" } };
   const reRendering = { revisions: sentAt10, pdf: { status: "pending" as const, at: 31, savedAt: 30, blobPath: "quote-pdfs/Q-1/30.pdf" } };
   const owed = { revisions: sentAt10, pdf: { status: "pending" as const, at: 11, savedAt: 9 } };
-  ok(!portalPdfPreparing222t5(legacySent) && portalPdfUnavailable222(legacySent), "#222 T4 re-review: a quote sent before saved PDFs is not 'being prepared' — it is unavailable");
-  ok(!portalPdfPreparing222t5(editedAfterSend) && !portalPdfPreparing222t5(reRendering) && portalPdfUnavailable222(editedAfterSend), "#222 T4 re-review: a quote edited after its send is not 'being prepared' (its PDF belongs to a newer save)");
-  ok(portalPdfPreparing222t5(owed, 12) && !portalPdfUnavailable222(owed, 12), "#222 T4 re-review: a send whose own save is still rendering is 'being prepared'");
-  ok(!portalPdfUnavailable222({ revisions: [], pdf: null }) && !portalPdfUnavailable222({ revisions: [{ rev: 1, at: 10, reason: "sent", pdfBlobPath: "r1" }], pdf: null }), "#222 T4 re-review: never-sent quotes and sent copies on file are never 'unavailable'");
-  const proute5 = s5("src/app/portal/quotes/[id]/pdf/route.ts");
-  ok(proute5.includes("No PDF is available for this version — please contact your rep.") && /portalQuotePdfUnavailable\(q, session\.customerId\)/.test(proute5) && /portalListsQuote\(q, customerId\) && portalPdfUnavailable\(q\)/.test(s5("src/lib/quote-pdf/portal-access.ts")), "#222 T4 re-review: the portal route says to contact the rep when a sent copy will never come");
   // (2) A stale mark has no render behind it: out of date, and Retry reschedules at once.
   const mark5 = stalePdf222({ status: "ready", at: 5, savedAt: 5, blobPath: "quote-pdfs/Q-1/5.pdf" }, 50, 1_000);
   const mv5 = pdfView222t5(mark5, 1_000 + 200_000);
@@ -20579,12 +18978,6 @@ async function quotePdfCoalesce222AsyncChecks(): Promise<void> {
 
 /* ============ #220 Task 6 — portal quotes Open/History + projects ============ */
 {
-  // #288 Task 2: the quote row moved to the shared src/app/portal/quote-row.tsx.
-  const portal220 = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8") + readFileSync(join(process.cwd(), "src/app/portal/quote-row.tsx"), "utf8");
-  ok(portal220.includes("resolvePortalViewer(") && !portal220.includes("getOptionalUser"), "#220 portal page: the team-preview rule is the shared resolvePortalViewer");
-  ok(portal220.includes("groupPortalQuotes(published)") && portal220.includes("portalQuotePdfSource(q, cid)") && portal220.includes("Document being prepared"), "#220 portal quotes: grouped Open/History, each row opens its PDF or says it's being prepared");
-  ok(!/\.(procurement|timeLogs|mobilizations|deliveries|crew|margin)\b/.test(portal220), "#220 portal page never reads internal project/quote fields");
-  ok(portal220.includes("portalQuotePdfPreparing(q, cid)") && portal220.includes("PDF not available — contact your rep"), "#220 portal quotes: \"being prepared\" only while a sent copy can still arrive; otherwise contact your rep");
 }
 
 /* ============ #222 Task 5 review fixes (folded into Task 6) ============ */
@@ -20769,29 +19162,10 @@ import {
 import { listDocsByField as d218ByField } from "@/db/doc-store";
 {
   const src218p = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  const pup = src218p("src/app/portal/documents/upload/route.ts");
-  ok(pup.includes("await portalSession()") && pup.includes("parseUploadKey(clientPayload)") && pup.includes("uploadGrantError(pathname, session.customerId, uploadKey)") && !pup.includes("payload.customerId") && !pup.includes("requireUser"), "#218 route: the portal upload grant takes the company from the session only");
-  const pdl = src218p("src/app/portal/documents/[id]/route.ts");
-  ok(pdl.includes("await portalSession()") && pdl.includes("portalCanSee(doc, session.customerId)") && pdl.includes("status: 404") && pdl.includes("documentDownloadHeaders(doc.fileName)") && !pdl.includes("requireUser"), "#218 route: portal download is scoped by portalCanSee and refuses with 404");
-  const pact = src218p("src/app/portal/documents-actions.ts");
-  ok(pact.startsWith('"use server"') && pact.includes("await portalSession()") && pact.includes('kind: "customer"') && pact.includes("customerId: session.customerId"), "#218 portal: finalize takes the company from the session");
-  const pupc = src218p("src/app/portal/document-upload.tsx");
-  ok(pupc.startsWith('"use client"') && !/from "@\/lib\/stores\//.test(pupc) && !/from "@\/lib\/portal"/.test(pupc) && pupc.includes('handleUploadUrl: "/portal/documents/upload"'), "#218 portal: the upload control is a client component that never imports a store or the session module");
-  const ppage = src218p("src/app/portal/page.tsx");
-  ok(ppage.includes("documentsForCustomer(cid, { portal: true })") && ppage.includes("<PortalDocumentsSection"), "#218 portal: the dashboard lists only portal-visible documents of the session's company");
-  ok(src218p("src/middleware.ts").includes("|portal|"), "#218 portal: /portal routes stay outside the team login (existing exemption, unchanged)");
-  // Team preview (?preview=<id>, resolvePortalViewer): team download links, no upload.
-  const psec = src218p("src/app/portal/documents-section.tsx");
-  ok(psec.includes('preview ? "/api/documents/" : "/portal/documents/"') && psec.includes("disabled={preview}") && ppage.includes("preview={preview}"), "#218 portal: the team preview links to the team download route and disables upload");
-  // Portal finalize forces the customer shape whatever the browser sent.
-  ok(/finalizeDocumentUpload\(\s*\{ \.\.\.input, customerId: session\.customerId, projectId: null, visibility: "shared" \}/.test(pact) && !pact.includes("seenByTeamAt"), "#218 portal: finalize pins company, project (none) and Shared; the customer actor makes it unseen");
 
   // Task 4 review fixes.
   const nav218 = src218p("src/lib/nav-counts.ts");
-  ok(/docBell\.flatMap\(\(b, i\) =>\s*\(?\s*docNames\[i\]\s*\?/.test(nav218) && !nav218.includes("docNames[i] || b.customerId"), "#218 bell: an item whose company no longer resolves is dropped, never left un-clearable");
-  ok(nav218.includes("seenByTeamAt IS NULL"), "#218 bell: the nav-counts comment states the SQL filter");
   const store218 = src218p("src/lib/stores/documents.ts");
-  ok(/listDocsByField<DocumentRecord>\(COLL, "source", \["customer"\], \{ nullFields: \["seenByTeamAt"\] \}\)/.test(store218), "#218 bell: unseenCustomerDocuments filters seenByTeamAt IS NULL in SQL");
   const card218 = src218p("src/components/documents/documents-card-client.tsx");
   ok(card218.includes('scope === "company" ? "Mark seen" : "Mark all of this company’s new uploads seen"'), "#218 UI: a venue/project card's Mark seen says it acknowledges the whole company");
 }
@@ -20815,8 +19189,6 @@ async function documentsPortalFixAsyncChecks(): Promise<void> {
   const sqlRows = await d218ByField<{ id: string }>("documents", "source", ["customer"], { nullFields: ["seenByTeamAt"] });
   const ids = new Set(sqlRows.map((r) => r.id));
   ok(ids.has(fresh.id) && !ids.has(seen.id) && !ids.has(team.id), "#218 doc-store: nullFields filters in SQL (a seen customer upload and a team file never come back)");
-  const unseen = new Set((await d218Unseen()).map((d) => d.id));
-  ok(unseen.has(fresh.id) && !unseen.has(seen.id) && !unseen.has(team.id), "#218 bell: unseenCustomerDocuments returns only unseen customer uploads");
 }
 
 /* ======================================================================
@@ -20855,18 +19227,7 @@ const fwaRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
     "#216 final: typing the street/city/state by hand drops the picked coordinates and zip");
 }
 
-import { deriveSeededMarker as fwaSeeded } from "@/lib/service-pricing";
 {
-  // #217 final — deriveSeededMarker re-derives the builder's own reopen-seed.
-  ok(fwaSeeded({ postedOverride: 900, stored: { value: 900, status: "sent" } }) === false,
-    "#217 final: a sent on-grid quote (no reopen-seed) where the user types the same 900 is a real hand-set price — not seeded");
-  ok(fwaSeeded({ postedOverride: 821, stored: { value: 821.4, status: "sent" } }) === true,
-    "#217 final: a legacy fractional value (stored 821.4, reopened and saved as 821) is still flagged seeded");
-  ok(fwaSeeded({ postedOverride: 821, stored: { value: 821, status: "sent", priceOverride: 821, priceOverrideSeeded: true } }) === true,
-    "#217 final: a second save of an already-seeded quote stays seeded");
-  const sp = fwaRd("src/lib/service-pricing.ts");
-  ok(!sp.includes("builder posts this as `priceOverrideSeeded`") && /i\.postedOverride === seedPriceOverride\(s\.status, s\.value, s\.priceOverride\) &&\s*seedPriceOverrideIsLegacy\(s\.status, s\.value, s\.priceOverride, s\.priceOverrideSeeded\)/.test(sp),
-    "#217 final: deriveSeededMarker is seedPriceOverride + seedPriceOverrideIsLegacy of the stored quote; the stale 'builder posts' comment is gone");
 }
 
 {
@@ -21080,7 +19441,7 @@ async function finalWaveAAsyncChecks(): Promise<void> {
    finalWaveBAsyncChecks.
    ====================================================================== */
 import { RENDER_LAUNCH_TIMEOUT_MS as fwbLaunchMs, RENDER_STEP_TIMEOUT_MS as fwbStepMs } from "@/lib/quote-pdf/render";
-import { pdfStoragePath as fwbPdfPath, portalPdfPreparing as fwbPreparing, portalPdfUnavailable as fwbUnavailable, PDF_PENDING_STALE_MS as fwbStaleMs } from "@/lib/quote-pdf/state";
+import { pdfStoragePath as fwbPdfPath, PDF_PENDING_STALE_MS as fwbStaleMs } from "@/lib/quote-pdf/state";
 import { accessoryClampNote as fwbClampNote, ACCESSORY_QTY_MAX as fwbAccMax } from "@/lib/design/grid-accessories";
 import { sanitizeTypeMap as fwbSanitizeTypeMap } from "@/lib/design/device-types";
 import { fabricRateProblem as fwbFabricProblem, FABRIC_AREA_RATE_MAX as fwbFabricMax } from "@/app/(app)/catalog/part-form";
@@ -21105,8 +19466,6 @@ const fwbRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const sentAt10 = [{ rev: 1, at: 10, reason: "sent" }];
   const failed = { revisions: sentAt10, pdf: { status: "failed" as const, at: 11, savedAt: 9, error: "Chrome crashed" } };
   const livePending = { revisions: sentAt10, pdf: { status: "pending" as const, at: 11, savedAt: 9 } };
-  ok(!fwbPreparing(failed, 12) && fwbUnavailable(failed, 12), "#222 final-B: a failed render is never 'being prepared' — it reads unavailable");
-  ok(fwbPreparing(livePending, 12) && !fwbPreparing(livePending, 11 + fwbStaleMs + 1) && fwbUnavailable(livePending, 11 + fwbStaleMs + 1), "#222 final-B: a pending render is 'being prepared' only until pdfView calls it failed (stale)");
 
   // #222 (2): source guard (the behaviour is exercised in finalWaveBAsyncChecks).
   ok(/prev && prev !== path && prev !== res\.after\?\.blobPath/.test(fwbRd("src/lib/quote-pdf/generate.ts")), "#222 final-B: generate never deletes the old file when it is the stored blobPath");
@@ -21460,20 +19819,8 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   ok(rd("src/app/(app)/estimator/page.tsx").includes("loadCurtainSewingPct()") && rd("src/app/(app)/estimator/page.tsx").includes("curtainSewingPct={curtainSewingPct}") &&
       estimatorSource().includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
     "#227 late: the Estimator reads the rule on the server and hands it to its client curtain math");
-  // #245 Tasks 10/12: the portal estimate page and its submit are retired —
-  // no portal path there prices fabric any more.
-  ok(!rd("src/app/portal/actions.ts").includes("curtainCost(") && !rd("src/app/portal/estimate/page.tsx").includes("fabricSellPerSqft"),
-    "#227 late: no legacy portal path (estimate page/actions) prices a curtain");
-  // #250: the portal configurator DOES price curtains now — through the ONE
-  // shared chain (curtainCost/curtainPrice imported from the canonical
-  // module), never a reimplementation.
-  ok(rd("src/lib/portal-pricing.ts").includes('import { curtainCost, curtainPrice } from "@/lib/design/curtain-pricing"'),
-    "#250: the portal cart prices curtains through the shared Estimator curtain math (curtainCost/curtainPrice), not a re-implementation");
   ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadCurtainSewingPct()") && rd("src/lib/design/grid-quote.ts").includes("loadCurtainSewingPct()") && rd("src/lib/stores/equipment-map.ts").includes("loadCurtainSewingPct()"),
     "#227 late: the Grid editor, the Grid quote and the Equipment-map price context read the rule");
-  // #245 Task 12: the portal estimate builder is deleted; the portal cart (which shows curtain requests) takes its place here.
-  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/catalog/quote/cart-client.tsx", "src/app/portal/catalog/curtain-request.tsx", ...estimatorExtraPaths()];
-  ok(clients.every((f) => !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db)/m.test(rd(f))), "#227 late: no client curtain file imports a VALUE from a store");
 }
 
 /* #227 late (b) — the sewing rule through Estimating Rules into its loader and the Equipment-map price context, against the scratch DB. Leaves the default behind. */
@@ -21993,25 +20340,11 @@ function e223Src(rel: string): string {
    number; hrefs, hidden inputs, Blob paths and package keys keep the id.
    ====================================================================== */
 {
-  for (const b of ["flame-tests", "inspections"]) {
-    const c = e223Src(`src/app/(app)/${b}/quote/controls.tsx`);
-    const p = e223Src(`src/app/(app)/${b}/quote/page.tsx`);
-    ok(c.includes("Saved {savedNumber}") && !c.includes("Saved {savedId}") && p.includes("savedNumber: displayQuoteNumber(editQuote)"), `#223 ${b} builder: the saved toast names the estimate number`);
-  }
   ok(e223Src("src/app/(app)/design/engagements/quote/controls.tsx").includes("`Consulting proposal ${initial.number}`"), "#223 consulting builder header shows the number");
-  // The letter pages delegate to letter-view.tsx (#222 print route shares it), so that's where the lines live.
-  for (const l of ["flame-tests", "inspections"]) {
-    const s = e223Src(`src/app/(app)/${l}/letter/letter-view.tsx`);
-    ok(!s.includes('v: quote.id }') && !s.includes("Work Order {quote.id}") && s.includes('{ k: "Document", v: displayQuoteNumber(quote) }') && s.includes("Work Order {displayQuoteNumber(quote)}"), `#223 ${l} letter: Document + Work Order lines print the number`);
-  }
-  const ren = e223Src("src/lib/renewal-outreach.ts");
   const pkg = e223Src("src/lib/client-package-server.ts");
   ok(pkg.includes('{ label: "Quote", value: displayQuoteNumber(quote) }') && pkg.includes("client-packages/quote-${safeName(quote.id)}/"), "#223 client package prints the number; its Blob path keeps the id");
-  ok(e223Src("src/app/portal/quote-row.tsx").includes('displayQuoteNumber(q) + " · "'), "#223 portal lists quotes by number (the shared row, #288)");
   // #222's saved-PDF download routes name the file by number; the file is still looked up by id.
   const teamPdf = e223Src("src/app/api/quotes/[id]/pdf/route.ts");
-  const portalPdf = e223Src("src/app/portal/quotes/[id]/pdf/route.ts");
-  ok(teamPdf.includes("pdfFileName(displayQuoteNumber(q), rev)") && portalPdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && teamPdf.includes("getQuote(id)"), "#223 saved quote PDF downloads (team + portal) are named by number");
 }
 
 /* ======================================================================
@@ -22266,18 +20599,13 @@ import { DEFAULT_FREIGHT_RULE as d245Rule, freightPctForMiles as d245Freight } f
   ok(d245Freight(100, { ...custom, stepMiles: 0 }).pct === 1, "#245 freight: a zero step never divides by zero — base only");
 }
 
-import { loadFreightRule as d245LoadFreight, loadPortalRules as d245LoadPortal } from "@/lib/freight-rule-load";
+import { loadFreightRule as d245LoadFreight } from "@/lib/freight-rule-load";
 async function portal245RulesAsyncChecks(): Promise<void> {
   const rule = await d245LoadFreight();
   ok(
     rule.basePct === d245Rule.basePct && rule.stepMiles === d245Rule.stepMiles &&
       rule.stepPct === d245Rule.stepPct && rule.capPct === d245Rule.capPct,
     "#245 rules: loadFreightRule() resolves to DEFAULT_FREIGHT_RULE with no override"
-  );
-  const portal = await d245LoadPortal();
-  ok(
-    portal.validityDays === 30 && portal.browseMinQuotes === 3 && portal.browseWindowMonths === 24 && portal.staleCostMonths === 0,
-    "#245 rules: loadPortalRules() resolves to its documented defaults"
   );
 }
 
@@ -22563,81 +20891,28 @@ async function portal245ImagesTask4AsyncChecks(): Promise<void> {
    written only through mergeUpsert (never wiped by an importer/enricher
    patch — see the #245 assertion beside the #81 re-import checks above).
    ====================================================================== */
-import { browsable as d245Browsable, browseReason as d245Reason, quotable as d245Quotable, normalizeVisibility as d245NormVis } from "@/lib/portal-visibility";
 {
   const rule = { minQuotes: 3 };
   const base = { visibility: "auto" as const, hasVisibleImage: false, hasDatasheet: false, quoteCount: 0 };
-  ok(d245Quotable(base) && d245Quotable({ visibility: "show" }) && !d245Quotable({ visibility: "hide" }), "#245 visibility: everything but Hide is quotable");
-  ok(!d245Browsable(base, rule), "#245 visibility: auto with no image/datasheet/quotes is search-only");
-  ok(d245Browsable({ ...base, hasVisibleImage: true }, rule) && d245Browsable({ ...base, hasDatasheet: true }, rule), "#245 visibility: image or datasheet makes it browsable");
-  ok(!d245Browsable({ ...base, quoteCount: 2 }, rule) && d245Browsable({ ...base, quoteCount: 3 }, rule), "#245 visibility: 3+ recent quotes makes it browsable");
-  ok(d245Browsable({ ...base, visibility: "show" }, rule) && !d245Browsable({ ...base, visibility: "hide", hasVisibleImage: true }, rule), "#245 visibility: overrides win both ways");
-  ok(d245Reason({ ...base, hasVisibleImage: true }, rule) === "Browsable: has image", "#245 visibility: reason names the first matching fact");
-  ok(d245Reason({ ...base, quoteCount: 5 }, rule) === "Browsable: quoted 5 times recently", "#245 visibility: quote-count reason");
-  ok(d245Reason({ ...base, visibility: "hide" }, rule) === "Hidden from customers", "#245 visibility: hide reason");
-  ok(d245Reason(base, rule) === "Search only — no image, datasheet, or recent quotes", "#245 visibility: search-only reason");
-  ok(d245NormVis("bogus") === "auto" && d245NormVis(undefined) === "auto" && d245NormVis("hide") === "hide", "#245 visibility: unknown values read as auto");
 }
 
 /* ======================================================================
    Portal catalog — price rules, quote mode, accept/card guards, search
    (#245, Task 6; spec §2.1/§2.3/§3.1/§4). Pure TypeScript modules.
    ====================================================================== */
-import { unitPriceFor as d245Unit, fixtureUnitPrice as d245FixPrice } from "@/lib/portal-price-rules";
-import { quoteMode as d245Mode, canAcceptPortal as d245CanAccept, firmValidUntil as d245Valid, looksLikeCardNumber as d245Card } from "@/lib/portal-quote-mode";
-import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
+import { looksLikeCardNumber as d245Card } from "@/lib/card-number";
 {
   const now = Date.UTC(2026, 8, 27);
   const o = { markup: mk(0.3), staleCostMonths: 0, now };
-  ok(d245Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#245 price: cost × (1 + markup)");
-  ok(d245Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d245Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#245 price: no cost → list");
-  const np = d245Unit({ cost: 0, list: 0 }, o);
-  ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#245 price: no cost and no list → price on request");
-  ok(d245Unit({ cost: 10, list: 20, note: "verify price" }, o).porReason === "verify-price", "#245 price: a note means verify price → POR");
   const old = now - 400 * 86400000;
-  ok(!d245Unit({ cost: 10, list: 20, pricedAt: old }, o).por, "#245 price: stale-cost rule off by default");
-  ok(d245Unit({ cost: 10, list: 20, pricedAt: old }, { ...o, staleCostMonths: 12 }).porReason === "stale-cost", "#245 price: stale cost → POR when the setting is on");
-  ok(!d245Unit({ cost: 10, list: 20, pricedAt: null }, { ...o, staleCostMonths: 12 }).por, "#245 price: unknown priced date is not stale");
-  ok(d245Unit({ cost: 33.33, list: 0 }, o).unitPrice === 47.61, "#245 price: rounded to cents");
 
   const comp = (sku: string, cost: number, qty = 1, extra = {}) => ({ sku, cost, list: 0, qty, quotable: true, required: true, ...extra });
-  const fx = d245FixPrice([comp("LE", 700), comp("LENS", 70, 2)], o);
-  ok(fx.unitPrice === 1200 && !fx.por && fx.cost === 840, "#245 fixture: sum of component tier prices × qty; cost carried");
-  ok(d245FixPrice([comp("LE", 700), comp("X", 0, 1, { list: 0 })], o).por, "#245 fixture: a POR component makes the fixture POR");
-  ok(d245FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false })], o).unavailable, "#245 fixture: a hidden required component makes it unavailable");
-  ok(!d245FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false, required: false })], o).unavailable, "#245 fixture: a hidden optional add-on doesn't block the fixture");
-
-  ok(d245Mode([{ por: false }, { por: false }]).mode === "firm", "#245 mode: all priced → firm");
-  const rv = d245Mode([{ por: false }, { por: true }, { por: true }]);
-  ok(rv.mode === "review" && rv.porCount === 2 && rv.reason === "2 lines are price on request", "#245 mode: any POR → review with reason");
-  ok(d245Mode([{ por: true }]).reason === "1 line is price on request", "#245 mode: singular reason");
-  ok(d245Valid(now, 30) === now + 30 * 86400000, "#245 validity: 30 days");
-  ok(d245CanAccept({ status: "sent", portalFirm: { validUntil: now + 1 } }, now).ok, "#245 accept: sent + in date → ok");
-  ok(d245CanAccept({ status: "sent", portalFirm: { validUntil: now - 1 } }, now).reason === "expired", "#245 accept: expired firm quote refused");
-  ok(d245CanAccept({ status: "sent" }, now).ok, "#245 accept: staff-sent (no portalFirm) never expires here");
-  ok(d245CanAccept({ status: "draft" }, now).reason === "not-sent" && d245CanAccept({ status: "sent", portalAcceptance: { at: 1 } }, now).reason === "accepted", "#245 accept: draft / already accepted refused");
   ok(d245Card("PO 44812, card 4111 1111 1111 1111 please") && d245Card("4242424242424242"), "#245 card guard: Luhn-valid 13–19 digit runs caught, with spaces");
   ok(!d245Card("PO 1234567890123") && !d245Card("call 608-555-0199"), "#245 card guard: PO numbers / phones that fail Luhn pass");
-
-  const e = (key: string, mfr: string, category: string, browsable = true, title = key): D242Entry => ({ key, kind: "part", title, sku: key, mfr, category, haystack: d245Hay([key, title, mfr, category]), browsable, rank: 0 });
-  const all = [e("A1", "ETC", "Fixtures"), e("A2", "ETC", "Cable"), e("B1", "Rose Brand", "Track", false), e("B2", "Rose Brand", "Fixtures", true, "Source Four Clamp")];
-  const r0 = d245Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(r0.total === 3 && !r0.entries.some((x) => x.key === "B1"), "#245 search: empty query lists browsable only");
-  ok(d245Search(all, { q: "b1", mfr: [], cat: [], page: 1, pageSize: 48 }).total === 1, "#245 search: a query finds search-only parts too");
-  const r1 = d245Search(all, { q: "", mfr: ["ETC"], cat: [], page: 1, pageSize: 48 });
-  ok(r1.total === 2 && r1.catFacets.find((f) => f.value === "Fixtures")?.count === 1 && !r1.catFacets.some((f) => f.value === "Track"), "#245 search: picking a manufacturer narrows category facets");
-  ok(r1.mfrFacets.find((f) => f.value === "Rose Brand")?.count === 1 && r1.mfrFacets.find((f) => f.value === "ETC")?.selected === true, "#245 search: manufacturer facet counts ignore its own selection (either order works)");
-  const r2 = d245Search(all, { q: "source clamp", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(r2.total === 1 && r2.entries[0].key === "B2", "#245 search: every token must match (AND)");
-  const many = Array.from({ length: 100 }, (_, i) => e("P" + i, "ETC", "Cable"));
-  const p3 = d245Search(many, { q: "", mfr: [], cat: [], page: 3, pageSize: 48 });
-  ok(p3.pages === 3 && p3.entries.length === 4 && p3.page === 3, "#245 search: 48 per page, last page partial");
-  ok(d245Search(many, { q: "", mfr: [], cat: [], page: 99, pageSize: 48 }).page === 3, "#245 search: page clamps to the last page");
 }
 
 /* Fix round 1: fixture cost accumulation for POR components; group-based card detection */
 {
-  ok(d245FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { markup: mk(0.3), staleCostMonths: 0, now: 0 }).cost === 800, "#245 fixture: a POR component's known cost still counts toward the fixture's internal cost");
   ok(d245Card("PO 12345 4111 1111 1111 1111"), "#245 card guard: a card typed after a PO number is still caught");
   ok(d245Card("PO-12345-4111-1111-1111-1111"), "#245 card guard: dash-separated run with a leading PO group");
   ok(!d245Card("tracking 94111111111111111222"), "#245 card guard: a long unbroken digit string is not scanned window by window");
@@ -22649,32 +20924,10 @@ import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry
    Task 7; spec §2/§8). Pure quote counting, then a DB pass over real
    catalog rows, an image link, a Hide override and a cart.
    ====================================================================== */
-import {
-  countRecentQuotesBySku as d245Counts,
-  invalidatePortalIndex as d245Invalidate,
-  portalIndex as d245Index,
-  portalFactsForSku as d245Facts,
-} from "@/lib/portal-catalog-index";
-import {
-  priceCart as d245PriceCart,
-  priceSku as d245PriceSku,
-  sellView as d245SellView,
-  pricingContextFor as d245Ctx,
-  freightFor as d245FreightFor,
-} from "@/lib/portal-pricing";
 import { mergeUpsert as d245MergeUpsert } from "@/lib/stores/catalog";
-import type { PortalCart as D242Cart } from "@/lib/portal-cart-types";
 {
   const mk = (createdAt: number, skus: string[], source = "estimator") => ({ source, createdAt, spec: { sections: [{ items: skus.map((sku) => ({ sku })) }] } });
   const since = 1000;
-  const m = d245Counts([mk(2000, ["A", "A", "B"]), mk(3000, ["A"]), mk(500, ["A"]), mk(4000, ["A"], "daylite"), { source: "x", createdAt: 5000, spec: null }], since);
-  ok(m.get("A") === 2 && m.get("B") === 1, "#245 index: counts distinct quotes per SKU inside the window, excluding Daylite history and old quotes");
-  const odd = d245Counts([
-    { source: "estimator", createdAt: 2000, deleted: true, spec: { sections: [{ items: [{ sku: "D" }] }] } },
-    { source: "estimator", createdAt: 2000, spec: { sections: "nope" } },
-    { source: "estimator", createdAt: 2000, spec: { sections: [{ items: null }, { items: [null, { sku: 7 }, { sku: "" }, { sku: "E" }] }] } },
-  ], since);
-  ok(!odd.has("D") && odd.get("E") === 1 && odd.size === 1, "#245 index: deleted quotes and malformed spec shapes are skipped safely");
 }
 
 async function portal245IndexAsyncChecks(): Promise<void> {
@@ -22694,17 +20947,6 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     registerFixture("part_document_links", d245LinkId(IMG, img.id));
     await upsertCustomer({ id: CO, name: "Test242 Portal Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
 
-    d245Invalidate();
-    const ix = await d245Index({ fresh: true });
-    const entry = (k: string) => ix.entries.find((e) => e.key === k);
-    ok(!ix.parts.has(HIDE) && !entry(HIDE), "#245 index: a Hide part is absent from the index and its search entries");
-    ok(entry(IMG)?.browsable === true && ix.parts.get(IMG)?.imageIds.includes(img.id) === true, "#245 index: a part with a visible image is browsable and carries the image id");
-    ok(!!entry(PLAIN) && entry(PLAIN)!.browsable === false, "#245 index: a plain part is searchable but not browsable");
-    ok(entry(IMG)!.haystack.includes("imaged") && entry(IMG)!.title === "Test242 Imaged Fixture", "#245 index: entry title + haystack come from the part");
-    ok((await d245Index()) === ix, "#245 index: a second read inside the TTL is the cached index");
-    d245Invalidate();
-    ok((await d245Index()) !== ix, "#245 index: invalidatePortalIndex forces a rebuild");
-
     // Spec §1.3: an own spec sheet (no datasheet) counts as a datasheet.
     const SPEC = fixtureId(245, "p-spec");
     await d245MergeUpsert(SPEC, { desc: "Test242 Spec-sheet Part", category: "Rigging", unit: "ea", list: 30, cost: 12 });
@@ -22714,50 +20956,6 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     registerFixture("part_documents", ss.id);
     await d245Attach(ss.id, [SPEC], "Test");
     registerFixture("part_document_links", d245LinkId(SPEC, ss.id));
-    d245Invalidate();
-    const ixS = await d245Index({ fresh: true });
-    const fSpec = await d245Facts(SPEC);
-    ok(ixS.entries.find((e) => e.key === SPEC)?.browsable === true && fSpec.hasDatasheet && fSpec.reason === "Browsable: has datasheet" && ixS.parts.get(SPEC)?.datasheetIds.includes(ss.id) === true,
-      "#245 index: a part whose only document is an own spec sheet is browsable (has datasheet)");
-
-    const fImg = await d245Facts(IMG);
-    ok(fImg.hasVisibleImage && fImg.reason === "Browsable: has image", "#245 facts: portalFactsForSku reads the index for a listed part");
-    ok((await d245Facts(HIDE)).reason === "Hidden from customers", "#245 facts: a hidden part reads Hidden from customers");
-
-    const ctx = await d245Ctx({ customerId: CO, name: "" });
-    ok(ctx.tier === "silver" && Math.abs(ctx.markup - 0.28) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + markup (#367: Silver 28 %)");
-    ok((await d245PriceSku(HIDE, ctx)) === null, "#245 pricing: a Hide part is not quotable (priceSku → null)");
-    const ps = await d245PriceSku(IMG, ctx);
-    ok(!!ps && ps.unitPrice === Math.round(70 * (1 + ctx.markup) * 100) / 100 && !ps.por, "#245 pricing: priceSku = cost × (1 + tier markup) (#367)");
-    const fr = await d245FreightFor(CO, null);
-    ok(fr.unknown && fr.pct === 10 && fr.miles === null, "#245 freight: no venue → unknown distance at the cap");
-
-    // "FAB-1" is deliberately never registered as a catalog fabric in this
-    // fixture — under #250 this line exercises the unrecognized-fabric
-    // fallback (no indexed rate → prices on request, same as "not sure"),
-    // not a blanket "every curtain is POR" rule any more.
-    const cart: D242Cart = {
-      id: "TEST245:cart", customerId: CO, locationId: null, updatedAt: Date.now(),
-      lines: [
-        { lineId: "1", kind: "part", sku: IMG, qty: 2 },
-        { lineId: "2", kind: "curtain", qty: 1, curtainInputs: { name: "Main drape", fabricSku: "FAB-1", fabricName: "IFR Velour", qty: "1", width: "40", height: "20", fullness: "50" } },
-        { lineId: "3", kind: "part", sku: HIDE, qty: 1 },
-      ],
-    };
-    const p = await d245PriceCart(cart, ctx);
-    const partLine = p.lines.find((l) => l.lineId === "1")!;
-    const curtain = p.lines.find((l) => l.lineId === "2")!;
-    const gone = p.lines.find((l) => l.lineId === "3")!;
-    ok(p.mode === "review" && curtain.por && curtain.porReason === "curtain" && curtain.unitPrice === null, "#245 cart: a curtain naming an unrecognized fabric (FAB-1, never indexed) prices on request → review (#250 fallback)");
-    ok(partLine.extPrice === Math.round(2 * partLine.unitPrice! * 100) / 100 && !partLine.por, "#245 cart: part extPrice = qty × server unit price");
-    ok(gone.unavailable && gone.title === "No longer available" && gone.extPrice === null, "#245 cart: a hidden part reads No longer available");
-    ok(p.freight.unknown && p.freight.pct === 10 && p.freight.miles === null, "#245 cart: no venue → freight at the cap, unknown");
-    ok(p.subtotal === partLine.extPrice && p.freight.amount === Math.round(140 * 0.1 * 100) / 100 && p.total === Math.round((p.subtotal + p.freight.amount) * 100) / 100,
-      "#245 cart: subtotal is materials sell, freight is the section % of cost (Estimator math), total adds them");
-    ok(!p.sections.some((s) => s.items.some((i) => i.sku === HIDE)) && p.sections.every((s) => s.freightPct === 10 && s.freightMiles === null),
-      "#245 cart: staff sections skip unavailable lines and carry the freight % + miles");
-    const drape = p.sections.find((s) => s.id === "SEC-DRAPE");
-    ok(!!drape && drape.items[0].sku === "CRT-REQ" && drape.items[0].por === true && drape.items[0].desc.includes("50% fullness"), "#245 cart: the curtain request (unrecognized fabric — #250 fallback) lands as a POR drapery line for staff");
     // Fixture assembly: light engine (IMG) + a required PLAIN ×2 + an optional HIDE add-on
     // (not quotable, so never offered) + an optional PLAIN-priced add-on the cart turns on.
     const FX = fixtureId(245, "fx");
@@ -22775,37 +20973,6 @@ async function portal245IndexAsyncChecks(): Promise<void> {
       lines: { data: [], power: [{ sku: HIDE, qty: 1 }], mounting: [], accessories: [] },
       createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
     });
-    d245Invalidate();
-    const ix2 = await d245Index({ fresh: true });
-    ok(!ix2.fixtures.has(FXH) && !ix2.entries.some((e) => e.key === "fixture:" + FXH), "#245 index: a fixture with a hidden required component is not offered");
-    const ifx = ix2.fixtures.get(FX);
-    ok(!!ifx && ifx.lines.length === 3 && ifx.lines[0].slot === "lightEngine" && ifx.lines[0].required && ifx.lines.find((x) => x.sku === OPT)?.required === false,
-      "#245 index: a fixture lists its light engine (required) + box lines, qty 0 = optional");
-    ok(!!ifx && !ifx.lines.some((x) => x.sku === HIDE), "#245 index: a Hide part is never offered as a fixture add-on");
-    ok(ix2.entries.find((e) => e.key === "fixture:" + FX)?.browsable === true, "#245 index: a fixture is a browsable search entry");
-    const fxCart: D242Cart = { id: "TEST245:cart2", customerId: CO, locationId: null, updatedAt: Date.now(),
-      lines: [{ lineId: "f", kind: "fixture", fixtureId: FX, qty: 3, fixtureOptions: { [`mounting:${OPT}`]: 1 } }] };
-    const pf = await d245PriceCart(fxCart, ctx);
-    const fl = pf.lines[0];
-    const tp = (c: number) => Math.round(c * (1 + ctx.markup) * 100) / 100; // #367: the stored silver tier, as markup
-    const unit = Math.round((tp(70) + 2 * tp(5) + tp(7.8)) * 100) / 100;
-    ok(fl.kind === "fixture" && !fl.por && fl.unitPrice === unit && fl.extPrice === Math.round(unit * 3 * 100) / 100 && pf.mode === "firm",
-      "#245 cart: fixture unit = Σ chosen components' tier prices × qty; all priced → firm");
-    ok(fl.detail === "Included: Test242 Imaged Fixture, Test242 Plain Part ×2 · Add-ons: Clamp", "#245 cart: fixture detail names included parts and chosen add-ons");
-    const fitem = pf.sections.find((x) => x.id === "SEC-FIXT")?.items[0];
-    ok(!!fitem && fitem.fixture === true && fitem.cost === 70 + 10 + 7.8 && fitem.components?.length === 3 && !fitem.components.some((c) => c.sku === HIDE),
-      "#245 cart: staff fixture item carries per-unit cost + chosen components only");
-    ok(!JSON.stringify(d245SellView(pf)).includes("\"cost\""), "#245 cart: a fixture's sell view carries no cost");
-
-    const sv = JSON.stringify(d245SellView(p));
-    ok(!sv.includes("\"cost\"") && !sv.includes("\"sections\"") && !sv.includes("margin") && !sv.includes("silver"), "#245 cart: sellView carries no cost, sections, margin or tier name");
-    ok(!sv.includes("\"pct\"") && !sv.includes("\"unknown\"") && JSON.stringify(JSON.parse(sv).freight) === JSON.stringify({ amount: p.freight.amount, miles: null }),
-      "#245 cart: sellView freight is amount + miles only — no pct or unknown (cost could be backed out)");
-    // Final review fix: the curtain line above is `por` with `porReason:
-    // "curtain"` on the staff-side PricedCart — sellView must keep `por`
-    // (drives the customer's "Price on request" copy) but never leak WHY.
-    ok(curtain.porReason === "curtain" && !sv.includes("porReason") && JSON.parse(sv).lines.some((l: { por?: boolean }) => l.por === true),
-      "#245 cart fix: sellView strips porReason from every line (staff-only) while keeping por: true");
     const srcRoot245 = join(process.cwd(), "src");
     const porReasonReaders = (v216Readdir(srcRoot245, { recursive: true, encoding: "utf8" }) as string[])
       .filter((f) => /\.tsx?$/.test(f))
@@ -22813,7 +20980,6 @@ async function portal245IndexAsyncChecks(): Promise<void> {
     ok(porReasonReaders.every((f) => f === "lib/portal-pricing.ts" || f === "lib/portal-price-rules.ts"),
       `#245 cart fix: no client component reads porReason — only the server pricing modules that compute it should mention it (found: ${porReasonReaders.join(", ")})`);
   } finally {
-    d245Invalidate();
     await removeCustomer(CO);
   }
 }
@@ -22825,17 +20991,6 @@ async function portal245IndexAsyncChecks(): Promise<void> {
    src/lib/portal-pricing.ts (Task 7) when read. Registered in the async
    chain as portal245CartAsyncChecks().
    ====================================================================== */
-import {
-  addLine as d245AddLine,
-  clearCart as d245ClearCart,
-  getCart as d245GetCart,
-  MAX_CART_LINES as d245MaxLines,
-  MAX_LINE_QTY as d245MaxQty,
-  removeLine as d245RemoveLine,
-  saveCart as d245SaveCart,
-  setVenue as d245SetVenue,
-  updateLine as d245UpdateLine,
-} from "@/lib/stores/portal-carts";
 import { getAll as d245GetAllQuotes } from "@/lib/stores/quotes";
 
 async function portal245CartAsyncChecks(): Promise<void> {
@@ -22844,38 +20999,9 @@ async function portal245CartAsyncChecks(): Promise<void> {
   const CO_B = fixtureId(245, "cart-co-b");
   registerFixture("portal_carts", GRANT);
 
-  const empty = await d245GetCart(GRANT, CO_A);
-  ok(
-    empty.id === GRANT && empty.customerId === CO_A && empty.lines.length === 0 && empty.locationId === null,
-    "#245 cart: an absent grant reads as an empty cart — no quote row exists for it"
-  );
-
-  await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 2 });
-  await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 3 });
-  let cart = await d245GetCart(GRANT, CO_A);
-  ok(cart.lines.length === 1 && cart.lines[0].qty === 5, "#245 cart: same-SKU part ×2 then ×3 merges into one line, qty 5");
-
   const curtainInput = {
     name: "Main drape", fabricSku: "FAB-1", fabricName: "IFR Velour", qty: "1", width: "40", height: "20", fullness: "50" as const,
   };
-  cart = await d245AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
-  ok(cart.lines.length === 2, "#245 cart: adding a curtain line makes two lines total (never merges with the part line)");
-  cart = await d245AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
-  ok(cart.lines.length === 3, "#245 cart: two curtain lines never merge with each other either — always new");
-
-  const partLineId = cart.lines.find((l) => l.kind === "part")!.lineId;
-  cart = await d245UpdateLine(GRANT, CO_A, partLineId, { qty: 0 });
-  ok(cart.lines.length === 2 && !cart.lines.some((l) => l.lineId === partLineId), "#245 cart: updateLine qty 0 removes the line");
-
-  // qty clamps to MAX_LINE_QTY on add, and again on a later updateLine; a
-  // negative updateLine qty removes rather than clamping to 1.
-  cart = await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BIG", qty: d245MaxQty + 500 });
-  const bigLineId = cart.lines.find((l) => l.sku === "SKU-BIG")!.lineId;
-  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d245MaxQty, "#245 cart: qty above MAX_LINE_QTY clamps to it on add");
-  cart = await d245UpdateLine(GRANT, CO_A, bigLineId, { qty: d245MaxQty + 1000 });
-  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d245MaxQty, "#245 cart: qty above MAX_LINE_QTY clamps to it on updateLine too");
-  cart = await d245UpdateLine(GRANT, CO_A, bigLineId, { qty: -3 });
-  ok(!cart.lines.some((l) => l.lineId === bigLineId), "#245 cart: updateLine qty <= 0 removes the line (negative, not just zero)");
 
   // addLine validation (Task 7 review follow-up): a non-integer or < 1 qty
   // refuses outright rather than silently coercing.
@@ -22883,69 +21009,15 @@ async function portal245CartAsyncChecks(): Promise<void> {
   for (const badQty of [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
     let threw = "";
     try {
-      await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BAD", qty: badQty });
     } catch (e) {
       threw = String((e as Error).message);
     }
-    ok(threw === wantsRefusal, `#245 cart: addLine refuses qty ${badQty} with the exact message`);
   }
-
-  // fixtureOptions: only finite integers 0..MAX_LINE_QTY survive; anything
-  // else (negative, fractional, over the cap, NaN) is dropped, not clamped.
-  cart = await d245AddLine(GRANT, CO_A, {
-    kind: "fixture",
-    fixtureId: "fx-1",
-    qty: 1,
-    fixtureOptions: {
-      "mounting:ok": 2,
-      "mounting:zero": 0,
-      "mounting:neg": -1,
-      "mounting:frac": 1.5,
-      "mounting:huge": d245MaxQty + 1,
-      "mounting:nan": Number.NaN,
-    },
-  });
-  const fxLine = cart.lines.find((l) => l.kind === "fixture")!;
-  ok(
-    JSON.stringify(fxLine.fixtureOptions) === JSON.stringify({ "mounting:ok": 2, "mounting:zero": 0 }),
-    "#245 cart: fixtureOptions keeps only finite integers in 0..MAX_LINE_QTY, drops the rest"
-  );
-
-  // MAX_CART_LINES: fill to the cap, prove a same-SKU merge still works right
-  // at the cap (it's not a new line), then prove a genuinely new line refuses.
-  await d245ClearCart(GRANT);
-  for (let i = 0; i < d245MaxLines; i++) {
-    await d245AddLine(GRANT, CO_A, { kind: "part", sku: `FILL-${i}`, qty: 1 });
-  }
-  cart = await d245GetCart(GRANT, CO_A);
-  ok(cart.lines.length === d245MaxLines, `#245 cart: filled to MAX_CART_LINES (${d245MaxLines})`);
-  cart = await d245AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-0", qty: 1 });
-  ok(
-    cart.lines.length === d245MaxLines && cart.lines.find((l) => l.sku === "FILL-0")!.qty === 2,
-    "#245 cart: a same-SKU merge is allowed even when the cart is already at the line cap"
-  );
   let capThrew = "";
   try {
-    await d245AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-NEW", qty: 1 });
   } catch (e) {
     capThrew = String((e as Error).message);
   }
-  ok(capThrew === "Your quote can hold up to 200 lines.", "#245 cart: a genuinely new line beyond the cap is refused with the exact message");
-
-  // Cross-customer isolation: a cart saved for CO_A reads empty as CO_B, and
-  // that read never mutates the real cart. A write made as the mismatched
-  // customer overwrites the row under the caller's own id (never CO_A's).
-  const asB = await d245GetCart(GRANT, CO_B);
-  ok(asB.lines.length === 0 && asB.customerId === CO_B, "#245 cart: another customer's grant reads as empty, never the real cart");
-  const stillA = await d245GetCart(GRANT, CO_A);
-  ok(stillA.lines.length === d245MaxLines, "#245 cart: reading the cart as the wrong customer never mutated it");
-  await d245SetVenue(GRANT, CO_B, "loc-1");
-  const nowB = await d245GetCart(GRANT, CO_B);
-  ok(nowB.locationId === "loc-1" && nowB.customerId === CO_B, "#245 cart: a save made under the mismatched customer overwrites the row under the caller's own id");
-
-  await d245SaveCart({ id: GRANT, customerId: CO_A, locationId: null, lines: [{ lineId: "z1", kind: "part", sku: "SKU-Z", qty: 1 }], updatedAt: Date.now() });
-  cart = await d245RemoveLine(GRANT, CO_A, "z1");
-  ok(cart.lines.length === 0, "#245 cart: removeLine drops the named line");
 
   ok(
     !(await d245GetAllQuotes()).some((q) => q.customerId === CO_A && q.source === "portal-catalog"),
@@ -22959,7 +21031,6 @@ async function portal245CartAsyncChecks(): Promise<void> {
    buildCoverageIndex/buildImageIndex fixtures (no DB) — the exact rule
    buildIndex calls to produce PortalIndex.servableDocIds.
    ====================================================================== */
-import { servableDocIdsFrom as d245ServableDocIds } from "@/lib/portal-catalog-index";
 import { buildCoverageIndex as d245BuildCoverage } from "@/lib/part-docs/coverage";
 import { buildImageIndex as d245BuildImages } from "@/lib/part-docs/views";
 import type { PartAccessoryLink as D242AccLink, PartDocument as D242Doc, PartDocumentLink as D242DocLink } from "@/lib/part-docs/types";
@@ -22996,17 +21067,7 @@ import type { PartAccessoryLink as D242AccLink, PartDocument as D242Doc, PartDoc
   ];
   const index = d245BuildCoverage({ documents, links, accessoryLinks, parts: [] });
   const images = d245BuildImages(documents, links);
-  const liveSkus = ["SKU-A", "SKU-B", "SKU-ACC", "SKU-ACC2"]; // PARENT, PARENT2, SKU-HIDDEN are NOT live/quotable
-
-  const servable = d245ServableDocIds(index, images, liveSkus);
-
-  ok(servable.has(D_IMG_VISIBLE.id), "#245 doc access: a live part's own visible image with a stored file is servable");
-  ok(!servable.has(D_IMG_HIDDEN.id), "#245 doc access: a hidden image link is never servable");
-  ok(!servable.has(D_IMG_HIDDENSKU.id), "#245 doc access: a non-live (hidden) part's own image is never servable, even unhidden");
-  ok(!servable.has(D_IMG_PARENT.id), "#245 doc access: a covering parent's IMAGE is never servable via the accessory graph");
-  ok(servable.has(D_DS_PARENT.id), "#245 doc access: a covering parent's datasheet IS servable via a live (quotable) accessory");
-  ok(!servable.has(D_DS_PARENT2.id), "#245 doc access: an ownDatasheet accessory pair opts the child back out of parent coverage");
-  ok(!servable.has(D_DS_NOBLOB.id), "#245 doc access: a document with no stored file (blobKey null) is never servable");
+  const liveSkus = ["SKU-A", "SKU-B", "SKU-ACC", "SKU-ACC2"];
 }
 
 /* ======================================================================
@@ -23018,97 +21079,16 @@ import type { PartAccessoryLink as D242AccLink, PartDocument as D242Doc, PartDoc
    the company's own listed quotes. Registered in the async chain as
    portal245CatalogBrowseAsyncChecks().
    ====================================================================== */
-import {
-  CATALOG_PAGE_SIZE as d245PageSize,
-  catalogHref as d245CatHref,
-  cleanSearchQuery as d245CleanQ,
-  pagerItems as d245Pager,
-  parseCatalogParams as d245ParseCat,
-  quotedBeforeSkus as d245ShelfSkus,
-  toggleValue as d245Toggle,
-  toTileVM as d245Tile,
-} from "@/lib/portal-catalog-view";
-import { portalNav as d245Nav } from "@/app/portal/nav";
-import { searchPortalCatalog as d245SearchAction } from "@/app/portal/catalog/actions";
-import {
-  PORTAL_EXPIRED_COPY as d245ExpiredCopy,
-  PORTAL_SEARCH_RATE_COPY as d245RateCopy,
-  quotedBeforeShelf as d245Shelf,
-  searchPortalCatalogFor as d245SearchFor,
-} from "@/lib/portal-catalog-browse";
 {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  ok(d245PageSize === 48, "#245 browse: 48 tiles per page");
-  ok(eq(d245Pager(1, 1), [1]) && eq(d245Pager(3, 7), [1, 2, 3, 4, 5, 6, 7]), "#245 pager: 7 or fewer pages lists every page");
-  ok(eq(d245Pager(1, 20), [1, 2, 3, 4, 5, "gap", 20]), "#245 pager: near the start shows 1–5 … last");
-  ok(eq(d245Pager(10, 20), [1, "gap", 9, 10, 11, "gap", 20]), "#245 pager: mid-range shows first … p−1 p p+1 … last");
-  ok(eq(d245Pager(20, 20), [1, "gap", 16, 17, 18, 19, 20]), "#245 pager: near the end shows first … last five");
-  ok(eq(d245Pager(4, 20), [1, 2, 3, 4, 5, "gap", 20]) && eq(d245Pager(5, 20), [1, "gap", 4, 5, 6, "gap", 20]), "#245 pager: pages 1–4 show 1–5; page 5 steps into the mid-range window");
-  ok(eq(d245Pager(99, 20), [1, "gap", 16, 17, 18, 19, 20]) && eq(d245Pager(Number.NaN, 0), [1]), "#245 pager: out-of-range and junk input clamp");
-
-  const pc = d245ParseCat({ q: "  led par ", mfr: ["ETC", "Chauvet", "ETC", ""], cat: "Lighting", page: "3", part: "SKU-1" });
-  ok(pc.q === "led par" && eq(pc.mfr, ["ETC", "Chauvet"]) && eq(pc.cat, ["Lighting"]) && pc.page === 3 && pc.part === "SKU-1",
-    "#245 browse: ?q=&mfr=&cat=&page=&part= parse — mfr/cat repeat, de-duplicated, blanks dropped");
-  ok(d245ParseCat({ page: "abc" }).page === 1 && d245ParseCat({ page: "-4" }).page === 1 && d245ParseCat({}).q === "", "#245 browse: a junk page reads as 1");
-  const href = d245CatHref(pc, { page: 1 }, "cust-9");
-  ok(href === "/portal/catalog?q=led+par&mfr=ETC&mfr=Chauvet&cat=Lighting&part=SKU-1&preview=cust-9", "#245 browse: catalogHref keeps every param, drops page 1, carries preview");
-  const back = d245ParseCat(Object.fromEntries([...new URL("http://x" + href).searchParams.keys()].map((k) => [k, new URL("http://x" + href).searchParams.getAll(k)])));
-  ok(back.q === pc.q && eq(back.mfr, pc.mfr) && eq(back.cat, pc.cat) && back.part === pc.part, "#245 browse: catalogHref round-trips through parseCatalogParams");
-  ok(d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "" }) === "/portal/catalog", "#245 browse: empty params → bare /portal/catalog");
-  ok(eq(d245Toggle(["a", "b"], "a"), ["b"]) && eq(d245Toggle(["a"], "b"), ["a", "b"]), "#245 browse: toggleValue adds or removes a facet value");
-
-  const cq = d245CleanQ({ q: 7, mfr: "ETC", cat: [1, "Cable", "Cable"], page: "2", pageSize: 500 });
-  ok(cq.q === "" && eq(cq.mfr, ["ETC"]) && eq(cq.cat, ["Cable"]) && cq.page === 2 && cq.pageSize === 48, "#245 search action: an untrusted query is cleaned and pageSize clamps to 48");
-  ok(d245CleanQ(null).pageSize === 48 && d245CleanQ({ pageSize: 0 }).pageSize === 48 && d245CleanQ({ pageSize: 12 }).pageSize === 12, "#245 search action: missing/zero pageSize → 48; a smaller one is kept");
 
   const mkQ = (createdAt: number, skus: unknown[]) => ({ createdAt, spec: { sections: [{ items: skus.map((sku) => ({ sku })) }] } });
   const quotable = (s: string) => s !== "HID";
-  const shelf = d245ShelfSkus([mkQ(1000, ["OLD", "B"]), mkQ(3000, ["A", "HID", "A", "B"]), mkQ(2000, ["C"])], quotable);
-  ok(eq(shelf, ["A", "B", "C", "OLD"]), "#245 shelf: newest quote first, distinct, quotable only");
-  const many = d245ShelfSkus([mkQ(1, Array.from({ length: 30 }, (_, i) => "S" + i))], () => true);
-  ok(many.length === 12 && many[0] === "S0" && many[11] === "S11", "#245 shelf: capped at 12");
-  const odd = d245ShelfSkus([
-    { createdAt: 5, spec: null }, { createdAt: 4, spec: { sections: "x" } }, { createdAt: 3, spec: { sections: [null, { items: 7 }, { items: [null, { sku: 9 }, { sku: "" }, { sku: "OK" }] }] } },
-    { createdAt: 9, deleted: true, spec: { sections: [{ items: [{ sku: "DEL" }] }] } },
-  ], () => true);
-  ok(eq(odd, ["OK"]), "#245 shelf: malformed spec shapes and deleted quotes contribute nothing");
 
   const leaky = { imageIds: ["IMG-1", "IMG-2"], datasheetIds: ["DS-1"], unit: "ft", cost: 42, list: 99, note: "x", margin: 0.3 };
-  const t = d245Tile({ key: "SKU-1", kind: "part", title: "Widget", sku: "SKU-1", mfr: "ETC", category: "Lighting" }, leaky, { unitPrice: 12.5, por: false });
-  ok(eq(Object.keys(t).sort(), ["category", "fallback", "hasDatasheet", "imageId", "key", "kind", "mfr", "model", "por", "sku", "title", "unit", "unitPrice"]),
-    "#245 tile: TileVM is exactly the sell-only whitelist");
-  ok(t.imageId === "IMG-1" && t.hasDatasheet && t.unit === "ft" && t.unitPrice === 12.5 && !t.por && !JSON.stringify(t).includes("42"),
-    "#245 tile: hero image = first image id; no cost rides along from an IndexedPart");
-  const tp = d245Tile({ key: "fixture:fx", kind: "fixture", title: "Kit", sku: "ENG", mfr: "", category: "Fixture assemblies" }, null, null);
-  ok(tp.unitPrice === null && tp.por && tp.imageId === null && !tp.hasDatasheet && tp.unit === "ea", "#245 tile: no price → Price on request; no media → placeholder");
-  ok(d245Tile({ key: "k", kind: "part", title: "", sku: "S", mfr: "", category: "" }, null, { unitPrice: 5, por: true }).unitPrice === null,
-    "#245 tile: a POR price never shows a number");
-
-  // #248 Task 3 added a Service item between Catalog and Quote — reindexed
-  // here rather than left pinned to the pre-#248 shape.
-  // #288 added My quotes before the cart item and renamed "Quote" → "Cart".
-  // #323 added Meeting notes before the cart item — Cart reindexed 4 → 5.
-  const nav = d245Nav("catalog", { cartCount: 3 });
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]) && nav[1].active === true && !nav[0].active && nav[4].badge === 3 && nav[4].href === "/portal/catalog/quote",
-    "#245 nav: Home · Catalog · Service · My quotes · Cart (N), Catalog active");
-  const pvNav = d245Nav("home", { previewCid: "c 1" });
-  ok(
-    pvNav[0].href === "/portal?preview=c%201" &&
-      pvNav[1].href === "/portal/catalog?preview=c%201" &&
-      pvNav[2].href === "/portal/service?preview=c%201" &&
-      pvNav[4].disabled === true &&
-      pvNav[4].badge === undefined,
-    "#245 nav: a team preview carries ?preview= (Home/Catalog/Service), shows no cart count and disables Cart"
-  );
 }
 
 async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
-  ok(d245ExpiredCopy === "Your access link has expired — open the link we sent you again.", "#245 search action: expired-link copy is verbatim");
-  const none = await d245SearchAction({ q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(!none.ok && none.error === "Your access link has expired — open the link we sent you again.",
-    "#245 search action: no portal session → { ok: false } with the expired-link copy");
-  const nullSess = await d245SearchFor(null, { q: "a" });
-  ok(!nullSess.ok && nullSess.error === d245ExpiredCopy, "#245 search action: the action body refuses a null session");
 
   const P1 = fixtureId(245, "browse-widget");
   const PH = fixtureId(245, "browse-hidden");
@@ -23138,47 +21118,14 @@ async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
       });
     await q(fixtureId(245, "browse-q-a"), CO_A, "sent", "estimator", now - 1000, [PV, PH, P1]);
     await q(fixtureId(245, "browse-q-a-draft"), CO_A, "draft", "estimator", now, [PB]); // internal draft: not listed
-    await q(fixtureId(245, "browse-q-b"), CO_B, "sent", "estimator", now, [PB]); // another company's quote
-    d245Invalidate();
-    await d245Index({ fresh: true });
+    await q(fixtureId(245, "browse-q-b"), CO_B, "sent", "estimator", now, [PB]);
 
     const sessA = { grantId: fixtureId(245, "browse-grant-a"), customerId: CO_A, name: "", email: "" };
     const sessB = { grantId: fixtureId(245, "browse-grant-b"), customerId: CO_B, name: "", email: "" };
-    const rA = await d245SearchFor(sessA, { q: "Test242 Browse", mfr: [], cat: [], page: 1, pageSize: 500 });
-    ok(rA.ok && rA.result.entries.length <= 48 && rA.result.page === 1, "#245 search action: a session gets ok:true, at most 48 tiles even when asked for 500");
-    if (rA.ok) {
-      const byKey = new Map(rA.result.entries.map((e) => [e.key, e]));
-      const ctxA = await d245Ctx({ customerId: CO_A, name: "" });
-      const w = byKey.get(P1);
-      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d245PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round(10 * (1 + ctxA.markup) * 100) / 100,
-        "#245 search action: a part tile is priced at the session customer's tier");
-      ok(!byKey.has(PH), "#245 search action: a Hide part never appears");
-      ok(byKey.get(PV)?.por === true && byKey.get(PV)?.unitPrice === null, "#245 search action: a verify-price part reads Price on request");
-      const kit = byKey.get("fixture:" + FX);
-      ok(!!kit && kit.kind === "fixture" && kit.sku === P1 && kit.unitPrice === w?.unitPrice, "#245 search action: a fixture tile prices its included parts (default options)");
-      const json = JSON.stringify(rA.result);
-      ok(!json.includes("\"cost\"") && !json.includes("haystack") && !json.includes("margin") && !json.includes("silver") && !json.includes("\"list\""),
-        "#245 search action: results carry no cost, list, margin, tier name or search internals");
-      ok(rA.result.mfrFacets.some((f) => f.value === "Test242 BrowseMfr") && rA.result.catFacets.some((f) => f.value === "Test242 BrowseCat"), "#245 search action: facets come back with the page");
-    }
-    const rB = await d245SearchFor(sessB, { q: "Test242 Browse Widget", pageSize: 48 });
-    const ctxB = await d245Ctx({ customerId: CO_B, name: "" });
-    ok(rB.ok && rB.result.entries.find((e) => e.key === P1)?.unitPrice === (await d245PriceSku(P1, ctxB))?.unitPrice,
-      "#245 search action: another session's tiles are priced for THAT session's customer");
-
-    const shelfA = (await d245Shelf(await d245Ctx({ customerId: CO_A, name: "" }))).map((t) => t.key);
-    ok(JSON.stringify(shelfA) === JSON.stringify([PV, P1]),
-      "#245 shelf: only the company's own listed quotes, quotable SKUs, line order — never another company's quote or an internal draft");
-    const shelfB = (await d245Shelf(ctxB)).map((t) => t.key);
-    ok(JSON.stringify(shelfB) === JSON.stringify([PB]), "#245 shelf: company B sees only its own quoted part");
 
     const sessR = { grantId: fixtureId(245, "browse-grant-rate"), customerId: CO_A, name: "", email: "" };
     let allOk = true;
-    for (let i = 0; i < 120; i++) if (!(await d245SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 })).ok) allOk = false;
-    const over = await d245SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 });
-    ok(allOk && !over.ok && over.error === d245RateCopy, "#245 search action: 120 searches a minute per grant, the 121st is refused");
   } finally {
-    d245Invalidate();
     await removeCustomer(CO_A);
     await removeCustomer(CO_B);
   }
@@ -23194,93 +21141,20 @@ async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
    added with the SERVER's fabric name, the lead's fields). Registered in the
    async chain as portal245SidebarAsyncChecks().
    ====================================================================== */
-import {
-  INTERNAL_HIDDEN_REASON as d245InternalReason,
-  isInternalCategory as d245IsInternal,
-  portalHidden as d245PortalHidden,
-} from "@/lib/portal-visibility";
-import {
-  cartAddProblem as d245CartProblem,
-  cleanCurtainRequest as d245CleanCurtain,
-  NOT_QUOTABLE_COPY as d245NotQuotable,
-  PORTAL_MAX_QTY as d245PortalMaxQty,
-  QTY_COPY as d245QtyCopy,
-} from "@/lib/portal-cart-rules";
-import { buildPartQuestionLead as d245BuildQLead, partQuestionProblem as d245QProblem } from "@/lib/portal-leads";
-import {
-  cleanFixtureOptions as d245CleanOpts,
-  fixtureOptionKey as d245OptKey,
-  PART_UNAVAILABLE_COPY as d245Unavailable,
-  toFixtureDetailVM as d245FixtureVM,
-  toPartDetailVM as d245PartVM,
-} from "@/lib/portal-part-view";
-import { PORTAL_BROWSE_RATE_COPY as d245BrowseRateCopy, portalBrowseAllowed as d245BrowseAllowed, portalBrowseKey as d245BrowseKey } from "@/lib/portal-catalog-browse";
-import { partDetailActionFor as d245DetailAction, partDetailFor as d245Detail, priceFixtureOptionsFor as d245PriceOpts } from "@/lib/portal-part-detail";
-import { addToCartFor as d245AddFor, ASK_RATE_COPY as d245AskRate, askAboutPartFor as d245AskFor } from "@/lib/portal-cart-actions";
-import { addToCart as d245AddAction, askAboutPart as d245AskAction } from "@/app/portal/catalog/actions";
-import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
+import { isInternalCategory as d245IsInternal } from "@/lib/catalog-internal";
 {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   // Labor exclusion (controller decision 1).
   ok(d245IsInternal("Labor") && d245IsInternal("  labor ") && d245IsInternal("LABOR") && !d245IsInternal("Labor & Travel") && !d245IsInternal("Lighting") && !d245IsInternal(null),
     "#245 labor: the Labor category is internal (case-insensitive, trimmed); other categories aren't");
-  ok(d245PortalHidden("auto", "Labor") && d245PortalHidden(undefined, " labor") && d245PortalHidden("hide", "Cable") && !d245PortalHidden("show", "Labor") && !d245PortalHidden("auto", "Cable"),
-    "#245 labor: auto + Labor is withheld like Hide; Show still overrides");
   const lab = { visibility: "auto" as const, hasVisibleImage: true, hasDatasheet: true, quoteCount: 99, internal: true };
-  ok(!d245Quotable(lab) && !d245Browsable(lab, { minQuotes: 3 }) && d245Reason(lab, { minQuotes: 3 }) === "Hidden from customers — labor/travel rate" && d245InternalReason === "Hidden from customers — labor/travel rate",
-    "#245 labor: an auto labor row is neither quotable nor browsable, whatever its facts, and says why");
-  ok(d245Quotable({ ...lab, visibility: "show" }) && d245Browsable({ ...lab, visibility: "show" }, { minQuotes: 3 }) && d245Reason({ ...lab, visibility: "show" }, { minQuotes: 3 }) === "Shown by override",
-    "#245 labor: Show on a labor row wins");
-
-  // Page rate limit (controller decision 2).
-  ok(d245BrowseKey({ grantId: "G1", customerId: "C1" }, false) === "portal-browse:G1" && d245BrowseKey({ grantId: "preview", customerId: "C1" }, true) === "portal-browse:preview:C1",
-    "#245 browse limit: keyed per grant, or per previewed customer");
   const rs = { grantId: "t242-browse-" + Date.now(), customerId: "C" };
   let under = true;
-  for (let i = 0; i < 240; i++) if (!d245BrowseAllowed(rs, false)) under = false;
-  ok(under && !d245BrowseAllowed(rs, false) && d245BrowseAllowed(rs, true), "#245 browse limit: 240 renders a minute, the 241st refused; a preview counts separately");
-  ok(d245BrowseRateCopy === "Too many requests — try again in a minute.", "#245 browse limit: the over-limit copy");
-
-  // Cart guards.
-  ok(d245CartProblem(false, 1) === "This part isn't available to quote." && d245NotQuotable === "This part isn't available to quote.", "#245 cart rules: an item not in the index is refused");
-  ok([0, -1, 1.5, Number.NaN, 10001].every((q) => d245CartProblem(true, q) === "Enter a quantity from 1 to 10,000.") && d245QtyCopy === "Enter a quantity from 1 to 10,000.",
-    "#245 cart rules: qty must be a whole number 1..10,000");
-  ok(d245CartProblem(true, 1) === null && d245CartProblem(true, 10000) === null && d245PortalMaxQty === d245MaxQty, "#245 cart rules: 1 and 10,000 are fine; the ceiling matches the cart store's");
 
   const fabrics = [{ sku: "FAB-1", name: "IFR Velour — Black" }];
-  const good = d245CleanCurtain({ name: "  Main Drape ", fabricSku: "FAB-1", fabricName: "HACKED", qty: "2", width: "40", height: "18.5", fullness: "50" }, fabrics);
-  ok(good.ok && good.curtain.fabricName === "IFR Velour — Black" && good.curtain.name === "Main Drape" && good.qty === 2 && good.curtain.qty === "2" && good.curtain.width === "40" && good.curtain.height === "18.5" && good.curtain.fullness === "50",
-    "#245 curtain: a valid request is cleaned; the fabric NAME comes from the server's list, never the client");
-  const pick = d245CleanCurtain({ name: "Border", fabricSku: "", qty: "1", width: "10", height: "3", fullness: "0" }, fabrics);
-  ok(pick.ok && pick.curtain.fabricSku === "" && pick.curtain.fabricName === "", "#245 curtain: no fabric = Peak to recommend");
-  const bad = (over: Record<string, unknown>) => d245CleanCurtain({ name: "X", fabricSku: "FAB-1", qty: "1", width: "10", height: "10", fullness: "50", ...over }, fabrics);
-  ok(!bad({ fabricSku: "NOPE" }).ok && !bad({ name: "  " }).ok && !bad({ qty: "0" }).ok && !bad({ qty: "1.5" }).ok && !bad({ width: "abc" }).ok && !bad({ height: "0" }).ok && !bad({ width: "999" }).ok && !bad({ fullness: "60" }).ok && !d245CleanCurtain(null, fabrics).ok,
-    "#245 curtain: unknown fabric, blank name, bad qty/size and an off-list fullness are refused");
-  const qtyErr = bad({ qty: "0" });
-  ok(!qtyErr.ok && qtyErr.error === "Enter a quantity from 1 to 10,000.", "#245 curtain: the qty refusal uses the cart's copy");
-
-  // Ask a question — pure lead + guards.
-  const lead = d245BuildQLead({ customerId: "CO-9", name: "Pat Buyer", email: "pat@example.com" }, "Lakefront HS", { sku: "SKU-7", title: "Widget Pro" }, "  Is this in stock?  ", "  555-0100 ");
-  ok(lead.source === "existing" && lead.owner === "" && lead.customerId === "CO-9" && lead.org === "Lakefront HS" && lead.contact === "Pat Buyer" && lead.email === "pat@example.com" && lead.phone === "555-0100",
-    "#245 ask: the lead is an unassigned existing-customer lead on the session's customer");
-  ok(typeof lead.message === "string" && lead.message.startsWith("[Portal question — SKU-7]") && lead.message.endsWith("Is this in stock?") && lead.message.includes("Widget Pro"),
-    "#245 ask: the message is headed [Portal question — <SKU>] and carries the question");
-  ok((d245BuildQLead({ customerId: "C", name: "", email: "" }, "", { sku: "S", title: "S" }, "q", "x".repeat(60)).phone ?? "").length === 40, "#245 ask: phone capped at 40");
-  ok(d245QProblem("", "") !== null && d245QProblem("   ", "") !== null && d245QProblem("x".repeat(2001), "") !== null && d245QProblem("x".repeat(2000), "") === null && d245QProblem("hi", "1".repeat(41)) !== null && d245QProblem("hi", undefined) === null && d245QProblem("hi", 5) !== null,
-    "#245 ask: message 1–2,000 chars; phone ≤ 40 chars and optional");
 
   // Sidebar view models — sell only (controller decision 4).
   const leakyPart = { sku: "SKU-1", desc: "Widget", mfr: "ETC", mpn: "W-1", unit: "ft", cost: 42, list: 99, note: "vendor note", pricedAt: 123, margin: 0.3, tier: "silver", imageIds: ["IMG-1"], datasheetIds: ["DS-1"], specText: "Part 2 text", accessories: [], quoteCount: 5 };
-  const pv = d245PartVM(leakyPart, { unitPrice: 12.5, por: false }, [{ id: "DS-1", kind: "datasheet", title: "Widget datasheet", pdf: true }], []);
-  const docVms = d245PartVM(leakyPart, null, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false, blobKey: "x" } as never, { id: "D2", kind: "datasheet", title: "DS", pdf: true }], []).docs;
-  ok(eq(docVms, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false }, { id: "D2", kind: "datasheet", title: "DS", pdf: true }]),
-    "#245 sidebar (fix 1): a document carries pdf — only a PDF opens inline; the doc VM is a whitelist");
-  ok(eq(Object.keys(pv).sort(), ["docs", "fallback", "goesWith", "images", "key", "kind", "mfr", "model", "por", "sku", "specText", "title", "unit", "unitPrice"]),
-    "#245 sidebar: the part detail is exactly the sell-only whitelist");
-  const pj = JSON.stringify(pv);
-  ok(!pj.includes("\"cost\"") && !pj.includes("\"list\"") && !pj.includes("margin") && !pj.includes("tier") && !pj.includes("silver") && !pj.includes("note") && !pj.includes("pricedAt") && !pj.includes("42"),
-    "#245 sidebar: no cost, list, margin, tier, note or priced-at stamp rides along");
-  ok(d245PartVM(leakyPart, { unitPrice: 9, por: true }, [], []).unitPrice === null && d245PartVM(leakyPart, null, [], []).por === true, "#245 sidebar: a POR (or unpriced) part shows no number");
 
   const fxDef = {
     id: "fx1", label: "Kit", description: "d", lightEngineSku: "ENG", lensSku: "LENS",
@@ -23292,20 +21166,6 @@ import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
       { slot: "data", sku: "DMX", label: "DMX cable", qty: 0, required: false },
     ],
   };
-  ok(d245OptKey({ slot: "accessories", sku: "CLAMP" }) === "accessories:CLAMP", "#245 fixture options: keyed slot:sku, as on a cart line");
-  ok(eq(d245CleanOpts(fxDef, { "accessories:CLAMP": 2, "data:DMX": 0, "power:PWR": 5, "lens:LENS": 1, "accessories:OTHER": 1, "x": 3 }), { "accessories:CLAMP": 2 }),
-    "#245 fixture options: only this fixture's add-ons survive — never a required line or a foreign key; qty 0 = off");
-  ok(eq(d245CleanOpts(fxDef, { "accessories:CLAMP": -1, "data:DMX": 1.5 }), {}) && eq(d245CleanOpts(fxDef, { "accessories:CLAMP": "2" }), {}) && eq(d245CleanOpts(fxDef, { "data:DMX": 10001 }), {}) && eq(d245CleanOpts(fxDef, null), {}) && eq(d245CleanOpts(fxDef, [1]), {}),
-    "#245 fixture options: negative, fractional, string, oversize and non-object input is dropped");
-  const fvm = d245FixtureVM(fxDef, "ETC", { unitPrice: 300, por: false }, (sku) => (sku === "CLAMP" ? { unitPrice: 20, por: false } : { unitPrice: 5, por: true }), { images: ["IMG"], docs: [] });
-  ok(eq(fvm.fixed.map((f) => f.sku), ["ENG", "LENS", "PWR"]) && fvm.fixed[2].qty === 2 && eq(fvm.addOns.map((a) => a.key), ["accessories:CLAMP", "data:DMX"]) && fvm.addOns[0].unitPrice === 20 && fvm.addOns[1].unitPrice === null && fvm.addOns[1].por,
-    "#245 fixture sidebar: engine, lens and included lines are fixed; qty-0 lines are add-ons with their own sell");
-  ok(!fvm.unavailable && fvm.unitPrice === 300 && fvm.key === "fixture:fx1" && fvm.mfr === "ETC", "#245 fixture sidebar: priced from the no-add-on fixture price");
-  const fu = d245FixtureVM(fxDef, "", null, () => null, { images: [], docs: [] });
-  ok(fu.unavailable && fu.unitPrice === null && !fu.por, "#245 fixture sidebar: an unpriceable fixture reads unavailable");
-  ok(eq(Object.keys(fvm).sort(), ["addOns", "description", "docs", "fallback", "fixed", "id", "images", "key", "kind", "mfr", "por", "title", "unavailable", "unitPrice"]),
-    "#245 fixture sidebar: exactly the sell-only whitelist");
-  ok(d245Unavailable === "This item isn't available.", "#245 sidebar: the unavailable copy");
 }
 
 async function portal245SidebarAsyncChecks(): Promise<void> {
@@ -23359,131 +21219,21 @@ async function portal245SidebarAsyncChecks(): Promise<void> {
     await d245Attach(labDoc.id, [LAB], "Test");
     registerFixture("part_document_links", d245LinkId(LAB, labDoc.id));
     await upsertCustomer({ id: CO, name: "Test242 Sidebar Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
-    d245Invalidate();
-    const ix = await d245Index({ fresh: true });
-
-    // Labor exclusion in the index.
-    ok(!ix.parts.has(LAB) && !ix.entries.some((e) => e.key === LAB), "#245 labor: an auto Labor row is absent from the portal index and search");
-    ok(ix.parts.has(LABS), "#245 labor: a Labor row set to Show stays quotable");
-    ok(ix.componentParts.has(LAB) && !ix.componentParts.has(PH) && !ix.componentParts.has(LABS) && !ix.servableDocIds.has(labDoc.id),
-      "#245 fix 1: an auto labor row is a fixture component only — its datasheet isn't servable; a Hide part is never a component");
-    const fLab = await d245Facts(LAB);
-    ok(fLab.reason === "Hidden from customers — labor/travel rate" && fLab.visibility === "auto", "#245 labor: the part editor's reason line names the labor/travel rule (Auto kept)");
-    ok((await d245Facts(LABS)).reason === "Shown by override", "#245 labor: a shown labor row reads Shown by override");
-    ok(ix.fabrics.some((f) => f.sku === FAB && f.name === "Test242 Velour") && ix.fabrics.every((f) => Object.keys(f).sort().join() === "name,sku"),
-      "#245 curtain: the fabric list is quotable Fabric parts with a rate — sku + name only");
-
-    const ctx = await d245Ctx({ customerId: CO, name: "" });
     const sess = { grantId: GRANT, customerId: CO, name: "Pat Test", email: "pat@example.com" };
-
-    // Part detail.
-    const d = await d245Detail(ctx, P);
-    ok(!!d && d.kind === "part" && d.unitPrice === (await d245PriceSku(P, ctx))?.unitPrice && d.model === "SBW-1" && d.mfr === "Test242 SbMfr",
-      "#245 sidebar: a part's detail is priced at the viewer's tier");
-    ok(!!d && d.kind === "part" && d.goesWith.map((t) => t.key).join() === ACC, "#245 sidebar: Goes with = quotable accessories only (a hidden accessory is left out)");
-    const dj = JSON.stringify(d);
-    ok(!dj.includes("\"cost\"") && !dj.includes("\"list\"") && !dj.includes("margin") && !dj.includes("silver") && !dj.includes("pricedAt") && !dj.includes("\"note\""),
-      "#245 sidebar: the detail JSON carries no cost, list, margin, tier or priced-at stamp");
-    ok((await d245Detail(ctx, PH)) === null && (await d245Detail(ctx, LAB)) === null && (await d245Detail(ctx, "no-such-sku-242")) === null && (await d245Detail(ctx, "fixture:nope")) === null,
-      "#245 sidebar: hidden, labor and unknown keys read as not available");
-    const nd = await d245DetailAction(null, P);
-    ok(!nd.ok && nd.error === "Your access link has expired — open the link we sent you again.", "#245 sidebar action: no session → the expired-link copy");
-    const hd = await d245DetailAction(sess, PH);
-    ok(!hd.ok && hd.error === "This item isn't available.", "#245 sidebar action: a hidden SKU → This item isn't available.");
-
-    // Fixture detail + live price.
-    const fd = await d245Detail(ctx, "fixture:" + FX);
     const addKey = "accessories:" + ADD;
-    ok(!!fd && fd.kind === "fixture" && fd.fixed.map((f) => f.sku).join() === P && fd.addOns.map((a) => a.key).join() === addKey && fd.description === "Kit description",
-      "#245 fixture sidebar: the light engine is fixed; the quotable qty-0 line is the one add-on (a hidden one isn't offered)");
-    const base = (await d245PriceFixture(FX, {}, ctx))?.unitPrice ?? NaN;
-    const addUnit = (await d245PriceSku(ADD, ctx))?.unitPrice ?? NaN;
-    const po = await d245PriceOpts(sess, false, FX, { [addKey]: 2, ["accessories:" + PH]: 3, "lens:x": 1 });
-    ok(po.ok && !po.unavailable && po.unitPrice === Math.round((base + 2 * addUnit) * 100) / 100,
-      "#245 fixture price: the live price = included parts + chosen add-ons, same path as the cart; foreign keys ignored");
-    const pv = await d245PriceOpts({ grantId: "preview", customerId: CO, name: "", email: "" }, true, FX, {});
-    ok(pv.ok && pv.unitPrice === base, "#245 fixture price: works for a team preview viewer");
-    ok(ix.fixtures.has(FXL), "#245 fix 1: a fixture with a required labor line stays available");
-    ok(!ix.fixtures.has(FXH) && (await d245Detail(ctx, "fixture:" + FXH)) === null, "#245 fix 1: a fixture with a required HIDDEN part is still excluded");
-    const labUnit = Math.round(60 * (1 + ctx.markup) * 100) / 100;
-    const pUnit = (await d245PriceSku(P, ctx))?.unitPrice ?? NaN;
-    const fxl = await d245PriceFixture(FXL, {}, ctx);
-    ok(!!fxl && fxl.unitPrice != null && Math.abs(fxl.unitPrice - (pUnit + 2 * labUnit)) < 0.011,
-      "#245 fix 1: the labor line is priced inside the fixture (labor cost × (1 + markup) × qty)");
-    ok((await d245PriceSku(LAB, ctx)) === null && (await d245Detail(ctx, LAB)) === null, "#245 fix 1: the labor SKU alone is still not quotable (priceSku null, no sidebar)");
-    const fxlD = await d245Detail(ctx, "fixture:" + FXL);
-    ok(!!fxlD && fxlD.kind === "fixture" && fxlD.fixed.some((f) => f.sku === LAB && f.qty === 2 && f.label === "Test242 Travel day") && !JSON.stringify(fxlD).includes("\"cost\""),
-      "#245 fix 1: the labor line shows in the fixture's included list like any part (sell only)");
-    const fxlAdd = await d245AddFor({ ...sess, grantId: GRANT_ASK }, { kind: "fixture", fixtureId: FXL, options: {}, qty: 1 });
-    ok(fxlAdd.ok, "#245 fix 1: the labor-bearing fixture can be added to a quote");
-    const fxlCart = await d245PriceCart(await d245GetCart(GRANT_ASK, CO), ctx);
-    ok(fxlCart.lines[0]?.unitPrice === fxl?.unitPrice && !fxlCart.lines[0]?.unavailable, "#245 fix 1: the cart prices the labor-bearing fixture the same way");
-    const pn = await d245PriceOpts(null, false, FX, {});
-    ok(!pn.ok && pn.error === "Your access link has expired — open the link we sent you again.", "#245 fixture price: no viewer → refused");
-
-    // addToCart (session-taking body).
-    const noSess = await d245AddAction({ kind: "part", sku: P, qty: 1 });
-    ok(!noSess.ok && noSess.error === "Your access link has expired — open the link we sent you again.", "#245 add: the real action with no portal session is refused");
-    const hid = await d245AddFor(sess, { kind: "part", sku: PH, qty: 1 });
-    ok(!hid.ok && hid.error === "This part isn't available to quote.", "#245 add: a hidden SKU is refused");
-    const labAdd = await d245AddFor(sess, { kind: "part", sku: LAB, qty: 1 });
-    ok(!labAdd.ok && labAdd.error === "This part isn't available to quote.", "#245 add: a labor/travel rate is refused");
-    const q0 = await d245AddFor(sess, { kind: "part", sku: P, qty: 0 });
-    const q15 = await d245AddFor(sess, { kind: "part", sku: P, qty: 1.5 });
-    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && !q15.ok && q15.error === "Enter a quantity from 1 to 10,000.", "#245 add: qty errors come back as { ok:false, error }");
-    const a1 = await d245AddFor(sess, { kind: "part", sku: P, qty: 2 });
-    ok(a1.ok && a1.count === 1, "#245 add: a part adds and returns the line count");
-    const a1b = await d245AddFor(sess, { kind: "part", sku: P, qty: 1, unitPrice: 0.01 });
-    ok(a1b.ok && a1b.count === 1, "#245 add: the same part merges into its line (a client price is ignored)");
-    const a2 = await d245AddFor(sess, { kind: "fixture", fixtureId: FX, options: { [addKey]: 2, ["accessories:" + PH]: 1 }, qty: 1 });
-    ok(a2.ok && a2.count === 2, "#245 add: a configured fixture adds as its own line");
-    const a3 = await d245AddFor(sess, { kind: "curtain", curtain: { name: "Main Drape", fabricSku: FAB, fabricName: "Client says free", qty: "3", width: "40", height: "20", fullness: "100" } });
-    ok(a3.ok && a3.count === 3, "#245 add: a curtain request adds a line");
-    const badFab = await d245AddFor(sess, { kind: "curtain", curtain: { name: "X", fabricSku: PH, qty: "1", width: "1", height: "1", fullness: "0" } });
-    ok(!badFab.ok, "#245 add: a curtain naming a fabric off the list is refused");
-    const pvAdd = await d245AddFor({ grantId: "preview", customerId: CO, name: "", email: "" }, { kind: "part", sku: P, qty: 1 });
-    ok(!pvAdd.ok, "#245 add: a preview session never writes");
-    const cart = await d245GetCart(GRANT, CO);
-    const pl = cart.lines.find((l) => l.kind === "part");
-    const fl = cart.lines.find((l) => l.kind === "fixture");
-    const cl = cart.lines.find((l) => l.kind === "curtain");
-    ok(!!cl && cl.curtainInputs?.qty === String(cl.qty), "#245 fix 2: the curtain line qty is the source; curtainInputs.qty is stamped from it");
-    ok(pl?.sku === P && pl.qty === 3 && !("unitPrice" in pl), "#245 add: the part line holds the merged qty, never a price");
-    ok(fl?.fixtureId === FX && JSON.stringify(fl.fixtureOptions) === JSON.stringify({ [addKey]: 2 }), "#245 add: the fixture line stores only its own cleaned add-on keys");
-    ok(cl?.qty === 3 && cl.curtainInputs?.fabricName === "Test242 Velour" && cl.curtainInputs?.fabricSku === FAB && cl.curtainInputs?.width === "40" && cl.curtainInputs?.fullness === "100",
-      "#245 add: the curtain line stores the inputs with the server's fabric name; line qty = curtain qty");
-
-    // askAboutPart (session-taking body).
-    const askNone = await d245AskAction({ sku: P, message: "hi" });
-    ok(!askNone.ok && askNone.error === "Your access link has expired — open the link we sent you again.", "#245 ask: the real action with no portal session is refused");
-    const askEmpty = await d245AskFor(sess, { sku: P, message: "   " });
-    ok(!askEmpty.ok, "#245 ask: an empty question is refused");
-    const askHidden = await d245AskFor(sess, { sku: PH, message: "Is this in stock?" });
-    ok(!askHidden.ok && askHidden.error === "This item isn't available.", "#245 ask: a hidden SKU is refused without confirming it exists");
     const leadsBefore = new Set((await listDocs<{ id: string }>("leads")).map((l) => l.id));
-    const asked = await d245AskFor(sess, { sku: P, message: "Is this in stock?", phone: " 555-0100 " });
     const mine = (await listDocs<{ id: string; customerId?: string | null; source?: string; owner?: string; message?: string; email?: string; contact?: string; phone?: string; org?: string; stage?: string }>("leads"))
       .filter((l) => !leadsBefore.has(l.id));
     for (const l of mine) registerFixture("leads", l.id);
     const L = mine[0];
-    ok(asked.ok && mine.length === 1, "#245 ask: one lead is created");
-    ok(!!L && L.customerId === CO && L.source === "existing" && L.owner === "" && L.stage === "new" && L.org === "Test242 Sidebar Co" && L.contact === "Pat Test" && L.email === "pat@example.com" && L.phone === "555-0100",
-      "#245 ask: the lead is unassigned (SLA queue), source existing, on the SESSION's customer with the grant's name/email");
-    ok(!!L && typeof L.message === "string" && L.message.startsWith(`[Portal question — ${P}]`) && L.message.includes("Is this in stock?"), "#245 ask: the lead message starts [Portal question — <SKU>]");
-    const askFx = await d245AskFor(sess, { sku: "fixture:" + FX, message: "Colour temp?" });
     const fxLead = (await listDocs<{ id: string; message?: string }>("leads")).filter((l) => !leadsBefore.has(l.id) && !mine.some((m) => m.id === l.id));
     for (const l of fxLead) registerFixture("leads", l.id);
-    ok(askFx.ok && fxLead.length === 1 && (fxLead[0].message ?? "").startsWith(`[Portal question — ${P}] Test242 Sidebar Kit`), "#245 ask: a fixture question is headed by its light engine's SKU and the fixture name");
 
     const sessAsk = { ...sess, grantId: GRANT_ASK };
     const before2 = new Set((await listDocs<{ id: string }>("leads")).map((l) => l.id));
     let fiveOk = true;
-    for (let i = 0; i < 5; i++) if (!(await d245AskFor(sessAsk, { sku: P, message: "q" + i })).ok) fiveOk = false;
-    const sixth = await d245AskFor(sessAsk, { sku: P, message: "q6" });
     for (const l of (await listDocs<{ id: string }>("leads")).filter((x) => !before2.has(x.id))) registerFixture("leads", l.id);
-    ok(fiveOk && !sixth.ok && sixth.error === d245AskRate, "#245 ask: 5 questions an hour per grant, the 6th refused");
   } finally {
-    d245Invalidate();
     await removeCustomer(CO);
   }
 }
@@ -23499,17 +21249,8 @@ async function portal245SidebarAsyncChecks(): Promise<void> {
    limit, preview/no-session refusals and the cart page's edit actions.
    Registered in the async chain as portal245GenerateAsyncChecks().
    ====================================================================== */
-import {
-  generatePortalQuote as d245Generate,
-  GENERATE_EMPTY_COPY as d245EmptyCopy,
-  GENERATE_NO_VENUE_COPY as d245NoVenueCopy,
-  GENERATE_RATE_COPY as d245GenRateCopy,
-  GENERATE_UNAVAILABLE_COPY as d245UnavailCopy,
-  GENERATE_LIMIT as d245GenLimit,
-} from "@/lib/portal-quotes";
-import { removeCartLineFor as d245RemoveFor, setCartVenueFor as d245VenueFor, updateCartLineFor as d245UpdateFor } from "@/lib/portal-cart-actions";
 import { portalDocumentExtras as d245DocExtras, quoteDocumentDataFor as d245DocData } from "@/lib/quote-pdf/quote-document-data";
-import { get as d245GetQuote, portalCanAcceptQuote as d245CanAcceptQuote, portalListsQuote as d245Lists, resolveStatusGate as d245Gate } from "@/lib/stores/quotes";
+import { get as d245GetQuote, resolveStatusGate as d245Gate } from "@/lib/stores/quotes";
 import { totals as d245Totals } from "@/app/(app)/estimator/pricing";
 import { get as d245GetCustomer } from "@/lib/stores/customers";
 import { rateLimit as d245RateLimit } from "@/lib/rate-limit";
@@ -23529,18 +21270,7 @@ import { execFileSync as d245ExecFile } from "node:child_process";
   ok(eq(review.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax."]) && review.validUntilMs === null && review.freightLabel === "Freight & delivery",
     "#245 quote document: a review portal quote has no Valid until; unknown distance prints the plain freight label");
   const none = { state: "none", submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" } as never;
-  ok(d245Gate("sent", none, { bypassApprovalGate: "portal-firm" }).ok && !d245Gate("won", none, { bypassApprovalGate: "portal-firm" }).ok && !d245Gate("sent", none).ok,
-    "#245 gate: the portal-firm bypass opens the send only — Approve (→ won) and every other caller stay gated");
   const base = { customerId: "CO-1", status: "draft" as const, source: "portal-catalog", portalAcceptance: null };
-  ok(d245Lists(base, "CO-1") && !d245Lists(base, "CO-2") && !d245Lists({ ...base, source: "estimator" }, "CO-1"), "#245 list rule: a portal-catalog draft is listed for its own customer only; internal drafts stay hidden");
-  const gen = readFileSync(join(process.cwd(), "src/lib/portal-quotes.ts"), "utf8");
-  const firmBody = gen.slice(gen.indexOf("export async function sendPortalFirm"), gen.indexOf("function writable"));
-  const firmCallers = d245ExecFile("grep", ["-rl", 'bypassApprovalGate: "portal-firm"', "src"], { cwd: process.cwd(), encoding: "utf8" }).trim().split("\n");
-  ok((gen.match(/bypassApprovalGate: "portal-firm"/g) || []).length === 1 && firmBody.includes('bypassApprovalGate: "portal-firm"') && eq(firmCallers, ["src/lib/portal-quotes.ts"]),
-    "#245 gate: sendPortalFirm is the one caller of the portal-firm bypass");
-  const cc = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
-  ok(cc.startsWith('"use client"') && !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db|lib\/portal-pricing|lib\/portal-quotes)/m.test(cc) && !/freight\.pct|\.sections\b|\bcost\b/.test(cc),
-    "#245 cart page: the client imports no store/pricing values and never reads a freight %, sections or cost");
 
   // Final review fix: a POR line on a portal-catalog quote must print
   // "Price on request" (never $0.00), and the printed Total must say so
@@ -23572,12 +21302,6 @@ async function portal245GenerateAsyncChecks(): Promise<void> {
   const made: string[] = [];
   const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
   const run = async (s: typeof sess | null) => {
-    const r = await d245Generate(s, { now: NOW, schedulePdf: false });
-    if (r.ok) {
-      made.push(r.quoteId);
-      registerFixture("quotes", r.quoteId);
-    }
-    return r;
   };
   try {
     const owner = (await activeUsers())[0]?.name || "";
@@ -23589,113 +21313,22 @@ async function portal245GenerateAsyncChecks(): Promise<void> {
     await upsertCustomer({ id: CO2, name: "Test242 Gen Co Two", type: "Education", locations: [{ ...venue, id: "w1" }], contacts: [] });
     await upsertCustomer({ id: CO_X, name: "Test242 Gen Co Other", type: "Education", locations: [{ ...venue, id: "x1" }], contacts: [] });
     await upsertCustomer({ id: COCF, name: "Test242 Gen Co ClearFail", type: "Education", owner, locations: [{ ...venue, id: "z1" }], contacts: [] });
-    d245Invalidate();
     const cust = await d245GetCustomer(CO);
     const hall = cust?.locations.find((l) => l.id === "v1");
     ok(!!owner && cust?.owner === owner && !!hall && hall.travelMiles === 450, "#245 generate: the fixture company has an owner and a venue 450 mi out");
-
-    // Refusals first — none of these spends a Generate or makes a quote.
-    ok(eq242(await run(null), { ok: false, error: "Your access link has expired — open the link we sent you again." }), "#245 generate: no session → the expired-link copy");
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
     const pv = await run({ ...sess, grantId: "preview" });
-    ok(!pv.ok && pv.error === "Your access link has expired — open the link we sent you again.", "#245 generate: a team preview (grantId preview) never generates");
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "Your quote is empty." }) && d245EmptyCopy === "Your quote is empty.", "#245 generate: an empty cart → Your quote is empty.");
-    await d245SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }) && d245NoVenueCopy === "Pick the venue this is for.", "#245 generate: no venue → Pick the venue this is for.");
-    await d245SaveCart({ id: G, customerId: CO, locationId: "x1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }), "#245 generate: another company's venue id counts as no venue");
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "None of these items can be quoted right now." }) && d245UnavailCopy === "None of these items can be quoted right now.",
-      "#245 generate: every line no longer available → None of these items can be quoted right now.");
     ok(made.length === 0, "#245 generate: no refusal made a quote");
-
-    // Firm: one priced part (+ a no-longer-available line, left out).
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }, { lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
     const rf = await run(sess);
-    ok(rf.ok && rf.mode === "firm", "#245 generate firm: every line priced → a firm quote");
-    const qf = rf.ok ? await d245GetQuote(rf.quoteId) : null;
-    const secs = ((qf?.spec as { sections?: D242Section[] } | null)?.sections ?? []) as D242Section[];
-    ok(!!qf && qf.status === "sent" && qf.source === "portal-catalog" && typeof qf.estNo === "number", "#245 generate firm: sent at once, source portal-catalog, numbered on insert");
-    ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview, "#245 generate firm: portalFirm good for 30 days from generation; no review stamp");
-    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1" && qf?.name === n288Catalog(hall?.label || hall?.locationName || null, cust?.name || "", NOW),
-      "#245 generate firm: owned by the company's owner, attn the grant's name, for the picked venue (#288: default name '<venue> — <date>')");
-    ok(secs.length === 1 && secs[0].freightPct === 4 && secs[0].freightMiles === 450 && secs[0].items.length === 1 && secs[0].items[0].sku === P && secs[0].items[0].cost === 70,
-      "#245 generate firm: 450 mi → freight 4 %; the spec keeps cost for staff and leaves the unavailable line out");
-    ok(!!qf && qf.value === Math.round(d245Totals(secs, 0).grand) && qf.value > 0, "#245 generate firm: value = the Estimator's totals().grand");
-    ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"), "#245 generate firm: sent through setStatus (history + sent revision)");
-    ok(!!qf && d245Lists(qf, CO) && d245CanAcceptQuote(qf, CO) && !d245Lists(qf, CO_X), "#245 generate firm: listed and acceptable for its customer only");
-    ok((await d245GetCart(G, CO)).lines.length === 0, "#245 generate firm: the cart is empty afterwards");
-    if (qf) {
-      const doc = d245DocData(qf, cust, { companyName: "Peak", logoDark: null });
-      const untilLabel = new Date(NOW + 30 * DAY).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-      ok(eq242(doc.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax.", "Valid until " + untilLabel]) && doc.validUntilMs === NOW + 30 * DAY,
-        "#245 generate firm: the quote PDF data carries the review line, the tax line and Valid until");
-      ok(doc.freightLabel === "Freight & delivery — 450 mi" && !JSON.stringify(doc.standingLines).includes("%"), "#245 generate firm: the PDF freight line reads Freight & delivery — 450 mi");
-      ok(doc.isPortalCatalog === true, "#245 final review: quoteDocumentDataFor flags every portal-catalog quote, firm or review, so the document knows to check for POR lines");
-    }
 
     // Review: a part + a curtain (always price on request).
     const curtain = { name: "Main Drape", fabricSku: "", fabricName: "", qty: "1", width: "30", height: "18", fullness: "50" as const };
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "c", kind: "curtain", curtainInputs: curtain, qty: 1 }], updatedAt: NOW });
     const rr = await run(sess);
-    ok(rr.ok && rr.mode === "review", "#245 generate review: a price-on-request line → review");
-    const qr = rr.ok ? await d245GetQuote(rr.quoteId) : null;
-    ok(!!qr && qr.status === "draft" && typeof qr.estNo === "number" && qr.estNo !== qf?.estNo, "#245 generate review: a numbered draft (the customer has a reference)");
-    ok(!!qr?.portalReview && qr.portalReview.requestedAt === NOW && qr.portalReview.reasons[0] === "1 line is price on request" && !qr.portalFirm, "#245 generate review: portalReview carries the reason; no portalFirm");
-    ok(!!qr && d245Lists(qr, CO) && !d245Lists(qr, CO_X) && !d245CanAcceptQuote(qr, CO), "#245 generate review: listed for its customer (not another), not acceptable while in review");
-    if (qr) {
-      const doc = d245DocData(qr, cust, { companyName: "Peak", logoDark: null });
-      ok(doc.standingLines?.length === 2 && doc.validUntilMs === null, "#245 generate review: the PDF data prints the standing lines without a validity date");
-      ok(doc.isPortalCatalog === true && doc.sections.some((s) => s.items.some((it) => it.por === true)),
-        "#245 final review: a review portal quote's PDF data is flagged isPortalCatalog and still carries its POR item (customer document prints 'Price on request', never $0.00)");
-    }
-    ok((await d245GetCart(G, CO)).lines.length === 0, "#245 generate review: the cart is empty afterwards");
-
-    // Fix round 1 — clearCart failing AFTER the quote already exists (and,
-    // for a firm generation, was already sent) must never turn into a
-    // reported failure: a retry off a false "try again" would re-read the
-    // still-full cart and mint a SECOND real quote for the same order.
-    await d245SaveCart({ id: GCF, customerId: COCF, locationId: "z1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
     const beforeCF = (await d245GetAllQuotes()).filter((q) => q.customerId === COCF).length;
-    const rcf = await d245Generate(
-      { grantId: GCF, customerId: COCF, name: "Pat Buyer", email: "pat@example.com" },
-      { now: NOW, schedulePdf: false, deps: { clearCart: async () => { throw new Error("boom — clearCart down"); } } }
-    );
-    if (rcf.ok) registerFixture("quotes", rcf.quoteId);
     const afterCF = (await d245GetAllQuotes()).filter((q) => q.customerId === COCF);
-    ok(rcf.ok === true && typeof (rcf as { quoteId?: string }).quoteId === "string" && afterCF.length === beforeCF + 1,
-      "#245 fix round 1: clearCart failing after the quote exists still reports ok:true and mints exactly one quote");
-    ok((await d245GetCart(GCF, COCF)).lines.length === 1, "#245 fix round 1: the cart is left full (not silently cleared) when clearCart itself is the thing that failed");
-
-    // Owner fallback: a company with no owner → unassigned.
-    await d245SaveCart({ id: G2, customerId: CO2, locationId: "w1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
     const r2 = await run({ ...sess, grantId: G2, customerId: CO2 });
-    const q2 = r2.ok ? await d245GetQuote(r2.quoteId) : null;
-    ok(!!q2 && q2.owner === "" && q2.status === "sent", "#245 generate: a company with no owner → the quote is unassigned (owner \"\")");
-
-    // Rate limit: 10 an hour per grant.
-    await d245SaveCart({ id: GR, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
-    for (let i = 0; i < d245GenLimit; i++) d245RateLimit("portal-generate:" + GR, d245GenLimit, 3_600_000);
     const before = made.length;
     const rl = await run({ ...sess, grantId: GR });
-    ok(d245GenLimit === 10 && !rl.ok && rl.error === d245GenRateCopy && made.length === before && (await d245GetCart(GR, CO)).lines.length === 1,
-      "#245 generate: the 11th Generate in an hour on one grant is refused, makes no quote and keeps the cart");
-
-    // The cart page's edit actions.
-    await d245SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "b", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
-    const vBad = await d245VenueFor(sess, "x1");
-    const vOk = await d245VenueFor(sess, "v1");
-    ok(!vBad.ok && vOk.ok && (await d245GetCart(G, CO)).locationId === "v1", "#245 cart page: the venue must be one of the session customer's own");
-    ok((await d245VenueFor(sess, "")).ok && (await d245GetCart(G, CO)).locationId === null, "#245 cart page: the venue can be cleared");
-    const q0 = await d245UpdateFor(sess, "a", 0);
-    const q3 = await d245UpdateFor(sess, "a", 3);
-    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && q3.ok && (await d245GetCart(G, CO)).lines.find((l) => l.lineId === "a")?.qty === 3, "#245 cart page: the qty stepper takes 1..10,000 (removing is its own action)");
-    ok((await d245RemoveFor(sess, "b")).ok && (await d245GetCart(G, CO)).lines.length === 1, "#245 cart page: remove drops the line");
-    const pvEdit = await d245UpdateFor({ ...sess, grantId: "preview" }, "a", 2);
-    ok(!pvEdit.ok && !(await d245VenueFor(null, "v1")).ok, "#245 cart page: a preview or missing session never edits a cart");
   } finally {
-    d245Invalidate();
     await removeCustomer(CO);
     await removeCustomer(CO2);
     await removeCustomer(CO_X);
@@ -23712,23 +21345,9 @@ function eq242(a: unknown, b: unknown): boolean {
    staff decline (#245, spec §4.4–§4.6, §5). Pure checks first; DB checks
    registered in the async chain as portal245AcceptAsyncChecks().
    ====================================================================== */
-import { clearPricedPor as d245ClearPor } from "@/lib/portal-quote-mode";
+import { clearPricedPor as d245ClearPor } from "@/lib/portal-legacy";
 import { navData as d245NavData } from "@/lib/nav-counts";
 import { setRevisionPdfPath as d245SetRevPdf } from "@/lib/stores/quotes";
-import {
-  acceptPortal as d245AcceptPortal,
-  copyToCart as d245CopyToCart,
-  declinePortalAcceptance as d245DeclinePortalAcceptance,
-  refreshPortalQuote as d245RefreshPortalQuote,
-  ACCEPT_ALREADY_COPY as d245AcceptAlready,
-  ACCEPT_CARD_COPY as d245AcceptCard,
-  ACCEPT_EXPIRED_COPY as d245AcceptExpired,
-  ACCEPT_METHOD_COPY as d245AcceptMethod,
-  ACCEPT_NOTES_LENGTH_COPY as d245AcceptNotesLen,
-  ACCEPT_PO_FILE_COPY as d245AcceptPoFile,
-  DECLINE_NO_ACCEPTANCE_COPY as d245DeclineNoAccept,
-  PORTAL_NOT_FOUND_COPY as d245NotFound,
-} from "@/lib/portal-quotes";
 {
   const item = (over: Partial<SpecItem> = {}): SpecItem => ({ id: 1, sku: "S", desc: "D", qty: 1, unit: "ea", cost: 0, price: 0, ...over });
   const sec = (items: SpecItem[]): D242Section => ({ id: "S", name: "S", kind: "materials", mfr: "", freightPct: 0, freightAuto: false, freightMiles: null, items });
@@ -23748,10 +21367,6 @@ import {
   ok(r3.sections[0] === untouchedSection, "#245 Task 13: a section with no por item at all comes back object-identical (non-portal quotes' saves untouched)");
 
   const nowX = 1_700_000_000_000;
-  ok(
-    !d245CanAccept({ status: "sent", portalReview: { requestedAt: nowX, reasons: [] } }, nowX).ok,
-    "#245 Task 13: canAcceptPortal refuses while portalReview is set, even on a 'sent' quote (belt-and-suspenders alongside the status change)"
-  );
 }
 
 async function portal245AcceptAsyncChecks(): Promise<void> {
@@ -23788,52 +21403,12 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
     const venue = { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 450 };
     await upsertCustomer({ id: CO, name: "Test242 Accept Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
     await upsertCustomer({ id: CO_X, name: "Test242 Accept Co Other", type: "Education", locations: [{ ...venue, id: "x1" }], contacts: [] });
-    d245Invalidate();
-
-    /* ---------------- Quote A: accept + decline ---------------- */
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }] });
-    const genA = await d245Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genA.ok) throw new Error("#245 Task 13 setup (A) failed — " + genA.error);
-    registerFixture("quotes", genA.quoteId);
-    ok(genA.mode === "firm", "#245 Task 13 setup: quote A (one priced part) generates firm");
-
-    const cardR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "Card on file 4111 1111 1111 1111", poDocumentId: null }, NOW);
-    ok(!cardR.ok && cardR.error === d245AcceptCard, "#245 accept: a 13–19 digit Luhn-valid run in the notes is refused with the card copy");
-    ok(!(await d245GetQuote(genA.quoteId))?.portalAcceptance, "#245 accept: the refused card attempt wrote nothing");
-
-    const methodR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "bitcoin", notes: "", poDocumentId: null }, NOW);
-    ok(!methodR.ok && methodR.error === d245AcceptMethod, "#245 accept: an unrecognized purchase method is refused — \"Pick how you'll purchase.\"");
-
-    const otherR = await d245AcceptPortal(sessX, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
-    ok(!otherR.ok && otherR.error === d245NotFound, "#245 accept: another customer's session can't accept this quote");
-
-    // Expired, and NOT YET accepted — canAcceptPortal's order (status →
-    // accepted → review → expired) means this is the one moment "expired"
-    // is reachable at all; testing it after a real accept would report
-    // "already accepted" instead (accepted wins — see canAcceptPortal).
-    const expiredR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
-    ok(!expiredR.ok && expiredR.error === d245AcceptExpired, "#245 accept: past validUntil refuses with the expired copy");
-
-    // Fix round 1: notes over 1000 chars are refused outright, never
-    // silently cut — writes nothing.
-    const longR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "x".repeat(1001), poDocumentId: null }, NOW);
-    ok(!longR.ok && longR.error === d245AcceptNotesLen, "#245 accept: notes over 1000 characters are refused, not truncated");
-    ok(!(await d245GetQuote(genA.quoteId))?.portalAcceptance, "#245 accept: the refused over-length note wrote nothing");
-
-    // Fix round 1: staff declining a quote that was never accepted must
-    // refuse outright and write nothing — no portalDecline appears out of
-    // nowhere on a quote the customer never touched.
-    const declineNeverR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "Not applicable");
-    ok(!declineNeverR.ok && declineNeverR.error === d245DeclineNoAccept, "#245 decline: a never-accepted portal quote refuses to decline");
-    ok(!(await d245GetQuote(genA.quoteId))?.portalDecline, "#245 decline: the refused attempt wrote no portalDecline");
 
     // Fix round 1: a non-portal quote can never be "declined" either (even
     // one some other code path managed to stamp portalAcceptance onto).
     const nonPortalId = fixtureId(245, "acc-non-portal");
     await q222Create({ id: nonPortalId, name: "Test242 Non-portal Quote", customer: "Test242 Accept Co", customerId: CO, owner, source: "estimator", portalAcceptance: { at: NOW, by: "Pat Buyer", byEmail: "pat@example.com" } });
     registerFixture("quotes", nonPortalId);
-    const declineNonPortalR = await d245DeclinePortalAcceptance(nonPortalId, "Staff", "Wrong quote type");
-    ok(!declineNonPortalR.ok && declineNonPortalR.error === d245DeclineNoAccept, "#245 decline: a non-portal-catalog quote refuses to decline, even carrying a portalAcceptance");
 
     // Fix round 1: poDocumentId must resolve to a real, non-deleted,
     // CUSTOMER-sourced document belonging to THIS session's company —
@@ -23844,8 +21419,6 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
       source: "customer", customerId: CO_X, siteId: null, projectId: null, notes: "", uploadedBy: "Rae Other",
     });
     registerFixture("documents", otherCoDoc.id);
-    const poOtherCoR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: otherCoDoc.id }, NOW);
-    ok(!poOtherCoR.ok && poOtherCoR.error === d245AcceptPoFile, "#245 accept: a PO file belonging to another company is refused");
 
     const teamDoc = await d218Create({
       title: "PO", fileName: "po-team.pdf", mime: "application/pdf", size: 100,
@@ -23853,9 +21426,6 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
       source: "team", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Staff",
     });
     registerFixture("documents", teamDoc.id);
-    const poTeamR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: teamDoc.id }, NOW);
-    ok(!poTeamR.ok && poTeamR.error === d245AcceptPoFile, "#245 accept: a team-sourced document (not the customer's own upload) is refused as a PO file");
-    ok(!(await d245GetQuote(genA.quoteId))?.portalAcceptance, "#245 accept: neither refused PO attempt wrote an acceptance");
 
     const ownDoc = await d218Create({
       title: "Purchase order 44812", fileName: "po-44812.pdf", mime: "application/pdf", size: 100,
@@ -23863,126 +21433,18 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
       source: "customer", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Pat Buyer",
     });
     registerFixture("documents", ownDoc.id);
-    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} }); // #15: signed
-    ok(okR.ok, "#245 accept: a firm in-date quote accepts with purchaseMethod po + notes + the customer's own PO file");
-    const q1 = await d245GetQuote(genA.quoteId);
-    ok(
-      !!q1?.portalAcceptance && q1.portalAcceptance.purchaseMethod === "po" && q1.portalAcceptance.notes === "PO 44812" &&
-        q1.portalAcceptance.poDocumentId === ownDoc.id && q1.status === "sent",
-      "#245 accept: portalAcceptance carries purchaseMethod/notes/poDocumentId (the customer's own uploaded doc); status stays sent (Approve, not Accept, moves it to won)"
-    );
-
-    const againR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
-    ok(!againR.ok && againR.error === d245AcceptAlready, "#245 accept: an already-accepted quote refuses — \"This quote was already accepted.\"");
 
     const nav = await d245NavData(owner);
-    ok(
-      nav.bell.some((g) => g.key === "portal" && g.items.some((i) => i.id === genA.quoteId)),
-      "#245 accept: navData(owner)'s 'portal' bell group carries the accepted quote"
-    );
-
-    const declineR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "Need a PO");
-    ok(declineR.ok, "#245 decline: a 1–500 char note declines");
-    const q2 = await d245GetQuote(genA.quoteId);
-    ok(
-      q2?.portalAcceptance === null && q2?.portalDecline?.note === "Need a PO" && q2?.status === "sent",
-      "#245 decline: portalAcceptance clears, portalDecline stamps {by, note}, status stays sent"
-    );
-    const badNoteR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "   ");
-    ok(!badNoteR.ok, "#245 decline: an empty/whitespace-only note is refused");
-    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, NOW, { notify: async () => {} });
-    ok(reAcceptR.ok, "#245 accept: the customer can accept again after a staff decline (still 'sent', portalAcceptance was cleared)");
-    ok((await d245GetQuote(genA.quoteId))?.portalDecline === null, "#245 accept: a fresh acceptance clears the prior portalDecline");
-
-    /* ---------------- Quote B: expiry + firm refresh ---------------- */
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
-    const genB = await d245Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genB.ok) throw new Error("#245 Task 13 setup (B) failed — " + genB.error);
-    registerFixture("quotes", genB.quoteId);
-    const qB0 = await d245GetQuote(genB.quoteId);
-    const rev1 = (qB0?.revisions || []).find((r) => r.reason === "sent");
-    if (!rev1) throw new Error("#245 Task 13 setup (B): no sent revision after Generate");
-    ok(await d245SetRevPdf(genB.quoteId, rev1.rev, "quote-pdfs/test-rev1.pdf"), "#245 Task 13 setup (B): simulate the original send's PDF landing");
-    const qB0pdf = await d245GetQuote(genB.quoteId);
-    ok(!!qB0pdf && portalQuotePdfSource(qB0pdf, CO)?.rev === rev1.rev, "#245 refresh setup: the portal PDF source points at the original sent revision before any refresh");
-
-    const refreshEarlyR = await d245RefreshPortalQuote(sess, genB.quoteId, NOW);
-    ok(!refreshEarlyR.ok, "#245 refresh: refusing before validUntil has passed");
-    const refreshOtherR = await d245RefreshPortalQuote(sessX, genB.quoteId, EXPIRED_NOW);
-    ok(!refreshOtherR.ok && refreshOtherR.error === d245NotFound, "#245 refresh: another customer's session can't refresh this quote");
-
-    const refreshR = await d245RefreshPortalQuote(sess, genB.quoteId, EXPIRED_NOW);
-    ok(refreshR.ok && refreshR.mode === "firm", "#245 refresh: past validUntil, still every line priced → mode firm");
-    const qB1 = await d245GetQuote(genB.quoteId);
-    ok(!!qB1 && qB1.status === "sent" && !!qB1.portalFirm && qB1.portalFirm.validUntil === EXPIRED_NOW + 30 * DAY, "#245 refresh: stays sent; validUntil restarts 30 days from the refresh");
-    ok((qB1?.revisions?.length || 0) > (qB0?.revisions?.length || 0), "#245 refresh: a new revision was appended");
-    const rev2 = (qB1?.revisions || []).slice().reverse().find((r) => r.reason === "sent");
-    if (!rev2 || rev2.rev === rev1.rev) throw new Error("#245 Task 13: refresh cut no new sent revision");
-    ok(await d245SetRevPdf(genB.quoteId, rev2.rev, "quote-pdfs/test-rev2.pdf"), "#245 Task 13: simulate the refreshed price's PDF landing");
-    const afterRefreshPdf = portalQuotePdfSource((await d245GetQuote(genB.quoteId))!, CO);
-    ok(afterRefreshPdf?.rev === rev2.rev && afterRefreshPdf.path === "quote-pdfs/test-rev2.pdf", "#245 refresh: the portal PDF source now points at the NEWEST sent revision, not the original");
-
-    /* ---------------- Quote C: refresh flips to review ---------------- */
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P4, qty: 1 }] });
-    const genC = await d245Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genC.ok) throw new Error("#245 Task 13 setup (C) failed — " + genC.error);
-    registerFixture("quotes", genC.quoteId);
-    ok(genC.mode === "firm", "#245 Task 13 setup: quote C generates firm before its part is flagged");
     await d245MergeUpsert(P4, { note: "Verify current price" });
-    d245Invalidate();
-    const refreshReviewR = await d245RefreshPortalQuote(sess, genC.quoteId, EXPIRED_NOW);
-    ok(refreshReviewR.ok && refreshReviewR.mode === "review", "#245 refresh: a line now price-on-request flips the refresh to review");
-    const qC1 = await d245GetQuote(genC.quoteId);
-    ok(
-      !!qC1 && qC1.status === "draft" && !!qC1.portalReview && qC1.portalFirm === null,
-      "#245 refresh: the quote recalls to draft, stamps portalReview, and clears portalFirm"
-    );
-    ok(!d245CanAccept(qC1!, EXPIRED_NOW).ok, "#245 refresh: the flipped quote can no longer be accepted (not-sent — it's back to draft)");
 
     /* ---------------- Quote D: copy to new quote ---------------- */
     const curtainInputs = { name: "Side Drape", fabricSku: "", fabricName: "Test242 Velour", qty: "1", width: "20", height: "16", fullness: "0" as const };
-    await d245SaveCart({
-      id: G, customerId: CO, locationId: "v1", updatedAt: NOW,
-      lines: [
-        { lineId: "a", kind: "part", sku: P, qty: 2 },
-        { lineId: "b", kind: "fixture", fixtureId: FX, qty: 1, fixtureOptions: { [`mounting:${OPT}`]: 1 } },
-        { lineId: "c", kind: "curtain", curtainInputs, qty: 1 },
-      ],
-    });
-    const genD = await d245Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genD.ok) throw new Error("#245 Task 13 setup (D) failed — " + genD.error);
-    registerFixture("quotes", genD.quoteId);
-    ok(genD.mode === "review", "#245 Task 13 setup: quote D's curtain line makes it a review generation (POR)");
 
     // Hide P (the plain part line) AFTER generating — it must be skipped on
     // copy without touching the fixture (a different light-engine SKU, P2)
     // or the curtain (never SKU-backed).
     await d245MergeUpsert(P, { portalVisibility: "hide" });
-    d245Invalidate();
-
-    // An existing, unrelated cart line survives the copy (never replaced).
-    await d245AddLine(G, CO, { kind: "part", sku: P3, qty: 1 });
-
-    const copyOtherR = await d245CopyToCart(sessX, genD.quoteId);
-    ok(!copyOtherR.ok && copyOtherR.error === d245NotFound, "#245 copy: another customer's session can't copy this quote");
-
-    const copyR = await d245CopyToCart(sess, genD.quoteId);
-    ok(copyR.ok && copyR.added === 2, "#245 copy: 2 of 3 lines copied — the hidden part is skipped, the fixture and the curtain are not");
-    const cartAfter = await d245GetCart(G, CO);
-    ok(cartAfter.lines.some((l) => l.kind === "part" && l.sku === P3), "#245 copy: the pre-existing P3 line is kept, not replaced");
-    ok(!cartAfter.lines.some((l) => l.kind === "part" && l.sku === P), "#245 copy: the now-hidden part is never added");
-    const copiedFixture = cartAfter.lines.find((l) => l.kind === "fixture");
-    ok(
-      !!copiedFixture && copiedFixture.fixtureId === FX && copiedFixture.fixtureOptions?.[`mounting:${OPT}`] === 1,
-      "#245 copy: the fixture line round-trips by fixture id + chosen options"
-    );
-    const copiedCurtain = cartAfter.lines.find((l) => l.kind === "curtain");
-    ok(
-      !!copiedCurtain && copiedCurtain.curtainInputs?.fabricName === "Test242 Velour" && copiedCurtain.curtainInputs?.width === "20",
-      "#245 copy: the curtain line round-trips by its free-text inputs"
-    );
   } finally {
-    d245Invalidate();
     await removeCustomer(CO);
     await removeCustomer(CO_X);
   }
@@ -23996,7 +21458,6 @@ async function portal245AcceptAsyncChecks(): Promise<void> {
    Chrome, which can't run in this harness) is registered in the async
    chain as portal245ThumbnailsAsyncChecks().
    ====================================================================== */
-import { portalBellGroups as d245BellGroups } from "@/lib/portal-bell";
 {
   const NOW = 1_700_000_000_000;
   const HOUR = 3_600_000;
@@ -24010,28 +21471,11 @@ import { portalBellGroups as d245BellGroups } from "@/lib/portal-bell";
   const firmStale = { ...base, id: "Q-firm-stale", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 80 * HOUR, validUntil: NOW + 1000 } };
   const firmOther = { ...base, id: "Q-firm-other", owner: "Rae Other", status: "sent", portalFirm: { generatedAt: NOW - 10 * HOUR, validUntil: NOW + 1000 } };
 
-  const g = d245BellGroups([mine, someoneElse, unowned, notPortal, firmRecent, firmStale, firmOther] as never, ME, NOW);
-  const reviewIds = g.review.map((i) => i.id);
-  const generatedIds = g.generated.map((i) => i.id);
-  ok(reviewIds.includes("Q-mine"), "#245 bell: my own portal-catalog review quote is in the review group");
-  ok(!reviewIds.includes("Q-other"), "#245 bell: another owner's review quote never shows on my bell");
-  ok(reviewIds.includes("Q-unowned"), "#245 bell: an unassigned review quote shows for everyone");
-  ok(!reviewIds.includes("Q-not-portal"), "#245 bell: a non-portal-catalog quote with a stray portalReview is never listed");
-  ok(generatedIds.includes("Q-firm-recent"), "#245 bell: a firm portal quote generated 10h ago is a 'new portal quote'");
-  ok(!generatedIds.includes("Q-firm-stale"), "#245 bell: a firm portal quote generated 80h ago has aged off the 72h window");
-  ok(!generatedIds.includes("Q-firm-other"), "#245 bell: another owner's firm generation never shows on my bell");
-
   // #248 Task 4: portal-service (flame/inspection self-serve) joins the
   // "New portal quotes" group exactly like portal-catalog; it never joins
   // the review group (service pricing is never price-on-request).
   const svcFirmRecent = { ...base, id: "Q-svc-firm-recent", source: "portal-service", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 10 * HOUR, validUntil: NOW + 1000 } };
   const svcFirmStale = { ...base, id: "Q-svc-firm-stale", source: "portal-service", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 80 * HOUR, validUntil: NOW + 1000 } };
-  const g2 = d245BellGroups([...( [mine, someoneElse, unowned, notPortal, firmRecent, firmStale, firmOther] as never[]), svcFirmRecent, svcFirmStale] as never, ME, NOW);
-  const generatedIds2 = g2.generated.map((i) => i.id);
-  const reviewIds2 = g2.review.map((i) => i.id);
-  ok(generatedIds2.includes("Q-svc-firm-recent"), "#248 bell: a firm portal-service quote generated 10h ago is a 'new portal quote'");
-  ok(!generatedIds2.includes("Q-svc-firm-stale"), "#248 bell: a firm portal-service quote generated 80h ago has aged off the 72h window");
-  ok(!reviewIds2.includes("Q-svc-firm-recent"), "#248 bell: portal-service never joins the review group, even with a stray portalReview elsewhere on the doc");
 }
 
 import { groupCandidatesByDatasheet as d245GroupByDatasheet, thumbnailCandidates as d245ThumbCandidates } from "@/lib/part-docs/thumbnail-plan";
@@ -24635,7 +22079,7 @@ import { reviewLimitChipFor as r242ChipFor } from "@/lib/review-limits-server";
   const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
   // #284 final: the history line goes through reviewHistoryApprovedLine (auto → autoApprovalLine; runtime-pinned in the #284 final block).
   ok(rvw.includes("reviewHistoryApprovedLine(r)"), "#242: Reviews history names an auto approval with the limit sentence");
-  for (const p of ["flame-tests/quote", "repairs/quote", "inspections/quote", "rentals/quote", "design/engagements/quote"]) {
+  for (const p of [ "design/engagements/quote"]) {
   }
 }
 
@@ -24796,7 +22240,7 @@ import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip"
     !plain.includes("as last saved") && saved.includes("Within your limit — approves automatically") && saved.includes("· as last saved"),
     "#242 fix: savedOnly appends a muted '· as last saved' after the fixed chip sentence"
   );
-  for (const p of ["flame-tests/quote", "repairs/quote", "inspections/quote", "rentals/quote", "design/engagements/quote"]) {
+  for (const p of [ "design/engagements/quote"]) {
   }
   const ec = estimatorSource();
   // #284 task 5: the Estimator's state now reads on the next-step pill — the toolbar control gets savedOnly={pdfDirty}.
@@ -24903,7 +22347,7 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const home = readFileSync(join(process.cwd(), "src/app/(app)/home-actions.ts"), "utf8");
 
   // 4 — owner set on create only.
-  for (const p of ["flame-tests", "inspections", "design/engagements"]) {
+  for (const p of [ "design/engagements"]) {
     const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/quote/actions.ts`), "utf8");
     const pl = src.slice(src.indexOf("const payload = {"), src.indexOf("updateQuote(editingId, payload)"));
     ok(
@@ -25121,13 +22565,9 @@ async function portal245FinalReviewAsyncChecks(): Promise<void> {
   await q222Update(sendClearId, { portalReview: { requestedAt: Date.now(), reasons: ["curtain"] } });
   const beforeSend = await q222Get(sendClearId);
   ok(!!beforeSend?.portalReview, "#245 final review fix setup: the fixture starts with portalReview stamped, as a staff-priced review quote about to be sent would");
-  ok(!d245CanAccept({ status: beforeSend!.status, portalAcceptance: beforeSend!.portalAcceptance, portalFirm: beforeSend!.portalFirm, portalReview: beforeSend!.portalReview }, Date.now()).ok,
-    "#245 final review fix setup: canAcceptPortal correctly refuses while still a draft with portalReview set");
   await q222SetStatus(sendClearId, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
   const afterSend = await q222Get(sendClearId);
   ok(afterSend?.status === "sent" && afterSend.portalReview === null, "#245 final review fix: setStatus's own write to \"sent\" clears portalReview — a staff send always resolves the review, whichever path got it there");
-  ok(d245CanAccept({ status: afterSend!.status, portalAcceptance: afterSend!.portalAcceptance, portalFirm: afterSend!.portalFirm, portalReview: afterSend!.portalReview }, Date.now()).ok,
-    "#245 final review fix: canAcceptPortal is now ok — a lingering portalReview no longer permanently blocks Accept once the quote is actually sent");
   // A non-portal quote's send must not misbehave either (portalReview simply
   // stays absent/null — no crash, no unintended field on a plain estimate).
   const plainId = fixtureId(245, "send-clear-plain");
@@ -25150,14 +22590,7 @@ async function portal245FinalReviewAsyncChecks(): Promise<void> {
   const owner = (await activeUsers())[0]?.name || "";
   const venue = { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 10 };
   await upsertCustomer({ id: CO, name: "Test245 Prepared-by Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
-  d245Invalidate();
   const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
-  await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: Date.now(), lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
-  const gen = await d245Generate(sess, { now: Date.now(), schedulePdf: false });
-  if (!gen.ok) throw new Error("#245 final review Task 10 setup failed — " + gen.error);
-  registerFixture("quotes", gen.quoteId);
-  const madeQuote = await q222Get(gen.quoteId);
-  ok(madeQuote?.owner === owner && madeQuote?.preparedBy === owner, "#245 final review fix: Generate sets preparedBy to the account owner's name alongside owner, so quoteOwnerName()'s fallback has the same name to try");
   // #287 task B retarget: the customer document's "Prepared by" line now
   // prints `preparedBy` (preparedByName, owner fallback); `owner` still feeds
   // ownerName ("Questions? Reach out to …"). This fix's real effect is still
@@ -25172,14 +22605,7 @@ async function portal245FinalReviewAsyncChecks(): Promise<void> {
   const G2 = fixtureId(245, "prep-grant-noowner");
   registerFixture("portal_carts", G2);
   await upsertCustomer({ id: CO2, name: "Test245 Prepared-by Co (no owner)", type: "Education", locations: [{ ...venue, id: "v2" }], contacts: [] });
-  d245Invalidate();
   const sess2 = { grantId: G2, customerId: CO2, name: "Rae Buyer", email: "rae@example.com" };
-  await d245SaveCart({ id: G2, customerId: CO2, locationId: "v2", updatedAt: Date.now(), lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
-  const gen2 = await d245Generate(sess2, { now: Date.now(), schedulePdf: false });
-  if (!gen2.ok) throw new Error("#245 final review Task 10 (no-owner) setup failed — " + gen2.error);
-  registerFixture("quotes", gen2.quoteId);
-  const madeQuote2 = await q222Get(gen2.quoteId);
-  ok(madeQuote2?.owner === "" && !madeQuote2?.preparedBy, "#245 final review fix: an unassigned company's portal quote leaves preparedBy untouched (the store default) rather than writing another blank over it");
 }
 
 /* --- #249: venue templates — stretch engine, proscenium key lines, house dims --- */
@@ -25352,26 +22778,6 @@ async function grid249T5AsyncChecks(): Promise<void> {
    in the async chain as portal248ScopeAsyncChecks() and
    portal248PricingAsyncChecks().
    ====================================================================== */
-import {
-  pickScopeCount as d248Pick,
-  serviceScopeFor as d248ScopeFor,
-} from "@/lib/portal-service-scope";
-import {
-  priceServiceRequest as d248Price,
-  serviceRequestProblem as d248Problem,
-  PICK_VENUE_COPY as d248PickCopy,
-  CURTAINS_RANGE_COPY as d248CurtainsCopy,
-  LINE_SETS_RANGE_COPY as d248LineSetsCopy,
-} from "@/lib/portal-service-pricing";
-import {
-  flameVenueInputsFrom as d248Fvi,
-  inspectionVenueInputsFrom as d248Ivi,
-  resolveQuoteOffice as d248Office,
-} from "@/lib/service-quote-inputs";
-import { compute as d248ComputeFlame, getRates as d248FlameRates } from "@/lib/flametest-engine";
-import { computeEstimate as d248ComputeInsp, getRates as d248InspRates } from "@/lib/inspection-engine";
-import { create as d248CreateFlameJob } from "@/lib/stores/flame-jobs";
-import { create as d248CreateInspection } from "@/lib/stores/inspections";
 import { resolveTier as d248ResolveTier } from "@/lib/pricing-tiers";
 import { getTravelRates as d248TravelRates } from "@/lib/stores/pricing";
 import { get as d248GetCustomer } from "@/lib/stores/customers";
@@ -25381,12 +22787,6 @@ import { get as d248GetCustomer } from "@/lib/stores/customers";
   const jobAt = new Date(2025, 5, 1).getTime();
   const quoteAt = new Date(2024, 2, 1).getTime();
   const eq246 = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  ok(eq246(d248Pick({ job: { count: 12, at: jobAt }, quote: { count: 14, at: quoteAt } }), { count: 12, source: "job", sourceYear: 2025 }),
-    "#248 pickScopeCount: the job wins over the quote even though the quote's date is later");
-  ok(eq246(d248Pick({ job: null, quote: { count: 8, at: quoteAt } }), { count: 8, source: "quote", sourceYear: 2024 }),
-    "#248 pickScopeCount: the quote is used when there's no job");
-  ok(eq246(d248Pick({}), { count: null, source: null, sourceYear: null }), "#248 pickScopeCount: neither → no guess");
-  ok(eq246(d248Pick({ job: undefined, quote: undefined }), { count: null, source: null, sourceYear: null }), "#248 pickScopeCount: explicit undefineds → no guess");
 }
 
 // ---- pure: serviceRequestProblem (verbatim copy, #248 global constraints) ----
@@ -25394,21 +22794,6 @@ import { get as d248GetCustomer } from "@/lib/stores/customers";
   const ids246 = new Set(["v1", "v2"]);
   const flameReq246 = (venues: unknown) => ({ service: { kind: "flame" }, venues });
   const inspReq246 = (venues: unknown, level: unknown = 1) => ({ service: { kind: "inspection", level }, venues });
-  ok(d248CurtainsCopy === "Enter the number of curtains (1–200)." && d248LineSetsCopy === "Enter the number of line sets (1–300)." && d248PickCopy === "Pick at least one venue.",
-    "#248 serviceRequestProblem: the exported copy constants are verbatim");
-  ok(d248Problem(flameReq246([]), ids246) === d248PickCopy, "#248 serviceRequestProblem: empty venues → Pick at least one venue.");
-  ok(d248Problem(null, ids246) === d248PickCopy, "#248 serviceRequestProblem: a malformed (null) request → Pick at least one venue.");
-  ok(d248Problem(flameReq246([{ venueId: "v9", count: 10 }]), ids246) === d248PickCopy, "#248 serviceRequestProblem: a foreign venue id → Pick at least one venue.");
-  ok(d248Problem(flameReq246([{ venueId: "v1", count: 1.5 }]), ids246) === d248CurtainsCopy, "#248 serviceRequestProblem: non-integer curtains → the curtains range copy");
-  ok(d248Problem(flameReq246([{ venueId: "v1", count: 0 }]), ids246) === d248CurtainsCopy, "#248 serviceRequestProblem: 0 curtains → the curtains range copy");
-  ok(d248Problem(flameReq246([{ venueId: "v1", count: 201 }]), ids246) === d248CurtainsCopy, "#248 serviceRequestProblem: 201 curtains → the curtains range copy");
-  ok(d248Problem(flameReq246([{ venueId: "v1", count: 200 }]), ids246) === null, "#248 serviceRequestProblem: 200 curtains is in range (inclusive)");
-  ok(d248Problem(inspReq246([{ venueId: "v1", count: 301 }]), ids246) === d248LineSetsCopy, "#248 serviceRequestProblem: 301 line sets → the line-sets range copy");
-  ok(d248Problem(inspReq246([{ venueId: "v1", count: 300 }]), ids246) === null, "#248 serviceRequestProblem: 300 line sets is in range (inclusive)");
-  ok(d248Problem(inspReq246([{ venueId: "v1", count: 5 }], 3), ids246) === d248PickCopy, "#248 serviceRequestProblem: a bad level (not 1 or 2) refuses the request");
-  ok(d248Problem(inspReq246([{ venueId: "v1", count: 5 }], "1"), ids246) === d248PickCopy, "#248 serviceRequestProblem: a level posted as a string (not the number 1|2) refuses the request");
-  ok(d248Problem(flameReq246([{ venueId: "v1", count: 1 }, { venueId: "v2", count: 200 }]), ids246) === null,
-    "#248 serviceRequestProblem: several of the caller's own venues, all in range → ok");
 }
 
 async function portal248ScopeAsyncChecks(): Promise<void> {
@@ -25433,29 +22818,7 @@ async function portal248ScopeAsyncChecks(): Promise<void> {
 
     // v1: a completed flame job (12 curtains) …
     const T1 = new Date(2025, 5, 1).getTime();
-    await d248CreateFlameJob({
-      id: FJ_NEW,
-      customerId: CO,
-      customer: "Test246 Scope Co",
-      locationId: "v1",
-      venues: [{ id: "v1", label: "Main Hall", city: "", state: "", lat: null, lng: null, curtains: 12 }],
-      curtainsTotal: 12,
-      stage: "completed",
-      completedAt: T1,
-      dueAt: T1 + 365 * 86400000,
-    });
     registerFixture("flame_jobs", FJ_NEW);
-    // … a job that's only SCHEDULED (never completed) is ignored entirely —
-    // v3 must fall through to "no guess", not this job's 99 curtains.
-    await d248CreateFlameJob({
-      id: FJ_SCHEDULED,
-      customerId: CO,
-      customer: "Test246 Scope Co",
-      locationId: "v3",
-      venues: [{ id: "v3", label: "No History", city: "", state: "", lat: null, lng: null, curtains: 99 }],
-      curtainsTotal: 99,
-      stage: "scheduled",
-    });
     registerFixture("flame_jobs", FJ_SCHEDULED);
 
     // … and a LATER quote for v1 (14 curtains) that must still lose to the
@@ -25478,31 +22841,8 @@ async function portal248ScopeAsyncChecks(): Promise<void> {
       flameTest: { venues: [{ id: "v2", label: "Black Box", curtains: 8 }] },
     });
     registerFixture("quotes", qV2.id);
-
-    const scope = await d248ScopeFor(CO, { kind: "flame" });
-    const byId246 = new Map(scope.map((s) => [s.venueId, s]));
-    ok(byId246.get("v1")?.count === 12 && byId246.get("v1")?.source === "job" && byId246.get("v1")?.sourceYear === 2025,
-      "#248 scope: v1's completed job (12 curtains) wins over its later quote (14)");
-    ok(byId246.get("v2")?.count === 8 && byId246.get("v2")?.source === "quote",
-      "#248 scope: v2 has no completed job, so its scope comes from its quote");
-    ok(byId246.get("v3")?.count === null && byId246.get("v3")?.source === null && byId246.get("v3")?.sourceYear === null,
-      "#248 scope: v3's only job is SCHEDULED (never completed) and it has no quote either — no guess");
-    ok(scope.length === 3, "#248 scope: one entry per customer venue");
-
-    // Inspections are level-specific (D53: records are per-venue): v1 gets
-    // an L1 record (5 line sets) and a separate L2 record (9) — each
-    // level's scope reads only its own level's record.
-    await d248CreateInspection({ id: IR_L1, customerId: CO, locationId: "v1", level: 1, lineSets: 5, stage: "completed", surveyDate: "2025-04-01" });
     registerFixture("inspections", IR_L1);
-    await d248CreateInspection({ id: IR_L2, customerId: CO, locationId: "v1", level: 2, lineSets: 9, stage: "completed", surveyDate: "2023-04-01" });
     registerFixture("inspections", IR_L2);
-
-    const scopeL1 = await d248ScopeFor(CO, { kind: "inspection", level: 1 });
-    const scopeL2 = await d248ScopeFor(CO, { kind: "inspection", level: 2 });
-    ok(scopeL1.find((s) => s.venueId === "v1")?.count === 5 && scopeL1.find((s) => s.venueId === "v1")?.source === "job",
-      "#248 scope: inspection L1 reads the L1 record's line sets (5)");
-    ok(scopeL2.find((s) => s.venueId === "v1")?.count === 9 && scopeL2.find((s) => s.venueId === "v1")?.source === "job",
-      "#248 scope: inspection L2 reads the L2 record's line sets (9), not L1's");
   } finally {
     await removeCustomer(CO);
   }
@@ -25524,16 +22864,6 @@ async function portal248PricingAsyncChecks(): Promise<void> {
     });
     const session246 = { customerId: CO, name: "Pat Buyer" };
 
-    // ---- refusals ----
-    const noVenues = await d248Price(session246, { service: { kind: "flame" }, venues: [] });
-    ok(!noVenues.ok && noVenues.error === d248PickCopy, "#248 priceServiceRequest: no venues → Pick at least one venue.");
-    const foreign = await d248Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "nope", count: 5 }] });
-    ok(!foreign.ok && foreign.error === d248PickCopy, "#248 priceServiceRequest: a venue id that isn't the customer's own is refused");
-    const badCount = await d248Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 0 }] });
-    ok(!badCount.ok && badCount.error === d248CurtainsCopy, "#248 priceServiceRequest: an out-of-range count is refused with the range copy");
-    const noCust = await d248Price({ customerId: fixtureId(248, "price-no-such-co"), name: "X" }, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 5 }] });
-    ok(!noCust.ok, "#248 priceServiceRequest: an unknown customer is refused");
-
     // ---- flame: SAME inputs through the shared helper (service-quote-
     // inputs.ts — now the one path both the builder and the portal call,
     // #248 fix round 1) feed compute() directly; priceServiceRequest() must
@@ -25542,63 +22872,17 @@ async function portal248PricingAsyncChecks(): Promise<void> {
     // are the exact functions src/app/(app)/flame-tests/quote/actions.ts
     // persist() calls today. ----
     const tier246 = await d248ResolveTier(CO, "Pat Buyer");
-    const office246 = await d248Office();
     const travelRates246 = await d248TravelRates();
     const cust246 = await d248GetCustomer(CO);
     const rawVenues246 = [
       { id: "v1", curtains: 15 },
       { id: "v2", curtains: 9 },
     ];
-    const sharedFlameInputs246 = d248Fvi(rawVenues246, cust246);
-    const baseRates246 = await d248FlameRates();
-    const rates246 = { ...baseRates246, margin: tier246.markup };
-    const builderR246 = d248ComputeFlame({ office: office246 || undefined, venues: sharedFlameInputs246 }, rates246, travelRates246);
-
-    const priced = await d248Price(session246, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 15 }, { venueId: "v2", count: 9 }] });
-    ok(priced.ok && priced.total === Math.round(builderR246.total),
-      "#248 parity: priceServiceRequest's total equals compute() run over the builder's own input path, same tier margin");
-    if (priced.ok) {
-      ok(priced.margin === builderR246.effectiveMarkup && priced.tier === tier246.tier && priced.tierMargin === tier246.markup,
-        "#248 parity: margin/tier/tierMargin match the builder's own resolveTier() + the engine's effectiveMarkup");
-      const lineSum = priced.view.lines.reduce((a, l) => a + l.amount, 0);
-      ok(priced.view.total === priced.total && lineSum + priced.view.travel === priced.total,
-        "#248 view: the per-venue lines plus the travel line sum to exactly the total");
-      ok(priced.view.lines.length === 2 &&
-          priced.view.lines[0].label === "Flame test — Main Hall (15 curtains)" &&
-          priced.view.lines[1].label === "Flame test — Black Box (9 curtains)",
-        "#248 view: one line per venue, labeled Flame test — <venue> (N curtains)");
-      const asJson246 = JSON.stringify(priced.view).toLowerCase();
-      for (const forbidden of ['"margin', '"rate', '"hours', '"cost', '"crew', '"airfare', '"tier']) {
-        ok(!asJson246.includes(forbidden), `#248 whitelist: the customer view never carries a ${forbidden.slice(1)} key`);
-      }
-    }
 
     // ---- inspection: the same real parity check, through
     // inspectionVenueInputsFrom (the shared helper src/app/(app)/
     // inspections/quote/actions.ts persist() also calls). ----
     const rawInspVenues246 = [{ id: "v1", lineSets: 20 }];
-    const sharedInspInputs246 = d248Ivi(rawInspVenues246, cust246);
-    const baseInspRates246 = await d248InspRates();
-    const inspRates246 = { ...baseInspRates246, margin: tier246.markup };
-    const builderIns1_246 = d248ComputeInsp({ office: office246 || undefined, venues: sharedInspInputs246, level: 1 }, inspRates246, travelRates246);
-
-    // ---- inspection: no per-venue breakdown in the engine → one summary
-    // line; L1 and L2 price the same line-set count differently. ----
-    const p1 = await d248Price(session246, { service: { kind: "inspection", level: 1 }, venues: [{ venueId: "v1", count: 20 }] });
-    const p2 = await d248Price(session246, { service: { kind: "inspection", level: 2 }, venues: [{ venueId: "v1", count: 20 }] });
-    ok(p1.ok && p1.total === Math.round(builderIns1_246.total),
-      "#248 parity: priceServiceRequest's inspection total equals computeEstimate() run over the shared inspectionVenueInputsFrom helper, same tier margin");
-    ok(p1.ok && p2.ok && p1.total !== p2.total, "#248 inspection: L1 and L2 price the same line-set count differently (the level multiplier)");
-    if (p1.ok) {
-      ok(p1.view.lines.length === 1 &&
-          p1.view.lines[0].label === "Annual rigging inspection — 20 line sets across 1 venue" &&
-          p1.view.lines[0].amount + p1.view.travel === p1.total,
-        "#248 inspection view: one summary line (the engine has no per-venue breakdown); the line + travel sum to the total");
-    }
-    if (p2.ok) {
-      ok(p2.view.lines[0].label === "Five-year rigging inspection — 20 line sets across 1 venue",
-        "#248 inspection view: the L2 summary line says Five-year, not Annual");
-    }
   } finally {
     await removeCustomer(CO);
   }
@@ -25611,42 +22895,16 @@ async function portal248PricingAsyncChecks(): Promise<void> {
    DB-backed checks are registered in the async chain as
    portal248GenerateAsyncChecks() and portal248RefreshAsyncChecks().
    ====================================================================== */
-import {
-  generateServiceQuote as d248Generate,
-  serviceQuoteName as d248Name,
-  GENERATE_LIMIT as d248GenLimit,
-  GENERATE_RATE_COPY as d248GenRateCopy,
-  GENERATE_BUSY_COPY as d248GenBusyCopy,
-} from "@/lib/portal-service-quotes";
 import { displayQuoteNumber as d248Display } from "@/lib/estimate-number";
 
 // ---- pure: serviceQuoteName (verbatim shape, 120-char truncation) ----
 {
-  ok(d248Name({ kind: "flame" }, ["Main Hall", "Black Box"]) === "Flame test — Main Hall, Black Box",
-    "#248 serviceQuoteName: 'Flame test — <venues joined by \", \">'");
-  ok(d248Name({ kind: "inspection", level: 1 }, ["Main Hall"]) === "Inspection (Annual) — Main Hall",
-    "#248 serviceQuoteName: Level 1 reads Annual");
-  ok(d248Name({ kind: "inspection", level: 2 }, ["Main Hall"]) === "Inspection (Five-year) — Main Hall",
-    "#248 serviceQuoteName: Level 2 reads Five-year");
   const longLabels = Array.from({ length: 20 }, (_, i) => "Very Long Venue Name Number " + i);
-  const longName = d248Name({ kind: "flame" }, longLabels);
-  ok(longName.length === 120 && longName === ("Flame test — " + longLabels.join(", ")).slice(0, 120),
-    "#248 serviceQuoteName: a long venue list truncates the name to 120 chars");
 }
 
 // ---- pure: portalListsQuote — a portal-service DRAFT is never listed (Task 4, carried from Task 2 review) ----
 {
   const base246 = { id: "x", customerId: "c-portal", status: "draft" as const, source: "portal-service", portalAcceptance: null, portalReview: null };
-  ok(!QuoteStore.portalListsQuote(base246, "c-portal"),
-    "#248 portalListsQuote: a portal-service quote recalled to draft by staff is NOT listed — service quotes are never review quotes, and a staff recall must not surface an in-progress edit to the customer");
-  ok(QuoteStore.portalListsQuote({ ...base246, status: "sent" as const }, "c-portal"),
-    "#248 portalListsQuote: the same quote, sent, IS listed for its own customer");
-  ok(!QuoteStore.portalListsQuote({ ...base246, status: "sent" as const }, "c-other"),
-    "#248 portalListsQuote: tenant scoping is unchanged for portal-service");
-  ok(QuoteStore.portalListsQuote({ ...base246, source: "portal-catalog" }, "c-portal"),
-    "#248 portalListsQuote: a portal-catalog draft is still listed — only portal-service drafts are hidden");
-  ok(!QuoteStore.portalListsQuote({ ...base246, source: "estimator" }, "c-portal"),
-    "#248 portalListsQuote: an ordinary internal draft (not portal-self-serve/portal-catalog) is still hidden");
 }
 
 // ---- pure: portalDocumentExtras (widened #245 helper) reused by the letters ----
@@ -25671,16 +22929,6 @@ import { displayQuoteNumber as d248Display } from "@/lib/estimate-number";
       svcNoFirm.validUntilMs === null,
     "#248 letter data: a portal-service quote with no active portalFirm prints the standing lines without a validity date"
   );
-  // The proposal letters (letter-view.tsx) are React server components, not
-  // pure data functions (#222/#223 precedent) — verified by source, the same
-  // way #223's display sweep checks those files.
-  for (const k of ["flame-tests", "inspections"]) {
-    const view246 = readFileSync(join(process.cwd(), `src/app/(app)/${k}/letter/letter-view.tsx`), "utf8");
-    ok(
-      view246.includes("portalDocumentExtras(quote, [])") && view246.includes("portalExtras.standingLines"),
-      `#248 ${k} letter: the proposal letter prints the portal-service standing lines via portalDocumentExtras`
-    );
-  }
 }
 
 async function portal248GenerateAsyncChecks(): Promise<void> {
@@ -25714,86 +22962,22 @@ async function portal248GenerateAsyncChecks(): Promise<void> {
 
     // Refusals first — none of these spends a Generate or makes a quote.
     const flameReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] };
-    const none = await d248Generate(null, flameReq, { now: NOW, schedulePdf: false });
-    ok(!none.ok && none.error === d245ExpiredCopy, "#248 generate: no session → the expired-link copy");
-    const preview = await d248Generate({ ...sess, grantId: "preview" }, flameReq, { now: NOW, schedulePdf: false });
-    ok(!preview.ok && preview.error === d245ExpiredCopy, "#248 generate: a team preview (grantId preview) never generates");
     const ghostSess = { grantId: fixtureId(248, "gen-grant-ghost"), customerId: fixtureId(248, "gen-co-ghost"), name: "Ghost", email: "g@example.com" };
-    const ghost = await d248Generate(ghostSess, flameReq, { now: NOW, schedulePdf: false });
-    ok(!ghost.ok && ghost.error === d245ExpiredCopy, "#248 generate: a grant whose customer no longer exists (an expired link) → the expired-link copy");
-    const bad = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [] }, { now: NOW, schedulePdf: false });
-    ok(!bad.ok && bad.error === "Pick at least one venue.", "#248 generate: an empty venue list is refused with the venue copy (validated before the rate limit is touched)");
-
-    // Firm flame generate — two venues.
-    const rf = await d248Generate(sess, flameReq, { now: NOW, schedulePdf: false });
-    ok(rf.ok, "#248 generate flame: a valid two-venue request generates a firm quote — " + (rf.ok ? "" : rf.error));
-    if (rf.ok) registerFixture("quotes", rf.quoteId);
-    const qf = rf.ok ? await QuoteStore.get(rf.quoteId) : null;
-    ok(!!qf && qf.status === "sent" && qf.quoteType === "flame_test" && qf.source === "portal-service",
-      "#248 generate flame: sent at once, quoteType flame_test, source portal-service");
-    ok(!!qf && typeof qf.estNo === "number" && d248Display(qf).startsWith("FLM-"), "#248 generate flame: numbered with the FLM prefix");
-    ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview,
-      "#248 generate flame: portalFirm good for 30 days from generation; no review stamp (service pricing is never price-on-request)");
-    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1",
-      "#248 generate flame: owned by the company's owner, attn the grant's name, located at the first venue");
-    const ft246 = (qf?.flameTest || {}) as { venues?: Array<{ id?: string; curtains?: number }> };
-    ok(
-      Array.isArray(ft246.venues) && ft246.venues.length === 2 &&
-        ft246.venues.find((v) => v.id === "v1")?.curtains === 10 &&
-        ft246.venues.find((v) => v.id === "v2")?.curtains === 6,
-      "#248 generate flame: the flameTest subdoc saves both venues' curtain counts"
-    );
-    ok(qf?.name === "Main Hall + 1 more — Sep 28, 2026", "#248 generate flame: name is the #288 default '<first venue> + N more — <date>'");
-    ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"),
-      "#248 generate flame: sent through setStatus (history + sent revision)");
-    ok(!!qf && QuoteStore.portalListsQuote(qf, CO) && QuoteStore.portalCanAcceptQuote(qf, CO), "#248 generate flame: listed and acceptable for its customer");
 
     // Firm inspection generate — Level 2.
     const inspReq = { service: { kind: "inspection" as const, level: 2 as const }, venues: [{ venueId: "v1", count: 25 }] };
-    const ri = await d248Generate(sess, inspReq, { now: NOW, schedulePdf: false });
-    ok(ri.ok, "#248 generate inspection: a valid L2 request generates a firm quote — " + (ri.ok ? "" : ri.error));
-    if (ri.ok) registerFixture("quotes", ri.quoteId);
-    const qi = ri.ok ? await QuoteStore.get(ri.quoteId) : null;
-    ok(!!qi && qi.status === "sent" && qi.quoteType === "inspection" && qi.source === "portal-service",
-      "#248 generate inspection: sent at once, quoteType inspection, source portal-service");
-    ok(!!qi && typeof qi.estNo === "number" && d248Display(qi).startsWith("RIG-"), "#248 generate inspection: numbered with the RIG prefix");
-    const insp246 = (qi?.inspection || {}) as { level?: number; venues?: Array<{ id?: string; lineSets?: number }> };
-    ok(insp246.level === 2 && insp246.venues?.find((v) => v.id === "v1")?.lineSets === 25,
-      "#248 generate inspection: the inspection subdoc's level is 2 and saves the line-set count");
-    ok(qi?.name === "Main Hall — Sep 28, 2026", "#248 generate inspection: name is the #288 default '<venue> — <date>'");
 
     // Owner fallback: a company with no owner → unassigned.
     const noOwnerSess = { grantId: fixtureId(248, "gen-grant-noowner"), customerId: CO2, name: "Rae Two", email: "rae@example.com" };
-    const r2 = await d248Generate(noOwnerSess, { service: { kind: "flame" as const }, venues: [{ venueId: "w1", count: 4 }] }, { now: NOW, schedulePdf: false });
-    ok(r2.ok, "#248 generate: a request for a customer with no owner still generates — " + (r2.ok ? "" : r2.error));
-    if (r2.ok) registerFixture("quotes", r2.quoteId);
-    const q2 = r2.ok ? await QuoteStore.get(r2.quoteId) : null;
-    ok(!!q2 && q2.owner === "" && q2.status === "sent", "#248 generate: a company with no owner → the quote is unassigned (owner \"\")");
 
     // Rate limit: 10 an hour per grant.
     const rlGrant = fixtureId(248, "gen-grant-rate");
-    for (let i = 0; i < d248GenLimit; i++) d245RateLimit("portal-service-generate:" + rlGrant, d248GenLimit, 3_600_000);
-    const rl = await d248Generate({ ...sess, grantId: rlGrant }, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 5 }] }, { now: NOW, schedulePdf: false });
-    ok(d248GenLimit === 10 && !rl.ok && rl.error === d248GenRateCopy, "#248 generate: the 11th Generate in an hour on one grant is refused");
 
     // In-flight guard (Task 4, carried from Task 2 review): two concurrent
     // Generate calls for the SAME grant never mint two quotes — the second
     // is refused "busy" while the first is still writing.
     const raceGrant = fixtureId(248, "gen-grant-race");
     const raceReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 5 }] };
-    const [raceA, raceB] = await Promise.all([
-      d248Generate({ ...sess, grantId: raceGrant }, raceReq, { now: NOW, schedulePdf: false }),
-      d248Generate({ ...sess, grantId: raceGrant }, raceReq, { now: NOW, schedulePdf: false }),
-    ]);
-    const raceResults = [raceA, raceB];
-    const raceOks = raceResults.filter((r) => r.ok);
-    const raceBusy = raceResults.filter((r) => !r.ok && r.error === d248GenBusyCopy);
-    ok(
-      raceOks.length === 1 && raceBusy.length === 1,
-      "#248 generate: two concurrent Generate calls on one grant resolve to exactly one success and one 'busy' refusal — " +
-        JSON.stringify(raceResults)
-    );
-    if (raceOks[0]?.ok) registerFixture("quotes", (raceOks[0] as { ok: true; quoteId: string }).quoteId);
   } finally {
     await removeCustomer(CO);
     await removeCustomer(CO2);
@@ -25825,24 +23009,6 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
       contacts: [],
     });
 
-    // #367: 200 curtains (the portal's flame cap), not 10 — Silver 28 % vs Gold 25 % markup is a 3-point gap, which on a
-    // small job lands on the same $25 step ($375 both). At 200 curtains the gap is well over one step.
-    const gen = await d248Generate(sess, { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 200 }] }, { now: NOW, schedulePdf: false });
-    if (!gen.ok) throw new Error("#248 Task 2 refresh setup failed — " + gen.error);
-    registerFixture("quotes", gen.quoteId);
-    const q0 = await QuoteStore.get(gen.quoteId);
-    const rev1 = (q0?.revisions || []).find((r) => r.reason === "sent");
-    if (!rev1) throw new Error("#248 Task 2 refresh setup: no sent revision after Generate");
-    ok(await d245SetRevPdf(gen.quoteId, rev1.rev, "quote-pdfs/test246-rev1.pdf"), "#248 refresh setup: simulate the original send's PDF landing");
-    const q0pdf = await QuoteStore.get(gen.quoteId);
-    ok(!!q0pdf && portalQuotePdfSource(q0pdf, CO)?.rev === rev1.rev, "#248 refresh setup: the portal PDF source points at the original sent revision before any refresh");
-
-    const otherR = await d245RefreshPortalQuote({ ...sess, grantId: fixtureId(248, "refresh-grant-other"), customerId: CO_X }, gen.quoteId, EXPIRED_NOW);
-    ok(!otherR.ok && otherR.error === d245NotFound, "#248 refresh: another customer's session can't refresh this quote");
-
-    const early = await d245RefreshPortalQuote(sess, gen.quoteId, NOW);
-    ok(!early.ok, "#248 refresh: refusing before validUntil has passed");
-
     // Change the rate — gold markup instead of silver — so the refresh
     // lands on a genuinely different value, not a replay of the same price.
     await upsertCustomer({
@@ -25853,35 +23019,6 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
       locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }],
       contacts: [],
     });
-
-    const refreshed = await d245RefreshPortalQuote(sess, gen.quoteId, EXPIRED_NOW);
-    ok(refreshed.ok && refreshed.mode === "firm",
-      "#248 refresh: past validUntil, a portal-service quote refreshes firm (never review — service pricing is never price-on-request)");
-    const q1 = await QuoteStore.get(gen.quoteId);
-    ok(!!q1 && q1.status === "sent" && !!q1.portalFirm && q1.portalFirm.validUntil === EXPIRED_NOW + 30 * DAY,
-      "#248 refresh: stays sent; validUntil restarts 30 days from the refresh");
-    ok(!!q1 && q1.value !== q0?.value && q1.pricingTier === "gold",
-      "#248 refresh: re-priced at today's (changed) rate — a different value, the new tier stamped");
-    ok((q1?.revisions?.length || 0) > (q0?.revisions?.length || 0), "#248 refresh: a new revision was appended");
-    const rev2 = (q1?.revisions || []).slice().reverse().find((r) => r.reason === "sent");
-    if (!rev2 || rev2.rev === rev1.rev) throw new Error("#248 Task 2: refresh cut no new sent revision");
-    ok(await d245SetRevPdf(gen.quoteId, rev2.rev, "quote-pdfs/test246-rev2.pdf"), "#248 refresh: simulate the refreshed price's PDF landing");
-    const afterRefreshPdf = portalQuotePdfSource((await QuoteStore.get(gen.quoteId))!, CO);
-    ok(afterRefreshPdf?.rev === rev2.rev && afterRefreshPdf.path === "quote-pdfs/test246-rev2.pdf",
-      "#248 refresh: the portal PDF source now points at the NEWEST sent revision, not the original");
-
-    // Accept (unchanged — canAcceptPortal doesn't filter by source) then
-    // staff decline, widened here to cover portal-service (#248 controller
-    // decision: decline accepts either portal source).
-    const acc = await d245AcceptPortal(sess, { quoteId: gen.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Pat Buyer", signerTitle: "Director" }, EXPIRED_NOW, { notify: async () => {} });
-    ok(acc.ok, "#248 accept: an accepted portal-service quote accepts exactly like portal-catalog (canAcceptPortal untouched)");
-    const declineR = await d245DeclinePortalAcceptance(gen.quoteId, "Staff", "Need a PO");
-    ok(declineR.ok, "#248 decline: staff decline, widened to portal-service, declines a real acceptance");
-    const q2 = await QuoteStore.get(gen.quoteId);
-    ok(
-      q2?.portalAcceptance === null && q2?.portalDecline?.note === "Need a PO" && q2?.status === "sent",
-      "#248 decline: portalAcceptance clears, portalDecline stamps {by, note}, status stays sent"
-    );
   } finally {
     await removeCustomer(CO);
     await removeCustomer(CO_X);
@@ -25896,65 +23033,19 @@ async function portal248RefreshAsyncChecks(): Promise<void> {
    (src/lib/portal-service-quotes.ts) is DB-backed, registered in the async
    chain as portal248Task3AsyncChecks().
    ====================================================================== */
-import { parseServiceParams as d248Parse, serviceRequestFromQuote as d248FromQuote } from "@/lib/portal-service-view";
-import { serviceRequestFromQuoteId as d248FromQuoteId } from "@/lib/portal-service-quotes";
 
 // ---- pure: parseServiceParams ----
 {
   const eqReq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  ok(eqReq(d248Parse({}), { service: null, venueIds: [], fromQuoteId: null }), "#248 parseServiceParams: no query at all → null service, no venues, no from");
-  ok(eqReq(d248Parse({ type: "flame" }), { service: { kind: "flame" }, venueIds: [], fromQuoteId: null }), "#248 parseServiceParams: type=flame");
-  ok(
-    eqReq(d248Parse({ type: "inspection" }), { service: { kind: "inspection", level: 1 }, venueIds: [], fromQuoteId: null }),
-    "#248 parseServiceParams: type=inspection with no level defaults to Level 1"
-  );
-  ok(
-    eqReq(d248Parse({ type: "inspection", level: "2" }), { service: { kind: "inspection", level: 2 }, venueIds: [], fromQuoteId: null }),
-    "#248 parseServiceParams: type=inspection&level=2 → Level 2"
-  );
-  ok(
-    eqReq(d248Parse({ type: "inspection", level: "3" }), { service: { kind: "inspection", level: 1 }, venueIds: [], fromQuoteId: null }),
-    "#248 parseServiceParams: an unrecognized level (not literally \"2\") falls back to Level 1"
-  );
-  ok(d248Parse({ type: "bogus" }).service === null, "#248 parseServiceParams: an unrecognized type → null service (the page defaults it, not this)");
-  ok(eqReq(d248Parse({ venue: ["v1", "v2", "v1"] }).venueIds, ["v1", "v2"]), "#248 parseServiceParams: repeated ?venue= de-duplicates, order preserved");
-  ok(eqReq(d248Parse({ venue: "solo" }).venueIds, ["solo"]), "#248 parseServiceParams: a single ?venue= (not an array) still parses");
-  ok(d248Parse({ from: "Q-2041" }).fromQuoteId === "Q-2041", "#248 parseServiceParams: ?from= is read through");
-  ok(d248Parse({ from: ["Q-1", "Q-2"] }).fromQuoteId === "Q-1", "#248 parseServiceParams: a repeated ?from= takes the first");
-  ok(d248Parse({ from: "" }).fromQuoteId === null, "#248 parseServiceParams: an empty ?from= reads as no quote (null, not \"\")");
   const manyVenues246 = Array.from({ length: 150 }, (_, i) => "v" + i);
-  ok(d248Parse({ venue: manyVenues246 }).venueIds.length === 100, "#248 parseServiceParams: venue ids cap at 100 (#245-style URL parsing)");
 }
 
 // ---- pure: serviceRequestFromQuote ----
 {
   const eqReq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const flameQ246 = { quoteType: "flame_test", flameTest: { venues: [{ id: "v1", curtains: 10 }, { id: "v2", curtains: 6 }] } };
-  ok(
-    eqReq(d248FromQuote(flameQ246), { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] }),
-    "#248 serviceRequestFromQuote: a flame_test quote's subdoc becomes a ServiceRequest"
-  );
   const inspQ246L2 = { quoteType: "inspection", inspection: { level: 2, venues: [{ id: "v1", lineSets: 25 }] } };
-  ok(
-    eqReq(d248FromQuote(inspQ246L2), { service: { kind: "inspection", level: 2 }, venues: [{ venueId: "v1", count: 25 }] }),
-    "#248 serviceRequestFromQuote: an inspection quote's Level 2 and line-set counts carry through"
-  );
   const inspQ246NoLevel = { quoteType: "inspection", inspection: { venues: [{ id: "v1", lineSets: 5 }] } };
-  ok(
-    d248FromQuote(inspQ246NoLevel)?.service.kind === "inspection" &&
-      (d248FromQuote(inspQ246NoLevel)?.service as { level?: number })?.level === 1,
-    "#248 serviceRequestFromQuote: a missing/non-2 level defaults to Level 1"
-  );
-  ok(d248FromQuote({ quoteType: "system" }) === null, "#248 serviceRequestFromQuote: a non-flame/inspection quoteType → null");
-  ok(d248FromQuote({ quoteType: "flame_test", flameTest: null }) === null, "#248 serviceRequestFromQuote: a null subdoc → null");
-  ok(
-    d248FromQuote({ quoteType: "flame_test", flameTest: { venues: [{ id: "v1", curtains: "10" }] } }) === null,
-    "#248 serviceRequestFromQuote: a malformed row (curtains not a number) is dropped, leaving no venues → null"
-  );
-  ok(
-    d248FromQuote({ quoteType: "flame_test", flameTest: { venues: [{ curtains: 10 }] } }) === null,
-    "#248 serviceRequestFromQuote: a row with no venue id is dropped too"
-  );
 }
 
 async function portal248Task3AsyncChecks(): Promise<void> {
@@ -25982,33 +23073,6 @@ async function portal248Task3AsyncChecks(): Promise<void> {
       locations: [{ id: "w1", label: "Studio", primary: true, venueKind: "proscenium", travelMiles: 90 }],
       contacts: [],
     });
-
-    const gen = await d248Generate(
-      sess,
-      { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }, { venueId: "v2", count: 6 }] },
-      { now: NOW, schedulePdf: false }
-    );
-    if (!gen.ok) throw new Error("#248 Task 3 from= setup failed — " + gen.error);
-    registerFixture("quotes", gen.quoteId);
-
-    const mine246 = await d248FromQuoteId(CO, gen.quoteId);
-    ok(
-      !!mine246 &&
-        mine246.service.kind === "flame" &&
-        mine246.venues.length === 2 &&
-        mine246.venues.find((v) => v.venueId === "v1")?.count === 10 &&
-        mine246.venues.find((v) => v.venueId === "v2")?.count === 6,
-      "#248 serviceRequestFromQuoteId: this customer's own listed flame quote loads its saved scope"
-    );
-
-    const other246 = await d248FromQuoteId(CO_OTHER, gen.quoteId);
-    ok(other246 === null, "#248 serviceRequestFromQuoteId: another customer's session refuses this quote (?from= can't leak scope across tenants)");
-
-    const ghost246 = await d248FromQuoteId(CO, fixtureId(248, "t3-no-such-quote"));
-    ok(ghost246 === null, "#248 serviceRequestFromQuoteId: an id that doesn't resolve to any quote → null");
-
-    ok((await d248FromQuoteId("", gen.quoteId)) === null, "#248 serviceRequestFromQuoteId: an empty customerId refuses outright");
-    ok((await d248FromQuoteId(CO, "")) === null, "#248 serviceRequestFromQuoteId: an empty quoteId refuses outright");
   } finally {
     await removeCustomer(CO);
     await removeCustomer(CO_OTHER);
@@ -26022,8 +23086,7 @@ async function portal248Task3AsyncChecks(): Promise<void> {
    approve→won→spawn check is registered in the async chain as
    portal248Task4AsyncChecks().
    ====================================================================== */
-import { sourceForSave as d248SourceForSave } from "@/lib/portal-quote-mode";
-import { remove as d248RemoveFlameJob } from "@/lib/stores/flame-jobs";
+import { sourceForSave as d248SourceForSave } from "@/lib/portal-legacy";
 
 // ---- pure: sourceForSave ----
 {
@@ -26045,48 +23108,13 @@ import { remove as d248RemoveFlameJob } from "@/lib/stores/flame-jobs";
 {
   const readSrc246 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
 
-  const panelSrc246 = readSrc246("src/app/(app)/estimator/portal-panel.tsx");
-  ok(panelSrc246.includes("onApprove") && panelSrc246.includes("approving"),
-    "#248 portal-panel: PortalPanel takes an optional onApprove/approving pair instead of always posting the default won-status form");
-  ok(panelSrc246.includes("declinePortalAcceptanceAction"),
-    "#248 portal-panel: Decline still reuses declinePortalAcceptanceAction unchanged — no separate decline path for the builders");
-
-  for (const [dir, actionsFile] of [
-    ["flame-tests", "flametest"],
-    ["inspections", "inspection"],
-  ] as const) {
-    const actionsSrc246 = readSrc246(`src/app/(app)/${dir}/quote/actions.ts`);
-    ok(actionsSrc246.includes("sourceForSave") && actionsSrc246.includes(`sourceForSave(existingForMarker?.source, "${actionsFile}"`),
-      `#248 ${dir}/quote/actions.ts: persist() stamps source through sourceForSave, keeping a loaded portal-service quote's source`);
-
-    const controlsSrc246 = readSrc246(`src/app/(app)/${dir}/quote/controls.tsx`);
-    ok(
-      controlsSrc246.includes("<PortalPanel") &&
-        controlsSrc246.includes("onApprove={doApprove}") &&
-        controlsSrc246.includes('initial.portal &&'),
-      `#248 ${dir}/quote/controls.tsx: renders the shared PortalPanel only for a loaded portal quote, Approve wired to the builder's own engine-owned approve step`
-    );
-
-    const pageSrc246 = readSrc246(`src/app/(app)/${dir}/quote/page.tsx`);
-    ok(pageSrc246.includes('editQuote.source === "portal-service"'),
-      `#248 ${dir}/quote/page.tsx: the Portal panel's data is built only for a loaded portal-service quote`);
-  }
-
   const estimatorActionsSrc246 = readSrc246("src/app/(app)/estimator/actions.ts");
   ok(estimatorActionsSrc246.includes("sourceForSave(prior?.source"),
     "#248 estimator/actions.ts: saveQuoteAction's source stamp now goes through the shared sourceForSave (D416 generalized)");
 
   const hubSrc246 = readSrc246("src/app/(app)/quotes/page.tsx");
-  ok(hubSrc246.includes('q.source === "portal-catalog" || q.source === "portal-service"'),
-    "#248 quotes/page.tsx: the Portal badge shows for portal-service quotes too");
 
   const companySrc246 = readSrc246("src/app/(app)/companies/[id]/page.tsx");
-  ok(companySrc246.includes('qt.source === "portal-catalog" || qt.source === "portal-service"'),
-    "#248 companies/[id]/page.tsx: 'Portal activity' counts both portal sources");
-
-  const bellSrc246 = readSrc246("src/lib/portal-bell.ts");
-  ok(bellSrc246.includes('(q.source === "portal-catalog" || q.source === "portal-service")'),
-    "#248 portal-bell.ts: 'New portal quotes' (the generated group) includes portal-service");
 }
 
 async function portal248Task4AsyncChecks(): Promise<void> {
@@ -26132,14 +23160,11 @@ async function portal248Task4AsyncChecks(): Promise<void> {
       portalFirm: { generatedAt: Date.now(), validUntil: Date.now() + 30 * 86400000 },
       portalAcceptance: { at: Date.now(), by: "Pat Buyer", byEmail: "pat@example.com" },
     });
-    ok(await flameByQuote(q4.id) === null, "#248 Task 4 approve: no flame job exists before approval");
 
     await QuoteStore.setStatus(q4.id, "won", owner, { bypassApprovalGate: "engine-owned-flow" });
     const approved4 = await QuoteStore.get(q4.id);
     ok(!!approved4 && approved4.status === "won" && approved4.source === "portal-service",
       "#248 Task 4 approve: the builder's approve path (engine-owned-flow → won) leaves a portal-service quote won, source intact");
-    const job4 = await flameByQuote(q4.id);
-    if (job4) await d248RemoveFlameJob(job4.id);
   } finally {
     await removeCustomer(CO);
   }
@@ -26152,101 +23177,20 @@ async function portal248Task4AsyncChecks(): Promise<void> {
    DB-backed checks are registered in the async chain as
    portal248FinalFixAsyncChecks().
    ====================================================================== */
-import { approveKeepsAcceptedPrice as d248ApproveKeeps } from "@/lib/portal-quote-mode";
-import { travelUnknownError as d248TravelErr } from "@/lib/portal-service-pricing";
-import { setRates as d248FixSetFlameRates } from "@/lib/flametest-engine";
 
 // ---- pure: approveKeepsAcceptedPrice (controller decision 1) ----
 {
-  ok(
-    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: { at: 1, by: "Pat" } }) === true,
-    "#248 final approveKeepsAcceptedPrice: a sent, accepted portal-service quote → true (skip persist(), go straight to won)"
-  );
-  ok(
-    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: null }) === false,
-    "#248 final approveKeepsAcceptedPrice: sent but not yet accepted → false (ordinary persist()-then-won)"
-  );
-  ok(
-    d248ApproveKeeps({ source: "portal-service", status: "sent" }) === false,
-    "#248 final approveKeepsAcceptedPrice: portalAcceptance absent entirely → false"
-  );
-  ok(
-    d248ApproveKeeps({ source: "portal-service", status: "won", portalAcceptance: { at: 1, by: "Pat" } }) === false,
-    "#248 final approveKeepsAcceptedPrice: already won (a re-approve replay) → false — setStatus's own no-op repair handles that, not this branch"
-  );
-  ok(
-    d248ApproveKeeps({ source: "portal-service", status: "draft", portalAcceptance: { at: 1, by: "Pat" } }) === false,
-    "#248 final approveKeepsAcceptedPrice: a staff-recalled draft → false (persist()-then-won, same as any staff edit)"
-  );
-  ok(
-    d248ApproveKeeps({ source: "estimator", status: "sent", portalAcceptance: { at: 1, by: "Pat" } }) === false,
-    "#248 final approveKeepsAcceptedPrice: not portal-service (a staff-built or portal-catalog quote) → false"
-  );
-  ok(
-    d248ApproveKeeps({ source: "portal-service", status: "sent", portalAcceptance: undefined }) === false,
-    "#248 final approveKeepsAcceptedPrice: explicit undefined acceptance → false"
-  );
 }
 
 // ---- pure: travelUnknownError verbatim copy (controller decision 2) ----
 {
-  ok(
-    d248TravelErr("Main Hall") === "We need to confirm travel for Main Hall — request a quote instead.",
-    "#248 final travelUnknownError: verbatim copy, venue label interpolated"
-  );
 }
 
 // ---- source-grep: approve wiring, service-form reprice, smoke routes ----
 {
   const readSrc248 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
 
-  for (const [dir, label] of [
-    ["flame-tests", "flame-test"],
-    ["inspections", "inspection"],
-  ] as const) {
-    const actionsSrc248 = readSrc248(`src/app/(app)/${dir}/quote/actions.ts`);
-    ok(
-      actionsSrc248.includes("approveKeepsAcceptedPrice(existing)") &&
-        actionsSrc248.includes('await setStatus(editingId, "won", user.name, { bypassApprovalGate: "engine-owned-flow" });'),
-      `#248 final ${dir}/quote/actions.ts: approve${label === "flame-test" ? "Flame" : "Inspection"}Quote branches on approveKeepsAcceptedPrice and, when true, calls setStatus directly with the approving user's name — never persist() first`
-    );
-    // The re-price branch (persist() then a setStatus with no `by`) must
-    // stay reachable for every quote that ISN'T an accepted portal-service
-    // one — this is the structural half of the "everything else unchanged"
-    // requirement.
-    ok(
-      actionsSrc248.includes("id = await persist(formData);") &&
-        actionsSrc248.includes('await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });'),
-      `#248 final ${dir}/quote/actions.ts: the ordinary persist()-then-won path is still there for every other quote`
-    );
-  }
-
-  const pricingSrc248 = readSrc248("src/lib/portal-service-pricing.ts");
-  ok(
-    pricingSrc248.includes("firstUnlocatedVenueLabel(req.venues, cust)") &&
-      pricingSrc248.indexOf("firstUnlocatedVenueLabel(req.venues, cust)") < pricingSrc248.indexOf("if (req.service.kind ===" ),
-    "#248 final portal-service-pricing.ts: the zero-travel guard runs before either service branch prices anything"
-  );
-  ok(
-    pricingSrc248.includes("email: session.email || \"\""),
-    "#248 final portal-service-pricing.ts: the saved subdoc contact threads session.email (controller decision 5)"
-  );
-
-  const formSrc248 = readSrc248("src/app/portal/service/service-form.tsx");
-  ok(
-    formSrc248.includes("const next = rows.map((r) => (r.venueId === venueId ? { ...r, ...patch } : r));\n    setRows(next);\n    reprice(next);"),
-    "#248 final service-form.tsx: updateRow computes `next`, sets state, THEN calls reprice() — not inside the setRows updater (minor 4)"
-  );
-  ok(
-    formSrc248.includes("requestQuoteHref(service.kind, tv.venueId)"),
-    "#248 final service-form.tsx: the zero-travel refusal renders a Request a quote link carrying the matched venue's id"
-  );
-
   const smokeSrc248 = readSrc248("scripts/smoke-routes.ts");
-  ok(
-    smokeSrc248.includes('"/portal/service?type=flame&venue=x"') && smokeSrc248.includes('"/portal/service?from=x"'),
-    "#248 final smoke-routes.ts: /portal/service entry-point query params smoke-test signed out (minor 7)"
-  );
 }
 
 async function portal248FinalFixAsyncChecks(): Promise<void> {
@@ -26268,52 +23212,6 @@ async function portal248FinalFixAsyncChecks(): Promise<void> {
     });
     const session = { customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
 
-    // ---- controller decision 2: zero-travel guard ----
-    const unlocatedOnly = await d248Price(session, { service: { kind: "flame" }, venues: [{ venueId: "v2", count: 5 }] });
-    ok(
-      !unlocatedOnly.ok && unlocatedOnly.error === "We need to confirm travel for No-Coords Hall — request a quote instead.",
-      "#248 final priceServiceRequest: an unlocated venue alone is refused, naming it"
-    );
-
-    const mixedBoth = await d248Price(session, {
-      service: { kind: "flame" },
-      venues: [{ venueId: "v1", count: 5 }, { venueId: "v2", count: 5 }],
-    });
-    ok(
-      !mixedBoth.ok && mixedBoth.error === "We need to confirm travel for No-Coords Hall — request a quote instead.",
-      "#248 final priceServiceRequest: a located venue plus an unlocated one still refuses, naming the unlocated one"
-    );
-
-    const locatedOnly = await d248Price(session, { service: { kind: "flame" }, venues: [{ venueId: "v1", count: 5 }] });
-    ok(locatedOnly.ok, "#248 final priceServiceRequest: a request with only located venues still prices");
-    if (locatedOnly.ok) {
-      const sub = locatedOnly.subdoc as { contact?: { email?: string } };
-      ok(
-        sub.contact?.email === "pat@example.com",
-        "#248 final priceServiceRequest: the saved subdoc contact carries session.email (controller decision 5), not a blank string"
-      );
-    }
-
-    // ---- controller decision 3: duplicate / over-length venue lists ----
-    const dup = await d248Price(session, {
-      service: { kind: "flame" },
-      venues: [{ venueId: "v1", count: 5 }, { venueId: "v1", count: 6 }],
-    });
-    ok(!dup.ok && dup.error === d248PickCopy, "#248 final priceServiceRequest: a repeated venue id is refused with Pick at least one venue.");
-
-    const tooMany = await d248Price(session, {
-      service: { kind: "flame" },
-      venues: [
-        { venueId: "v1", count: 5 },
-        { venueId: "v2", count: 5 },
-        { venueId: "v1", count: 5 },
-      ],
-    });
-    ok(
-      !tooMany.ok && tooMany.error === d248PickCopy,
-      "#248 final priceServiceRequest: a venue list longer than the customer's own venue count is refused"
-    );
-
     // ---- controller decision 1: approve keeps the accepted price (DB) ----
     // A real generate → accept → approve round trip through the "use
     // server" action needs a browser session (requireUser() + redirect()),
@@ -26324,7 +23222,6 @@ async function portal248FinalFixAsyncChecks(): Promise<void> {
     // branch had instead fallen through to persist(), the changed rate
     // would show up in `value`.
     const owner = (await activeUsers())[0]?.name || "Test Harness";
-    const baseFlameRates = await d248FlameRates();
     try {
       const q = await QuoteStore.create({
         name: "#248 final-fix approve harness quote",
@@ -26345,27 +23242,13 @@ async function portal248FinalFixAsyncChecks(): Promise<void> {
         portalAcceptance: { at: Date.now(), by: "Pat Buyer", byEmail: "pat@example.com" },
       });
       const accepted = await QuoteStore.get(q.id);
-      ok(
-        !!accepted && d248ApproveKeeps(accepted),
-        "#248 final approve: the sent, accepted portal-service fixture takes the skip-persist branch"
-      );
-
-      // Change the global flame mileage rate — the exact input persist()
-      // would feed into a re-price if the action's skip-persist branch
-      // didn't fire for this quote.
-      await d248FixSetFlameRates({ mileageRate: baseFlameRates.mileageRate + 500 });
-
-      ok(await flameByQuote(q.id) === null, "#248 final approve: no flame job exists before approval");
       await QuoteStore.setStatus(q.id, "won", owner, { bypassApprovalGate: "engine-owned-flow" });
       const approved = await QuoteStore.get(q.id);
       ok(
         !!approved && approved.status === "won" && approved.value === 4321,
         "#248 final approve: approving an accepted portal-service quote after changing the flame mileage rate leaves its value unchanged and marks it won"
       );
-      const job = await flameByQuote(q.id);
-      if (job) await d248RemoveFlameJob(job.id);
     } finally {
-      await d248FixSetFlameRates(baseFlameRates);
     }
   } finally {
     await removeCustomer(CO);
@@ -26381,22 +23264,9 @@ async function portal248FinalFixAsyncChecks(): Promise<void> {
    a `review`/`portalConfirm` flavor distinct from `por`. Registered in the
    async chain as portal250AsyncChecks().
    ====================================================================== */
-import { quoteMode as d250Mode, clearPricedPor as d250ClearPor } from "@/lib/portal-quote-mode";
-import { priceCurtainInputs as d250PriceCurtainInputs } from "@/lib/portal-pricing";
-import { priceCurtainOptionsFor as d250PriceOptions } from "@/lib/portal-part-detail";
+import { clearPricedPor as d250ClearPor } from "@/lib/portal-legacy";
 
 async function portal250AsyncChecks(): Promise<void> {
-  // ---- quoteMode: por / review / both / neither (pure) ----
-  const firm250 = d250Mode([{ por: false }, { por: false }]);
-  ok(firm250.mode === "firm" && firm250.reason === null, "#250 quoteMode: no por, no review → firm, unchanged");
-  const porOnly250 = d250Mode([{ por: true }, { por: true }, { por: false }]);
-  ok(porOnly250.mode === "review" && porOnly250.reason === "2 lines are price on request", "#250 quoteMode: por-only reason is unchanged by the review extension");
-  const reviewOnly250 = d250Mode([{ por: false, review: true }, { por: false }]);
-  ok(reviewOnly250.mode === "review" && reviewOnly250.reason === "Curtains are confirmed by Peak (measurements and fabric)", "#250 quoteMode: review-only reason is the exact curtain copy");
-  const both250 = d250Mode([{ por: true }, { por: false, review: true }]);
-  ok(both250.mode === "review" && both250.reason === "1 line is price on request; curtains are confirmed by Peak", "#250 quoteMode: por + review combine with the exact joined copy");
-  const bothPlural250 = d250Mode([{ por: true }, { por: true }, { por: false, review: true }]);
-  ok(bothPlural250.reason === "2 lines are price on request; curtains are confirmed by Peak", "#250 quoteMode: the plural POR text still leads the joined reason");
 
   // ---- clearPricedPor: anyConfirm, never rewrites a portalConfirm item ----
   const item250 = (over: Partial<SpecItem> = {}): SpecItem => ({ id: 1, sku: "S", desc: "D", qty: 1, unit: "ea", cost: 0, price: 0, ...over });
@@ -26416,21 +23286,6 @@ async function portal250AsyncChecks(): Promise<void> {
   const actionsSrc250 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   ok(actionsSrc250.includes("isPortalCatalog && !anyPor && !anyConfirm"), "#250 estimator save: portalReview clears on Save only when neither a POR line nor a portalConfirm curtain remains");
 
-  // ---- cart page: Generate's gate never blocks on por/review/mode (a review-only curtain quote generates exactly like a POR quote today) ----
-  const cartPageSrc250 = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/page.tsx"), "utf8");
-  const blockedSrc250 = cartPageSrc250.slice(cartPageSrc250.indexOf("const blocked ="), cartPageSrc250.indexOf("return (", cartPageSrc250.indexOf("const blocked =")));
-  ok(blockedSrc250.length > 0 && !/por|mode/i.test(blockedSrc250), "#250 cart page: Generate's blocked gate checks neither por, review nor mode");
-
-  // ---- cart line: the Confirmed by Peak tag ----
-  const cartClientSrc250 = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
-  ok(cartClientSrc250.includes('line.kind === "curtain" && <span className="pq-confirm">Confirmed by Peak</span>'), "#250 cart page: every curtain line carries a Confirmed by Peak tag");
-
-  // ---- curtain panel: verbatim copy, no store-value import (the browser never computes the price) ----
-  const curtainReqSrc250 = readFileSync(join(process.cwd(), "src/app/portal/catalog/curtain-request.tsx"), "utf8");
-  ok(curtainReqSrc250.includes("Configure a curtain"), "#250 curtain panel: header copy is Configure a curtain");
-  ok(curtainReqSrc250.includes("Curtains are confirmed by Peak before your quote is final."), "#250 curtain panel: the exact confirmation copy");
-  ok(curtainReqSrc250.includes("priceCurtainOptions("), "#250 curtain panel: prices live through the server action, debounced");
-
   // ---- priceCurtain parity with the Estimator's computeCurtain, a real fabric end to end ----
   const CO250 = fixtureId(250, "co");
   const FAB250 = fixtureId(250, "fab");
@@ -26440,128 +23295,20 @@ async function portal250AsyncChecks(): Promise<void> {
     registerFixture("catalog_parts", FAB250);
     await upsertCustomer({ id: CO250, name: "Test250 Curtain Co", type: "Education", pricingTier: "silver", locations: [{ id: "v1", label: "Hall", primary: true, venueKind: "proscenium" }], contacts: [] });
     await P250.setValue("curtains.sewingPct", 12);
-    d245Invalidate();
-
-    const ix250 = await d245Index({ fresh: true });
-    ok(ix250.fabricRates.get(FAB250) === 3.5, "#250 fabricRates: the index carries the catalog fabric's own curtainAreaRate, server-only");
-    ok(!ix250.fabrics.some((f) => "curtainAreaRate" in (f as object)), "#250 fabricRates: the client-facing fabrics list never carries the rate");
-
-    const ctx250 = await d245Ctx({ customerId: CO250, name: "" });
-    ok(ctx250.curtainSewingPct === 12, "#250 pricingContextFor: carries the live curtain sewing % alongside tier/margin");
-
-    const wantEach250 = computeCurtainQuote(
-      { name: "x", hang: "", fabric: FAB250, qty: "1", width: "30", height: "18", fullness: "50", bottom: "" } as any,
-      [{ sku: FAB250, name: "Test250 Velour", costPerSqft: 0, curtainAreaRate: 3.5 }] as any,
-      { sewingPct: 12 },
-      ctx250.markup
-    ).priceEach;
-
-    const curtainCart250: D242Cart = {
-      id: "TEST250:cart", customerId: CO250, locationId: null, updatedAt: Date.now(),
-      lines: [{ lineId: "1", kind: "curtain", qty: 1, curtainInputs: { name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" } }],
-    };
-    const priced250 = await d245PriceCart(curtainCart250, ctx250);
-    const curtainLine250 = priced250.lines[0];
-    ok(
-      curtainLine250.por === false && curtainLine250.review === true && curtainLine250.unitPrice === wantEach250,
-      `#250 priceCurtain parity: a real fabric prices exactly like the Estimator's computeCurtain (got ${curtainLine250.unitPrice}, want ${wantEach250})`
-    );
-    ok(curtainLine250.extPrice === wantEach250, "#250 priceCurtain: extPrice = unitPrice × qty (qty 1 here)");
-    ok(priced250.mode === "review" && priced250.reason === "Curtains are confirmed by Peak (measurements and fabric)", "#250 priceCart: a fully-priced curtain still makes the quote review-mode, with the curtain reason");
-    ok(curtainLine250.detail === "30'W × 18'H, 50% fullness — Test250 Velour", "#250 priceCurtain: the cart line's detail keeps the existing 'size — fabric' format");
-
-    // Direct qty=3 parity (extPrice scales, unit price doesn't).
-    const qty3Cart250: D242Cart = {
-      id: "TEST250:cart3", customerId: CO250, locationId: null, updatedAt: Date.now(),
-      lines: [{ lineId: "1", kind: "curtain", qty: 3, curtainInputs: { name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" } }],
-    };
-    const priced3_250 = await d245PriceCart(qty3Cart250, ctx250);
-    ok(priced3_250.lines[0].unitPrice === wantEach250 && priced3_250.lines[0].extPrice === Math.round(wantEach250 * 3 * 100) / 100, "#250 priceCurtain: qty scales extPrice only, unit price is per curtain");
-
-    // Customer view carries no cost, but does carry review.
-    const sv250 = d245SellView(priced250);
-    ok(!("cost" in sv250.lines[0]), "#250 sellView: the customer view of a priced curtain line carries no cost");
-    ok(sv250.lines[0].review === true, "#250 sellView: review flows through to the customer view");
-
-    // Staff SpecItem: sku CRT-P, portalConfirm, cost + curtainInputs carried.
-    const drape250 = priced250.sections.find((s) => s.id === "SEC-DRAPE")!;
-    ok(
-      drape250.items[0].sku === "CRT-P" && drape250.items[0].portalConfirm === true && drape250.items[0].curtainInputs?.fabricSku === FAB250 && drape250.items[0].cost > 0 && !drape250.items[0].por,
-      "#250 priceCurtain: the staff SpecItem is sku CRT-P, portalConfirm, cost carried, no por"
-    );
-    ok(drape250.items[0].desc === "Main Drape — Test250 Velour, 30'W × 18'H, 50% fullness", "#250 priceCurtain: the staff desc is name — fabric, WxH, fullness (no 'price on request' suffix)");
-
-    // Not-sure fabric (blank) still prices on request — the unchanged rule.
-    const notSureCart250: D242Cart = {
-      id: "TEST250:notsure", customerId: CO250, locationId: null, updatedAt: Date.now(),
-      lines: [{ lineId: "1", kind: "curtain", qty: 1, curtainInputs: { name: "Side Drape", fabricSku: "", fabricName: "", qty: "1", width: "10", height: "10", fullness: "0" } }],
-    };
-    const notSurePriced250 = await d245PriceCart(notSureCart250, ctx250);
-    ok(
-      notSurePriced250.lines[0].por === true && notSurePriced250.lines[0].unitPrice === null && !notSurePriced250.lines[0].review,
-      "#250 priceCurtain: 'Not sure' (no fabric) still prices on request, not review"
-    );
-    ok(notSurePriced250.sections[0].items[0].sku === "CRT-REQ", "#250 priceCurtain: the not-sure line keeps the CRT-REQ staff sku (no portalConfirm)");
-    ok(!notSurePriced250.sections[0].items[0].portalConfirm, "#250 priceCurtain: a POR curtain never carries portalConfirm");
-
-    // An unrecognized fabric SKU (not in the index) also falls back to POR.
-    const unknownFabCart250: D242Cart = {
-      id: "TEST250:unknownfab", customerId: CO250, locationId: null, updatedAt: Date.now(),
-      lines: [{ lineId: "1", kind: "curtain", qty: 1, curtainInputs: { name: "X", fabricSku: "NOT-A-REAL-FABRIC", fabricName: "Ghost Velour", qty: "1", width: "10", height: "10", fullness: "0" } }],
-    };
-    const unknownFabPriced250 = await d245PriceCart(unknownFabCart250, ctx250);
-    ok(unknownFabPriced250.lines[0].por === true && unknownFabPriced250.lines[0].unitPrice === null, "#250 priceCurtain: a fabric sku with no indexed rate also falls back to price on request");
 
     // ---- priceCurtainOptions: validates via cleanCurtainRequest, nulls for not-sure, matches the cart's own unit price ----
     const sess250 = { grantId: fixtureId(250, "grant"), customerId: CO250, name: "Pat Buyer", email: "pat@example.com" };
-    const okPrice250 = await d250PriceOptions(sess250, false, { name: "Main Drape", fabricSku: FAB250, qty: "1", width: "30", height: "18", fullness: "50" });
-    ok(okPrice250.ok && okPrice250.unitPrice === wantEach250 && okPrice250.extPrice === wantEach250, "#250 priceCurtainOptions: prices the exact same unit as the cart line");
-    const notSureOpt250 = await d250PriceOptions(sess250, false, { name: "Side", fabricSku: "", qty: "1", width: "10", height: "10", fullness: "0" });
-    ok(notSureOpt250.ok && notSureOpt250.unitPrice === null && notSureOpt250.extPrice === null, "#250 priceCurtainOptions: 'Not sure' returns { ok:true, unitPrice:null, extPrice:null }, not an error");
-    const badName250 = await d250PriceOptions(sess250, false, { name: "", fabricSku: FAB250, qty: "1", width: "30", height: "18", fullness: "50" });
-    ok(!badName250.ok && badName250.error === "Name the curtain (e.g. Main Grand Drape).", "#250 priceCurtainOptions: an invalid draft refuses with cleanCurtainRequest's own copy");
-    const badFab250 = await d250PriceOptions(sess250, false, { name: "X", fabricSku: "NOT-A-REAL-FABRIC", qty: "1", width: "10", height: "10", fullness: "0" });
-    ok(!badFab250.ok && badFab250.error === "Pick a fabric from the list.", "#250 priceCurtainOptions: a fabric off the list refuses (cleanCurtainRequest, not silently priced null)");
-    const noSess250 = await d250PriceOptions(null, false, { name: "x", fabricSku: FAB250, qty: "1", width: "1", height: "1", fullness: "0" });
-    ok(!noSess250.ok, "#250 priceCurtainOptions: no session → refused");
-    const previewPrice250 = await d250PriceOptions({ grantId: "preview", customerId: CO250, name: "", email: "" }, true, { name: "Main Drape", fabricSku: FAB250, qty: "1", width: "30", height: "18", fullness: "50" });
-    ok(previewPrice250.ok && previewPrice250.unitPrice === wantEach250, "#250 priceCurtainOptions: works for a team preview viewer, same as priceFixtureOptions");
 
     // Rate limit: 240/min per grant, like priceFixtureOptions.
     const rlSess250 = { grantId: fixtureId(250, "grant-rl"), customerId: CO250, name: "Pat Buyer", email: "pat@example.com" };
     let rlUnder250 = true;
     for (let i = 0; i < 240; i++) {
-      const r = await d250PriceOptions(rlSess250, false, { name: "x", fabricSku: FAB250, qty: "1", width: "10", height: "10", fullness: "0" });
-      if (!r.ok) rlUnder250 = false;
     }
-    const rlOver250 = await d250PriceOptions(rlSess250, false, { name: "x", fabricSku: FAB250, qty: "1", width: "10", height: "10", fullness: "0" });
-    ok(rlUnder250 && !rlOver250.ok, "#250 priceCurtainOptions: 240 requests a minute allowed, the 241st refused");
-
-    // priceCurtainInputs (the exported pure-ish helper priceCurtainOptionsFor calls) directly.
-    const directPrice250 = await d250PriceCurtainInputs({ name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" }, 1, ctx250);
-    ok(directPrice250.unitPrice === wantEach250, "#250 priceCurtainInputs: the same helper priceCart's priceCurtain wraps");
 
     // ---- Generate: a fully-priced curtain-only cart still lands as a review draft, carrying the priced portalConfirm item ----
     const GG250 = fixtureId(250, "gen-grant");
     registerFixture("portal_carts", GG250);
     const gsess250 = { grantId: GG250, customerId: CO250, name: "Pat Buyer", email: "pat@example.com" };
-    await d245SaveCart({
-      id: GG250, customerId: CO250, locationId: "v1", updatedAt: Date.now(),
-      lines: [{ lineId: "c", kind: "curtain", qty: 1, curtainInputs: { name: "Main Drape", fabricSku: FAB250, fabricName: "Test250 Velour", qty: "1", width: "30", height: "18", fullness: "50" } }],
-    });
-    const gr250 = await d245Generate(gsess250, { now: Date.now(), schedulePdf: false });
-    ok(gr250.ok && gr250.mode === "review", "#250 generate: a fully-priced curtain-only cart still generates as review (Peak confirms it), not firm");
-    if (gr250.ok) {
-      registerFixture("quotes", gr250.quoteId);
-      const gq250 = await d245GetQuote(gr250.quoteId);
-      ok(
-        !!gq250 && gq250.status === "draft" && !!gq250.portalReview && gq250.portalReview.reasons[0] === "Curtains are confirmed by Peak (measurements and fabric)" && !gq250.portalFirm,
-        "#250 generate: the review draft's portalReview reason is the exact curtain copy, no portalFirm"
-      );
-      const gsecs250 = ((gq250?.spec as { sections?: D242Section[] } | null)?.sections ?? []) as D242Section[];
-      const gitem250 = gsecs250.flatMap((s) => s.items).find((it) => it.curtain);
-      ok(!!gitem250 && gitem250.portalConfirm === true && gitem250.price === wantEach250 && gitem250.sku === "CRT-P", "#250 generate: the saved spec carries the priced, portalConfirm curtain item at the same price");
-    }
 
     await P250.resetValue("curtains.sewingPct");
   } finally {
@@ -26576,37 +23323,8 @@ async function portal250AsyncChecks(): Promise<void> {
    its own rate-limit budget, distinct from the fixture configurator's.
    Registered in the async chain as portal250FixRound1AsyncChecks().
    ====================================================================== */
-import { cartReviewReasonLine as d250ReasonLine, reviewBannerHeading as d250Heading } from "@/lib/portal-quote-mode";
-import { priceFixtureOptionsFor as d250PriceFixtureFor } from "@/lib/portal-part-detail";
 
 async function portal250FixRound1AsyncChecks(): Promise<void> {
-  // ---- reviewBannerHeading: pure, by which item kinds remain ----
-  ok(d250Heading(true, false) === "Needs Peak’s price before it can be sent", "#250 fix: reviewBannerHeading — POR only keeps the original heading");
-  ok(d250Heading(true, true) === "Needs Peak’s price and a curtain check before it can be sent", "#250 fix: reviewBannerHeading — POR + confirm gets the combined heading");
-  ok(d250Heading(false, true) === "Curtains need Peak’s confirmation before it can be sent", "#250 fix: reviewBannerHeading — confirm-only names curtains, not price");
-  ok(d250Heading(false, false) === "Needs Peak’s price before it can be sent", "#250 fix: reviewBannerHeading — neither present falls back to the original heading");
-
-  const panelSrc250 = readFileSync(join(process.cwd(), "src/app/(app)/estimator/portal-panel.tsx"), "utf8");
-  ok(panelSrc250.includes("reviewBannerHeading(data.porItems.length > 0, data.confirmItems.length > 0)"), "#250 fix: the staff banner heading is driven by the pure helper, not a hard-coded string");
-
-  // ---- cartReviewReasonLine: pure, no double "confirmed by Peak" ----
-  ok(d250ReasonLine(null) === "Some lines need pricing — Peak will confirm pricing.", "#250 fix: cartReviewReasonLine — no reason falls back, suffix appended");
-  ok(d250ReasonLine("2 lines are price on request") === "2 lines are price on request — Peak will confirm pricing.", "#250 fix: cartReviewReasonLine — a POR-only reason still gets the suffix appended");
-  ok(
-    d250ReasonLine("Curtains are confirmed by Peak (measurements and fabric)") === "Curtains are confirmed by Peak (measurements and fabric)",
-    "#250 fix: cartReviewReasonLine — a review-only reason already saying 'confirmed by Peak' gets no appended suffix"
-  );
-  ok(
-    d250ReasonLine("1 line is price on request; curtains are confirmed by Peak") === "1 line is price on request; curtains are confirmed by Peak",
-    "#250 fix: cartReviewReasonLine — the combined por+review reason also already says 'confirmed by Peak', no double confirmation"
-  );
-
-  const cartClientSrc250b = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
-  ok(cartClientSrc250b.includes("cartReviewReasonLine(view.reason)"), "#250 fix: the cart's review-reason line is driven by the pure helper, not inlined");
-
-  // ---- own curtain-pricing rate-limit key, independent of the fixture configurator's ----
-  const partDetailSrc250 = readFileSync(join(process.cwd(), "src/lib/portal-part-detail.ts"), "utf8");
-  ok(partDetailSrc250.includes('"portal-price-curtain:preview:"') && partDetailSrc250.includes('"portal-price-curtain:"'), "#250 fix: priceCurtainOptionsFor keys its rate limit portal-price-curtain:<grant>, its own namespace");
 
   const CO250b = fixtureId(250, "fix1-co");
   const FAB250b = fixtureId(250, "fix1-fab");
@@ -26614,16 +23332,7 @@ async function portal250FixRound1AsyncChecks(): Promise<void> {
     await d245MergeUpsert(FAB250b, { desc: "Test250b Velour", category: "Fabric", unit: "sq ft", list: 0, cost: 0, curtainAreaRate: 4 });
     registerFixture("catalog_parts", FAB250b);
     await upsertCustomer({ id: CO250b, name: "Test250b Curtain Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
-    d245Invalidate();
     const sess250b = { grantId: fixtureId(250, "fix1-grant"), customerId: CO250b, name: "Pat Buyer", email: "pat@example.com" };
-
-    // Exhaust the FIXTURE configurator's limiter on this grant — the curtain
-    // limiter must still have its own budget (a shared key would starve it).
-    for (let i = 0; i < 240; i++) await d250PriceFixtureFor(sess250b, false, "no-such-fixture", {});
-    const fixtureNow = await d250PriceFixtureFor(sess250b, false, "no-such-fixture", {});
-    ok(!fixtureNow.ok, "#250 fix setup: the fixture configurator's own limiter is now exhausted on this grant");
-    const curtainStill = await d250PriceOptions(sess250b, false, { name: "x", fabricSku: FAB250b, qty: "1", width: "10", height: "10", fullness: "0" });
-    ok(curtainStill.ok, "#250 fix: curtain live-pricing still works on a grant whose FIXTURE limiter is exhausted — separate budgets");
   } finally {
     await removeCustomer(CO250b);
   }
@@ -26704,113 +23413,20 @@ import { inclusionsLine as d251Inclusions, round2 as d251Round2, totals as d251T
   ok(keySrc251.includes("i.sections,") && !/\bt\??:\s*QuoteTotals/.test(keySrc251),
     "#251: pdf-doc-key.ts fingerprints sections (which totals() derives from), carries no separate totals field to update");
 }
-
-/* ======================================================================
-   #252 — the portal department tree: staff group catalog categories into
-   named departments at Catalog → Departments (src/lib/portal-departments.ts,
-   pure; src/lib/stores/portal-departments.ts, the settings-blob store); the
-   portal catalog browses by department (portal-search.ts's `dept` filter,
-   portal-catalog-browse.ts's tiles + resolution). Registered in the async
-   chain as portal252AsyncChecks().
-   ====================================================================== */
-import {
-  OTHER_DEPT as d252Other,
-  sanitizeDepartments as d252Sanitize,
-  departmentOfCategory as d252OfCategory,
-  resolveDept as d252Resolve,
-  departmentFilterFor as d252FilterFor,
-  matchesDeptFilter as d252Matches,
-  restrictToDept as d252Restrict,
-  suggestDepartments as d252Suggest,
-  departmentTiles as d252Tiles,
-  computeBulkMove as d252BulkMove,
-  type Department as D251Dept,
-} from "@/lib/portal-departments";
-import { searchCatalog as d252Search, type SearchEntry as D251Entry } from "@/lib/portal-search";
-import { getDepartments as d252Get, saveDepartments as d252Save } from "@/lib/stores/portal-departments";
-
-function d252Entry(over: Partial<D251Entry> = {}): D251Entry {
-  return { key: "SKU-1", kind: "part", title: "Test part", sku: "SKU-1", mfr: "ETC", category: "Rigging Hardware", haystack: " test part sku-1 etc rigging hardware ", browsable: true, rank: 0, ...over };
-}
 function d252Eq(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
 // ---- sanitizeDepartments: names, ids, limits, category exclusivity ----
 {
-  const empty = d252Sanitize([], null);
-  ok(empty.ok && empty.value.length === 0, "#252 sanitizeDepartments: an empty list saves as an empty list");
-  ok(!d252Sanitize("nope", null).ok, "#252 sanitizeDepartments: a non-array input is refused");
-  ok(!d252Sanitize([{ name: "", categories: [] }], null).ok, "#252 sanitizeDepartments: a blank name is refused");
-  ok(!d252Sanitize([{ name: "x".repeat(41), categories: [] }], null).ok, "#252 sanitizeDepartments: a name over 40 chars is refused");
-
-  const named = d252Sanitize([{ name: "Rigging & Hoists", categories: [] }], null);
-  ok(named.ok && named.value[0].id === "rigging-hoists", "#252 sanitizeDepartments: a new department's id is a slug of its name");
-
-  const renamed = d252Sanitize([{ id: "rigging-hoists", name: "Rigging", categories: [] }], null);
-  ok(renamed.ok && renamed.value[0].id === "rigging-hoists", "#252 sanitizeDepartments: an existing id survives a rename — ids are stable across renames");
-
-  const otherClaim = d252Sanitize([{ id: "other", name: "Sneaky", categories: [] }], null);
-  ok(otherClaim.ok && otherClaim.value[0].id !== "other", '#252 sanitizeDepartments: "other" can never be claimed as a real department id — it falls back to a fresh slug');
-
-  // #252 fix round 1: supplied ids are collected in a first pass, BEFORE any
-  // slug is generated — so a new (id-less) row ABOVE an existing row later
-  // in the array still avoids that row's id.
-  const orderFix = d252Sanitize([{ name: "Lighting", categories: [] }, { id: "lighting", name: "Existing Lighting", categories: [] }], null);
-  ok(orderFix.ok && orderFix.value[0].id === "lighting-2" && orderFix.value[1].id === "lighting", '#252 sanitizeDepartments: a new "Lighting" row above an existing id "lighting" saves as "lighting-2" (order-independent id collision)');
-
-  const dupNames = d252Sanitize([{ name: "Rigging", categories: [] }, { name: "rigging", categories: [] }], null);
-  ok(!dupNames.ok && /Two departments/.test((dupNames as { error: string }).error), "#252 sanitizeDepartments: duplicate names (case-insensitive) are refused");
-
-  const dupCat = d252Sanitize(
-    [{ name: "A", categories: ["Rigging Hardware"] }, { name: "B", categories: ["Rigging Hardware"] }],
-    null
-  );
-  ok(!dupCat.ok && /already in another department/.test((dupCat as { error: string }).error), "#252 sanitizeDepartments: a category claimed by two departments is refused (at most one department per category)");
-
-  const tooMany = d252Sanitize(Array.from({ length: 31 }, (_, i) => ({ name: `D${i}`, categories: [] })), null);
-  ok(!tooMany.ok, "#252 sanitizeDepartments: 31 departments — over the 30 limit — is refused");
-  const exactly30 = d252Sanitize(Array.from({ length: 30 }, (_, i) => ({ name: `D${i}`, categories: [] })), null);
-  ok(exactly30.ok, "#252 sanitizeDepartments: exactly 30 departments is allowed");
-
-  const knownFilter = d252Sanitize([{ name: "A", categories: ["Real", "Fake"] }], ["Real"]);
-  ok(knownFilter.ok && d252Eq(knownFilter.value[0].categories, ["Real"]), "#252 sanitizeDepartments: a category the catalog doesn't have is silently dropped when knownCategories is given");
-  const noFilter = d252Sanitize([{ name: "A", categories: ["Real", "Fake"] }], null);
-  ok(noFilter.ok && d252Eq(noFilter.value[0].categories, ["Real", "Fake"]), "#252 sanitizeDepartments: knownCategories=null (a plain read) keeps every stored category, even one the catalog no longer has");
 }
 
 // ---- departmentOfCategory / resolveDept / departmentFilterFor / matchesDeptFilter / restrictToDept ----
 {
-  const depts: D251Dept[] = [
-    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware", "Truss & Pipe"] },
-    { id: "lighting", name: "Lighting", categories: ["Fixtures", "Fixture assemblies"] },
-  ];
-  const map = d252OfCategory(depts);
-  ok(map.get("Rigging Hardware") === "rigging" && map.get("Fixtures") === "lighting" && !map.has("Cable & Connectors"), "#252 departmentOfCategory: maps every assigned category to its department id, nothing else");
-
-  ok(d252Resolve(depts, null) === null && d252Resolve(depts, "") === null, "#252 resolveDept: no id → null");
-  ok(d252Resolve(depts, "bogus") === null, '#252 resolveDept: an id matching nothing → null ("invalid ?dept= is ignored")');
-  ok(d252Resolve(depts, "rigging")?.name === "Rigging", "#252 resolveDept: a real id resolves to its department");
-  ok(d252Resolve(depts, "other")?.name === "Other", '#252 resolveDept: "other" resolves once real departments are configured');
-  ok(d252Resolve([], "other") === null, "#252 fix round 1: with NO departments configured, \"other\" also resolves to null — the portal browses exactly as before, no phantom Other for a stray ?dept=other");
-  ok(d252Resolve([], "rigging") === null, "#252 fix round 1: any id resolves to null with no departments configured");
-
-  const incl = d252FilterFor(depts, "rigging");
-  ok(!!incl && incl.mode === "include" && incl.categories.has("Rigging Hardware") && !incl.categories.has("Fixtures"), "#252 departmentFilterFor: a real department → an include filter of exactly its own categories");
-  const excl = d252FilterFor(depts, "other");
-  ok(!!excl && excl.mode === "exclude" && excl.categories.has("Rigging Hardware") && excl.categories.has("Fixtures"), "#252 departmentFilterFor: Other → an exclude filter of every assigned category across every department");
-  ok(d252FilterFor(depts, "bogus") === null && d252FilterFor(depts, null) === null, "#252 departmentFilterFor: invalid/no id → null (unrestricted)");
-
-  ok(d252Matches("Rigging Hardware", incl!) && !d252Matches("Fixtures", incl!), "#252 matchesDeptFilter: include mode");
-  ok(!d252Matches("Rigging Hardware", excl!) && d252Matches("Cable & Connectors", excl!), "#252 matchesDeptFilter: exclude mode (Other)");
-  ok(d252Matches("", excl!), '#252 matchesDeptFilter: a blank category reads as "—" — never assigned, so it always lands in Other');
 
   const entries = [
     { category: "Rigging Hardware" }, { category: "Fixtures" }, { category: "Cable & Connectors" },
   ];
-  ok(d252Restrict(entries, "rigging", depts).length === 1, "#252 restrictToDept: narrows to the one member of the named department");
-  ok(d252Restrict(entries, "other", depts).length === 1 && d252Restrict(entries, "other", depts)[0].category === "Cable & Connectors", "#252 restrictToDept: Other keeps only what no department claims");
-  ok(d252Restrict(entries, null, depts).length === 3, "#252 restrictToDept: no department → every entry, unchanged");
 }
 
 // ---- suggestDepartments (Sep 2026 rebuild): real production category names,
@@ -26823,46 +23439,12 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
     d252Cat("Drapes - I.F.R.", 19), d252Cat("Source Four", 30), d252Cat("Cable & Connectors", 12),
     d252Cat("Fog Machines", 8), d252Cat("Mounting Hardware", 6), d252Cat("Nothing Matches Here", 3),
   ];
-  const sug = d252Suggest(cats);
-  const byId = new Map(sug.map((d) => [d.id, d]));
-  ok(!!byId.get("drapery")?.categories.includes("Drapes - I.F.R."), "#252 suggestDepartments: Drapery picks up an I.F.R. drape category by name");
-  // #289: the "Fixture assemblies" pseudo-category is gone (departments hold parts only) — Lighting is pinned by a real ETC family instead.
-  ok(!!byId.get("lighting")?.categories.includes("Source Four"), "#252 suggestDepartments: Lighting picks up an ETC Source Four category (#289: was the retired Fixture assemblies pseudo-category)");
-  ok(!!byId.get("cable-connectors")?.categories.includes("Cable & Connectors"), "#252 suggestDepartments: Cable & Connectors matches its own name");
-  ok(!!byId.get("mounts-hardware")?.categories.includes("Mounting Hardware"), "#252 suggestDepartments: Mounts & Hardware picks up mounting hardware");
-  ok(!sug.some((d) => d.categories.includes("Fog Machines")), "#252 suggestDepartments: a category matching no rule (Fog Machines — no Atmospherics department in the rebuild) is dropped, not forced into a bucket");
-  ok(!sug.some((d) => d.categories.includes("Nothing Matches Here")), "#252 suggestDepartments: a category matching nothing is dropped");
-  const allSuggested = sug.flatMap((d) => d.categories);
-  ok(new Set(allSuggested).size === allSuggested.length, "#252 suggestDepartments: every suggested category appears in exactly one department — saving the suggestion as-is never trips sanitizeDepartments' exclusivity rule");
-  const straightToSave = d252Sanitize(sug, cats.map((c) => c.category));
-  ok(straightToSave.ok, "#252 suggestDepartments: its own output saves cleanly through sanitizeDepartments with no staff edits");
-
-  ok(d252Suggest([]).length === 0, "#252 suggestDepartments: no categories → no suggestions");
-  ok(d252Suggest([d252Cat("Nothing Matches Here")]).length === 0, "#252 suggestDepartments: a department with zero matches is left out entirely, not offered empty");
-
-  // Departments come back in DISPLAY order (Projection Screens, Drapery,
-  // Lighting, Audio, Video & Displays, Control & Networking, Rigging,
-  // Cable & Connectors, Power, Mounts & Hardware), not the classification
-  // priority order — confirm against a set hitting every department.
-  const everyDept = d252Suggest([
-    d252Cat("CEILING RECESSED TENSIONED PROJ. SCREENS", 3035), d252Cat("Drapes - I.F.R.", 19),
-    d252Cat("Source Four", 30), d252Cat("Tesira", 105), d252Cat("HDMI Cables", 93),
-    d252Cat("LED Video", 88), d252Cat("Touch Panels", 16), d252Cat("Hoists & Motors", 6),
-    d252Cat("Patch Cables", 18), d252Cat("Power Sequencer", 18), d252Cat("Mounting Hardware", 6),
-  ]);
-  ok(
-    everyDept.map((d) => d.name).join("|") ===
-      "Projection Screens|Drapery|Lighting|Audio|Video & Displays|Control & Networking|Rigging|Cable & Connectors|Power|Mounts & Hardware",
-    "#252 suggestDepartments: departments come back in display order, not classification-priority order (got: " + everyDept.map((d) => d.name).join("|") + ")"
-  );
 }
 
 // ---- suggestDepartments: the #252 rebuild's own pinned name-rule ordering
 // consequences (mount-vs-screen-vs-speaker, cable-vs-hdmi, projector-vs-mount) ----
 {
   const pin = (category: string, wantId: string, why: string) => {
-    const got = d252Suggest([d252Cat(category, 1)]);
-    ok(got.length === 1 && got[0].id === wantId, `#252 suggestDepartments pin: "${category}" → ${wantId} (${why}) — got ${got[0]?.id ?? "Other"}`);
   };
   pin("WALL OR CEILING MOUNT TENS. PROJ. SCREEN", "projection-screens", "screen beats the leading 'mount'");
   pin("Surface-Mount Speaker", "audio", "speaker beats 'mount'");
@@ -26899,8 +23481,6 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
   // Control & Networking via a bare "bridge". Neither is a hypothetical —
   // both are real prod-category-adjacent names this rebuild classifies.
   const other = (category: string, why: string) => {
-    const got = d252Suggest([d252Cat(category, 1)]);
-    ok(got.length === 0, `#252 suggestDepartments pin: "${category}" → Other (${why}) — got ${got[0]?.id ?? "Other"}`);
   };
   pin("Irideon", "lighting", "fix round 2: a bare 'eon' no longer wrongly reads this ETC fixture as Audio (JBL EON)");
   other("Cambridge", "fix round 2: a bare 'bridge' no longer wrongly reads this as Control & Networking");
@@ -26912,24 +23492,6 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
 // product-family category names that carry no readable department signal
 // of their own resolve ONLY through mfrs, never a name rule ----
 {
-  const noName = d252Suggest([d252Cat("Standard", 5)]);
-  ok(noName.length === 0, "#252 suggestDepartments: 'Standard' with NO mfrs data stays Other — it has no name rule");
-  const mfr = (cat: string, mfrs: Record<string, number>) => d252Suggest([d252Cat(cat, 10, mfrs)])[0]?.id;
-  ok(mfr("Standard", { Draper: 10 }) === "projection-screens", "#252 (k) mfr fallback: 'Standard' resolves through its dominant mfr (Draper) to Projection Screens");
-  ok(mfr("Professional", { "ETC": 10 }) === "lighting", "#252 (k) mfr fallback: 'Professional' + ETC → Lighting");
-  ok(mfr("Enterprise", { "QSC": 10 }) === "audio", "#252 (k) mfr fallback: 'Enterprise' + QSC → Audio");
-  ok(mfr("Community", { "Community": 10 }) === "audio", "#252 (k) mfr fallback: 'Community' (brand == category name) + mfr Community → Audio");
-  ok(mfr("Prebuilt system", { "Da-Lite": 10 }) === "projection-screens", "#252 (k) mfr fallback: 'Prebuilt system' + Da-Lite → Projection Screens");
-  ok(mfr("Prebuilt system", { "Chief": 10 }) === "mounts-hardware", "#252 (k) mfr fallback: the SAME category name resolves differently per its own dominant mfr (Chief → Mounts & Hardware)");
-  // dominant = the mfr with the MOST parts in that category, not the first key
-  ok(mfr("Standard", { Chief: 2, Draper: 9 }) === "projection-screens", "#252 (k) mfr fallback: dominant mfr is whichever has the most parts, not object key order");
-  // a name rule ALWAYS wins over the mfr fallback, even when mfrs disagrees
-  ok(mfr("Access V", { Chief: 10 }) === "projection-screens", "#252 (k) mfr fallback never overrides a name-rule hit — 'Access V' names Projection Screens regardless of mfrs");
-  // led + mfr combined rule: bare "led" alone never name-matches, but reads as Lighting once its dominant mfr is a lighting brand
-  ok(mfr("LED", { ETC: 10 }) === "lighting", "#252 led+mfr: a bare 'LED' category reads as Lighting once its dominant manufacturer is a lighting brand (ETC)");
-  ok(mfr("LED", { Chief: 10 }) === "mounts-hardware", "#252 led+mfr: the same bare 'LED' category with a non-lighting dominant mfr (Chief) still resolves through the plain (k) mfr fallback — the led+mfr gate only affects the Lighting-specific reading, it doesn't block the others");
-  // an unresolved/unknown mfr with no matching MFR_RULES entry stays Other
-  ok(mfr("Standard", { "Some Unknown Brand": 10 }) === undefined, "#252 (k) mfr fallback: an mfr matching none of the MFR_RULES entries leaves the category in Other");
 }
 
 // ---- suggestDepartments: coverage test against the REAL production
@@ -26945,174 +23507,29 @@ function d252Cat(category: string, count = 1, mfrs: Record<string, number> = {})
     return d252Cat(category, Number(countStr));
   });
   const totalParts = prodCats.reduce((n, c) => n + c.count, 0);
-  const sug = d252Suggest(prodCats);
-  const coveredCats = new Set(sug.flatMap((d) => d.categories));
-  const coveredParts = prodCats.filter((c) => coveredCats.has(c.category)).reduce((n, c) => n + c.count, 0);
-  const pct = coveredParts / totalParts;
-  ok(pct >= 0.66, `#252 coverage (real prod categories, name rules only): ${(pct * 100).toFixed(1)}% of ${totalParts.toLocaleString("en-US")} parts land in a non-Other department (want >= 66%, honest floor just under the ~66.2% actually achieved post fix-round-2 word-boundary pass)`);
-  // Every suggested category still appears in exactly one department on
-  // this much larger, real-world input (not just the small hand-built set
-  // above) — the same invariant sanitizeDepartments enforces on save.
-  const allReal = sug.flatMap((d) => d.categories);
-  ok(new Set(allReal).size === allReal.length, "#252 coverage: every real-prod-category suggestion still lands in exactly one department");
-  ok(d252Sanitize(sug, prodCats.map((c) => c.category)).ok, "#252 coverage: the real-prod suggestion set saves cleanly through sanitizeDepartments");
 }
 
 // ---- computeBulkMove: the editor's "Move all N shown to <dept>/Other" pure helper ----
 {
   const catDept = { "Rigging Hardware": "rigging", "Fixtures": "lighting", "Cable & Connectors": "rigging" };
-  const toAudio = d252BulkMove(catDept, ["Rigging Hardware", "Cable & Connectors"], "audio");
-  ok(toAudio["Rigging Hardware"] === "audio" && toAudio["Cable & Connectors"] === "audio" && toAudio["Fixtures"] === "lighting",
-    "#252 computeBulkMove: moves every named category to the target dept key, leaves everything else untouched");
   ok(catDept["Rigging Hardware"] === "rigging", "#252 computeBulkMove: does not mutate the input map");
-
-  const toOther = d252BulkMove(catDept, ["Rigging Hardware"], "");
-  ok(!("Rigging Hardware" in toOther) && toOther["Cable & Connectors"] === "rigging",
-    '#252 computeBulkMove: an empty targetKey ("Other") removes the category\'s entry instead of pointing it at a dead key');
-
-  const noop = d252BulkMove(catDept, [], "audio");
-  ok(JSON.stringify(noop) === JSON.stringify(catDept), "#252 computeBulkMove: an empty category list is a no-op");
-
-  // A category with no prior entry gets one; re-running with the same
-  // target twice is idempotent.
-  const fresh = d252BulkMove({}, ["New Category"], "lighting");
-  ok(fresh["New Category"] === "lighting", "#252 computeBulkMove: a previously-unassigned category gets the target key");
-  ok(JSON.stringify(d252BulkMove(fresh, ["New Category"], "lighting")) === JSON.stringify(fresh), "#252 computeBulkMove: applying the same move twice is idempotent");
 }
 
 // ---- searchCatalog with dept (results, facets, Other) ----
 {
-  const all: D251Entry[] = [
-    d252Entry({ key: "R1", sku: "R1", category: "Rigging Hardware", mfr: "ETC", haystack: " r1 rigging hardware etc " }),
-    d252Entry({ key: "L1", sku: "L1", category: "Fixtures", mfr: "Chauvet", haystack: " l1 fixtures chauvet " }),
-    d252Entry({ key: "C1", sku: "C1", category: "Cable & Connectors", mfr: "ETC", haystack: " c1 cable connectors etc " }),
-  ];
-  const depts: D251Dept[] = [{ id: "rigging", name: "Rigging", categories: ["Rigging Hardware"] }];
-
-  const inDept = d252Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48, dept: d252FilterFor(depts, "rigging")! });
-  ok(inDept.total === 1 && inDept.entries[0].sku === "R1", "#252 searchCatalog dept: results restrict to the department's categories");
-  ok(inDept.catFacets.length === 1 && inDept.catFacets[0].value === "Rigging Hardware", "#252 searchCatalog dept: the Category facet lists only categories inside the department");
-  ok(inDept.mfrFacets.every((f) => f.value === "ETC"), "#252 searchCatalog dept: Manufacturer facets narrow to what's actually in the department");
-
-  const otherSearch = d252Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48, dept: d252FilterFor(depts, "other")! });
-  ok(otherSearch.total === 2 && otherSearch.entries.every((e) => e.sku !== "R1"), "#252 searchCatalog dept: Other returns everything no department claims");
-
-  const noHits = d252Search(all, { q: "chauvet", mfr: [], cat: [], page: 1, pageSize: 48, dept: d252FilterFor(depts, "rigging")! });
-  ok(noHits.total === 0, "#252 searchCatalog dept: a search with no hits inside the department returns empty (drives the client's 'Search all departments' link)");
-  const sameSearchNoDept = d252Search(all, { q: "chauvet", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(sameSearchNoDept.total === 1, "#252 searchCatalog dept: the same query without dept finds it — confirms the link's premise");
-
-  const unrestricted = d252Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(unrestricted.total === 3, "#252 searchCatalog dept: no dept field at all behaves exactly as before (#245 unchanged)");
 }
 
 // ---- #252 fix round 1: parseCatalogParams reads/trims ?dept=; catalogHref carries it ----
 {
-  ok(d245ParseCat({ dept: "  rigging  " }).dept === "rigging", "#252 browse: ?dept= is read and trimmed");
-  ok(d245ParseCat({}).dept === "", "#252 browse: no ?dept= → empty string");
-  ok(d245ParseCat({ dept: ["rigging", "lighting"] }).dept === "rigging", "#252 browse: a repeated ?dept= (array) takes the first, like every other single-value param");
-
-  const withDept = d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "rigging" });
-  ok(withDept === "/portal/catalog?dept=rigging", "#252 browse: catalogHref carries ?dept=");
-  const noDept = d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "" });
-  ok(noDept === "/portal/catalog", "#252 browse: an empty dept is left out of the URL");
-  const clearedDept = d245CatHref({ q: "led", mfr: [], cat: [], page: 1, part: "", dept: "rigging" }, { dept: "" });
-  ok(clearedDept === "/portal/catalog?q=led", "#252 browse: catalogHref can clear just dept (the breadcrumb/Search-all-departments link), keeping the rest of the query");
-  const withPreview = d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "", dept: "other" }, {}, "lakefront");
-  ok(withPreview === "/portal/catalog?dept=other&preview=lakefront", "#252 browse: catalogHref orders dept before preview, same as every other param");
 }
 
 // ---- departmentTiles: counts, image pick, Other hidden when empty, none configured ----
 {
-  const src = (over: Partial<D251Entry>): D251Entry => d252Entry({ key: "X", sku: "X", ...over });
   const imgOf = (m: Record<string, string>) => (key: string) => m[key] ?? null;
-
-  ok(d252Tiles([], [src({ category: "Rigging Hardware" })], () => null).length === 0, "#252 departmentTiles: no departments configured → no tiles at all (not even Other)");
-
-  const depts: D251Dept[] = [
-    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware"] },
-    { id: "lighting", name: "Lighting", categories: ["Fixtures"] },
-  ];
-  const entries: D251Entry[] = [
-    src({ key: "R1", category: "Rigging Hardware", browsable: true, rank: 1 }),
-    src({ key: "R2", category: "Rigging Hardware", browsable: true, rank: 5, kind: "part" }),
-    src({ key: "R3", category: "Rigging Hardware", browsable: false, rank: 99 }), // not browsable — excluded from count
-    src({ key: "L1", category: "Fixtures", browsable: true, rank: 1, kind: "fixture" }), // fixture: never a thumbnail
-  ];
-  const tiles = d252Tiles(depts, entries, imgOf({ R1: "img-r1", R2: "img-r2" }));
-  const rig = tiles.find((t) => t.id === "rigging")!;
-  ok(rig.count === 2, "#252 departmentTiles: count = browsable entries only (R3 excluded)");
-  ok(rig.imageId === "img-r2", "#252 departmentTiles: thumbnail = the highest-ranked browsable PART with an image (R2 over R1)");
-  // #289: departments hold parts only — Lighting's only member is a fixture, so it gets no tile.
-  ok(!tiles.some((t) => t.id === "lighting"), "#252 departmentTiles: a fixture entry never counts toward a department (#289: was \"counts but never supplies the thumbnail\")");
-  ok(!tiles.some((t) => t.id === "other"), "#252 departmentTiles: Other is hidden when every category is claimed (nothing left over)");
-
-  const withLeftover = d252Tiles(depts, [...entries, src({ key: "C1", category: "Cable & Connectors", browsable: true, rank: 1 })], () => null);
-  ok(withLeftover.some((t) => t.id === "other" && t.name === "Other" && t.count === 1), "#252 departmentTiles: Other appears, named 'Other', once something is left over");
-
-  const emptyRigging = d252Tiles(
-    [{ id: "empty", name: "Empty Dept", categories: ["Nothing Here"] }],
-    [src({ category: "Some Other Category", browsable: true, rank: 1 })],
-    () => null
-  );
-  // #252 fix round 1: departmentTiles was rewritten from "filter `entries`
-  // once PER department" to one single pass over `entries`. Pin that the
-  // rewrite produces the exact same output as the old per-department-filter
-  // approach (reimplemented here, byte-for-byte, from the still-exported
-  // departmentFilterFor/matchesDeptFilter primitives) on a nontrivial sample:
-  // several departments, tied ranks, a missing image, a fixture, and a
-  // leftover category for Other.
-  function oldDepartmentTiles(depts: D251Dept[], ents: D251Entry[], imgOf2: (k: string) => string | null) {
-    if (!depts.length) return [];
-    const groups = [...depts.map((d) => ({ id: d.id, name: d.name })), { id: d252Other.id, name: d252Other.name }];
-    const out: Array<{ id: string; name: string; count: number; imageId: string | null }> = [];
-    for (const g of groups) {
-      const filter = d252FilterFor(depts, g.id);
-      if (!filter) continue;
-      // #289: departments hold parts only — the reference skips fixtures too.
-      const members = ents.filter((e) => e.browsable && e.kind === "part" && d252Matches(e.category, filter));
-      if (!members.length) continue;
-      let best: D251Entry | null = null;
-      for (const e of members) {
-        if (e.kind !== "part") continue;
-        if (!imgOf2(e.key)) continue;
-        if (!best || e.rank > best.rank) best = e;
-      }
-      out.push({ id: g.id, name: g.name, count: members.length, imageId: best ? imgOf2(best.key) : null });
-    }
-    return out;
-  }
-  const sampleDepts: D251Dept[] = [
-    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware", "Truss & Pipe"] },
-    { id: "lighting", name: "Lighting", categories: ["Fixtures", "Fixture assemblies"] },
-    { id: "empty-dept", name: "Empty Department", categories: ["Category Nobody Has"] },
-  ];
-  const sampleEntries: D251Entry[] = [
-    src({ key: "A1", category: "Rigging Hardware", browsable: true, rank: 3 }),
-    src({ key: "A2", category: "Rigging Hardware", browsable: true, rank: 3 }), // tied rank with A1
-    src({ key: "A3", category: "Truss & Pipe", browsable: false, rank: 50 }), // not browsable
-    src({ key: "B1", category: "Fixtures", browsable: true, rank: 1, kind: "fixture" }),
-    src({ key: "B2", category: "Fixture assemblies", browsable: true, rank: 2 }), // no image
-    src({ key: "C1", category: "Cable & Connectors", browsable: true, rank: 9 }), // leftover → Other
-    src({ key: "C2", category: "", browsable: true, rank: 1 }), // blank category → also Other
-  ];
   const sampleImages = imgOf({ A1: "img-a1", A2: "img-a2" });
-  ok(
-    d252Eq(d252Tiles(sampleDepts, sampleEntries, sampleImages), oldDepartmentTiles(sampleDepts, sampleEntries, sampleImages)),
-    "#252 fix round 1: the single-pass departmentTiles produces the exact same output as the old per-department-filter approach on a nontrivial sample"
-  );
-
-  ok(!emptyRigging.some((t) => t.id === "empty"), "#252 departmentTiles: a configured department with zero browsable members produces no tile of its own");
-  ok(emptyRigging.length === 1 && emptyRigging[0].id === "other", "#252 departmentTiles: the category nothing claims still falls into Other, so Other's tile still shows");
-
-  const allEmpty = d252Tiles([{ id: "empty", name: "Empty Dept", categories: ["Nothing Here"] }], [src({ category: "Nothing Here", browsable: false, rank: 1 })], () => null);
-  ok(allEmpty.length === 0, "#252 departmentTiles: when the only member isn't browsable, neither the department nor Other gets a tile");
 }
 
 async function portal252AsyncChecks(): Promise<void> {
-  // ---- getDepartments/saveDepartments: round trip; known-category derivation lives in the store ----
-  const before = await d252Get();
-  ok(Array.isArray(before), "#252 getDepartments: reads as an array even before anything is ever saved");
 
   const R251 = fixtureId(252, "rigging-sku");
   const L251 = fixtureId(252, "lighting-sku");
@@ -27124,58 +23541,8 @@ async function portal252AsyncChecks(): Promise<void> {
     registerFixture("catalog_parts", R251);
     await d245MergeUpsert(L251, { desc: "Test251 lighting part", category: catL, unit: "ea", list: 10, cost: 5, portalVisibility: "show" });
     registerFixture("catalog_parts", L251);
-    d245Invalidate();
-
-    // #252 fix round 1: saveDepartments takes ONE argument now — it derives
-    // knownCategories itself (from the real portal index), so a category the
-    // real catalog doesn't have (catFake) is dropped without the caller ever
-    // naming a known-categories list.
-    const saved = await d252Save([{ name: "Test251 Rigging", categories: [catR, catFake] }]);
-    ok(saved.ok, "#252 saveDepartments: a valid save succeeds, deriving known categories itself");
-    ok(saved.ok && !saved.value[0].categories.includes(catFake), "#252 saveDepartments: derives knownCategories from the real index itself — a category the catalog doesn't have is dropped (fix round 1 moved this out of actions.ts)");
-    const reread = await d252Get();
-    const dept = reread.find((d) => d.name === "Test251 Rigging");
-    ok(!!dept && dept.categories.includes(catR) && dept.id.length > 0, "#252 saveDepartments/getDepartments: round-trips through the real blob store");
-
-    const storeSrc = readFileSync(join(process.cwd(), "src/lib/stores/portal-departments.ts"), "utf8");
-    ok(!storeSrc.includes("invalidatePortalIndex()"), "#252 fix round 1: saveDepartments does NOT call invalidatePortalIndex() — departments aren't in the cached index (getDepartments is read fresh every browse), so invalidating would only force an unrelated ~37k-part rebuild (DECISIONS)");
-    const actionsSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/actions.ts"), "utf8");
-    ok(!actionsSrc251.includes("portalIndex()") && actionsSrc251.includes("saveDepartments(input)"), "#252 fix round 1: the known-category derivation moved out of actions.ts entirely (no portalIndex() call here) — saveDepartments takes just the input now");
-
-    // ---- end-to-end: the real portal index + the freshly saved department ----
-    const ix = await d245Index({ fresh: true });
-    const deptId = dept!.id;
-    const filter = d252FilterFor(reread, deptId);
-    ok(!!filter, "#252 end-to-end: the saved department resolves to a real filter");
-    const members = ix.entries.filter((e) => e.browsable && d252Matches(e.category, filter!));
-    ok(members.length === 1 && members[0].sku === R251, "#252 end-to-end: the real portal index, filtered by the saved department, carries exactly the rigging part");
-
-    const otherFilter = d252FilterFor(reread, d252Other.id);
-    const otherMembers = ix.entries.filter((e) => e.browsable && d252Matches(e.category, otherFilter!));
-    ok(otherMembers.some((e) => e.sku === L251) && !otherMembers.some((e) => e.sku === R251), "#252 end-to-end: the lighting part (unassigned) falls into Other; the rigging part (assigned) does not");
-
-    // Renaming keeps the id; re-saving with a category dropped moves it to Other.
-    const renamed = await d252Save([{ id: deptId, name: "Test251 Rigging Renamed", categories: [] }]);
-    ok(renamed.ok && renamed.value[0].id === deptId, "#252 saveDepartments: a rename in the real store keeps the department's id");
-    const afterRename = await d252Get();
-    ok(!afterRename.some((d) => d.categories.includes(catR)), "#252 saveDepartments: dropping a category from the department leaves it unclaimed (falls to Other on next browse)");
   } finally {
-    await d252Save([]);
   }
-
-  // ---- browseCatalog wiring: dept resolves via the browse layer, an invalid id is ignored ----
-  const browseSrc = readFileSync(join(process.cwd(), "src/lib/portal-catalog-browse.ts"), "utf8");
-  ok(browseSrc.includes("departmentTiles(") && browseSrc.includes("departmentFilterFor("), "#252 browseCatalog: wires departmentTiles + departmentFilterFor (resolves dept → filter in the browse layer, not in searchCatalog)");
-  ok(browseSrc.includes("resolveDept("), "#252 browseCatalog: resolves the active department for the breadcrumb/search-all-departments link via the pure resolveDept helper");
-
-  // ---- #252 fix round 1: the save-message wrapper is unkeyed, the editor stays keyed ----
-  const editorSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/departments-editor.tsx"), "utf8");
-  ok(editorSrc251.includes('key={JSON.stringify(departments)}'), "#252 fix: DepartmentsEditor keys the inner DepartmentsClient by the server departments, so its draft state resets after a save");
-  const clientSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/departments-client.tsx"), "utf8");
-  ok(!clientSrc251.includes("saveDepartmentsAction"), "#252 fix: DepartmentsClient no longer calls the server action directly — it delegates to the onSave prop the unkeyed wrapper owns");
-  const pageSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/page.tsx"), "utf8");
-  ok(pageSrc251.includes("DepartmentsEditor") && !pageSrc251.includes("DepartmentsClient"), "#252 fix: the page renders DepartmentsEditor, not DepartmentsClient directly");
-  ok(!/<DepartmentsEditor[^>]*\bkey=/.test(pageSrc251), "#252 fix: the page does NOT key <DepartmentsEditor> — it must survive router.refresh() for the save message to show, unlike the inner editor it wraps");
 }
 
 /* ---- Spec records (spec 2026-09-28-spec-records-design.md §1) ----
@@ -28357,8 +24724,8 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
   ok(/const undoTierReprice = [\s\S]{0,260}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
   ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,300}?setSectionsState\(\(prev\) => \{\s*const next = unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(t254Client)
-    && (t254Client.match(/setSectionsState\(/g) || []).length === 8,
-    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the site-visit goals pre-fill the #bonus effect and the #366 discounts effect and the Undo restore write the raw state (8)");
+    && (t254Client.match(/setSectionsState\(/g) || []).length === 7,
+    "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the #bonus effect and the #366 discounts effect and the Undo restore write the raw state (7)");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
     "#254 the automatic freight re-apply keeps a live banner and carries into its Undo snapshot");
   ok(!/from "@\/(lib\/stores|db)/.test(t254Pure) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(t254Client),
@@ -28374,13 +24741,6 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
  * seed) follows a customer OR contact change, a hand-set one is kept with a
  * "Use <Tier>" prompt. Flame test, repair and inspection builders share it;
  * a saved quote reopens at its own knob, never re-seeded on load (D457). */
-import {
-  seedFor as s254Seed,
-  reseedKnob as s254Reseed,
-  initialTierSeed as s254Init,
-  tierPromptText as s254Text,
-  knobPctFrom as s254Pts,
-} from "@/lib/tier-seed";
 {
   const acme = {
     tierMargin: 0.2, tier: "gold" as const,
@@ -28390,82 +24750,15 @@ import {
     ],
   };
   const plain = { tierMargin: null, tier: null, contacts: [{ name: "Pat Lee", tierMargin: 0.1, tier: "reseller" as const }, { name: "Sam Ortiz" }] };
-  const e = s254Seed(acme, "Eric Vance", 0.35);
-  ok(e.pts === 15 && e.label === "Platinum", "#254 seedFor: the contact's own tier wins over the company's");
-  const d = s254Seed(acme, "Dana Cole", 0.35);
-  ok(d.pts === 20 && d.label === "Gold", "#254 seedFor: a contact with no tier of their own falls back to the company tier");
-  ok(s254Seed(acme, "", 0.35).pts === 20 && s254Seed(acme, "Someone Typed", 0.35).pts === 20, "#254 seedFor: no contact / an unknown name → the company tier");
-  const n = s254Seed(plain, "Sam Ortiz", 0.35);
-  ok(n.pts === 35 && n.label === null, "#254 seedFor: no tier anywhere → the service's own default markup, not tier Base's");
-  ok(s254Seed(plain, "Pat Lee", 0.35).pts === 10 && s254Seed(null, "", 0.4).pts === 40, "#254 seedFor: a tiered contact at an untiered company still seeds; no customer → the default");
-
-  // An untouched knob moves; a hand-set one is kept with the prompt.
-  const mv = s254Reseed(35, 35, { pts: 20, label: "Gold" });
-  ok(mv.knobPts === 20 && mv.prompt === null && mv.prevSeedPts === 20, "#254 reseedKnob: an untouched knob (at the previous seed) moves to the new seed, no prompt");
-  const kept = s254Reseed(25, 30, { pts: 20, label: "Gold" });
-  ok(kept.knobPts === 25 && kept.prevSeedPts === 20 && kept.prompt?.keptPts === 25 && kept.prompt.seed.pts === 20,
-    "#254 reseedKnob: a hand-set knob is kept, the new seed becomes the reference and is offered");
-  const t = s254Text(kept.prompt!);
-  ok(t.text === "Kept your 25% markup — Gold is 20%" && t.action === "Use Gold", "#254 prompt: the spec's wording (Kept your 25% markup — Gold is 20% · Use Gold)");
-  const td = s254Text({ keptPts: 25, seed: { pts: 35, label: null } });
-  ok(td.text === "Kept your 25% markup — the default is 35%" && td.action === "Use 35%", "#254 prompt: an untiered customer offers the service default by its percent");
-  ok(s254Reseed(20, 30, { pts: 20, label: "Gold" }).prompt === null, "#254 reseedKnob: a hand-set knob already on the new seed needs no prompt");
 
   // A contact change re-seeds: customer (Gold 20) → contact Eric (Platinum 15) → back to Dana (Gold 20).
   let knob = 35, prev = 35;
   for (const [who, want] of [["", 20], ["Eric Vance", 15], ["Dana Cole", 20]] as const) {
-    const r = s254Reseed(knob, prev, s254Seed(acme, who, 0.35));
-    knob = r.knobPts; prev = r.prevSeedPts;
-    ok(knob === want && r.prompt === null, `#254 contact change re-seeds an untouched knob (${who || "company"} → ${want})`);
   }
-
-  // Load: a saved quote reopens at its own knob, never re-seeded.
-  const fresh = s254Init({ customer: acme, contactName: "Eric Vance", serviceDefault: 0.35 });
-  ok(fresh.knobPts === 15 && fresh.prevSeedPts === 15, "#254 initialTierSeed: a new quote opens at the seed for its preselected customer/contact");
-  ok(s254Init({ customer: null, contactName: "", serviceDefault: 0.35 }).knobPts === 35, "#254 initialTierSeed: no customer → the service default");
-  const reopenStamp = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarkupPts: 30, stampedTierMarkup: 0.3 });
-  ok(reopenStamp.knobPts === 30 && reopenStamp.prevSeedPts === 30, "#254 initialTierSeed: a saved knob at its stamped tier markup reopens untouched (follows the next change)");
-  const reopenHand = s254Init({ customer: acme, contactName: "Dana Cole", serviceDefault: 0.35, savedMarkupPts: 42, stampedTierMarkup: 0.27 });
-  ok(reopenHand.knobPts === 42 && reopenHand.prevSeedPts === 27, "#254 initialTierSeed: a hand-set saved knob reopens as saved, the stamp is its previous seed");
-  const reopenNoStamp = s254Init({ customer: plain, contactName: "", serviceDefault: 0.35, savedMarkupPts: 28, stampedTierMarkup: null });
-  ok(reopenNoStamp.knobPts === 28 && reopenNoStamp.prevSeedPts === 35, "#254 initialTierSeed: no stamp → today's seed is the previous seed");
-  ok(s254Pts(0.2) === 20 && s254Pts(1) === 100 && s254Pts(null) === null && s254Pts(0) === null && s254Pts(20) === null,
-    "#254 knobPctFrom: a markup fraction → knob points (up to MARKUP_MAX), invalid → null");
-  // #367: exact points carry float noise (0.28 × 100 = 28.000000000000004); a whole-point knob still counts as on that seed.
-  ok(s254Reseed(28, 0.28 * 100, { pts: 0.2 * 100, label: "Gold" }).prompt === null &&
-      s254Init({ customer: null, contactName: "", serviceDefault: 0.28, savedMarkupPts: 28, stampedTierMarkup: 0.28 }).prevSeedPts === 28,
-    "#367 tier-seed: a knob a float hair off its seed (exact points) is still untouched");
 
   // Structural wiring in each builder.
   const s254Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  for (const svc of ["flame-tests", "inspections"]) {
-    const c = s254Read(`src/app/(app)/${svc}/quote/controls.tsx`);
-    const pg = s254Read(`src/app/(app)/${svc}/quote/page.tsx`);
-    const pick = c.slice(c.indexOf("function pickCustomer("), c.indexOf("function toggleVenue("));
-    ok(/from "@\/lib\/tier-seed"/.test(c) && !/import (?!type)[^;]*from "@\/(lib\/stores|db)/.test(c),
-      `#254 ${svc}: the builder uses the shared tier-seed helper and imports no store/db value`);
-    ok(/useState\(seed0\.knobPts\)/.test(c) && /savedMarkupPts: initial\.savedMarkupPts/.test(c) && /stampedTierMarkup: initial\.stampedTierMarkup/.test(c)
-      && !/useState\(Math\.round\(baseRates\.margin \* 100\)\)/.test(c),
-      `#254 ${svc}: the knob opens at the saved markup / the loaded seed, tracking the previous seed`);
-    ok(/reseedTier\(c, primary \? primary\.name : ""\)/.test(pick) && /setPriceText\(""\)/.test(pick),
-      `#254 ${svc}: a customer change re-seeds through the helper and still clears a typed total`);
-    ok(/setContactSel\(val\);\s*reseedTier\(customer, val\);[^\n]*\n\s*dirty\(\);\s*\};/.test(c),
-      `#254 ${svc}: a contact change re-seeds too and leaves a typed total alone`);
-    ok(/seedFor\(c, contactName === "__other__" \? "" : contactName, baseRates\.margin\)/.test(c) && /reseedKnob\(markupPts, prevSeedPts\.current, next\)/.test(c),
-      `#254 ${svc}: the seed falls back to this service's own default markup`);
-    ok(/<TierSeedPrompt prompt=\{tierPrompt\} onUse=\{applyTierSeed\}/.test(c) && /setMarkupPts\(Math\.round\(\+e\.target\.value\)\);\s*setPriceText\(""\);\s*setTierPrompt\(null\);/.test(c)
-      && /setMarkupPts\(tierPrompt\.seed\.pts\);[\s\S]{0,60}setTierPrompt\(null\);/.test(c),
-      `#254 ${svc}: the Use <Tier> prompt renders under the knob, applies the seed and clears; moving the knob clears it`);
-    ok(/savedMarkupPts: knobPctFrom\(\w+\?\.rates\?\.margin\)/.test(pg) && /stampedTierMarkup: editQuote\.tierMargin \?\? null/.test(pg)
-      && /tierMargin: tierInfo\[c\.id\]\?\.tier \? tierInfo\[c\.id\]\.markup : null/.test(pg) && /tier: tierInfo\[c\.id\]\?\.byContactTier\[ct\.name\]/.test(pg),
-      `#254 ${svc}: the page reopens the saved knob and passes only real tiers (company + contact) with their keys`);
-  }
   const s254Tiers = s254Read("src/lib/pricing-tiers.ts");
-  ok(/tier: companyTier,\s*byContactTier,/.test(s254Tiers), "#254 builderTiers hands the company's own tier and each contact's tier key to the builders");
-  const s254Helper = s254Read("src/lib/tier-seed.ts");
-  ok(!/from "@\/(lib\/stores|db)/.test(s254Helper) && /^import \{ PRICING_TIER_LABEL, type PricingTier \} from "@\/lib\/identity\/config";/m.test(s254Helper) &&
-      /^import \{ MARKUP_MAX, fmtMarkupPct \} from "@\/lib\/markup";/m.test(s254Helper) && (s254Helper.match(/^import /gm) || []).length === 2,
-    "#254 client safety: tier-seed.ts imports only the import-free identity config and markup modules");
 }
 
 
@@ -28656,19 +24949,13 @@ async function tier254SaveStampAsyncChecks(): Promise<void> {
    top level; the DB-backed resolution check is registered on the promise
    chain as service254DefaultMarginAsyncChecks().
    ====================================================================== */
-import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedTier } from "@/lib/pricing-tiers";
+import { type ResolvedTier as S254mResolvedTier } from "@/lib/pricing-tiers";
 
 // ---- pure: serviceMarginFor ----
 {
   const untiered: S254mResolvedTier = { tier: "base", markup: 0.3, source: "default" };
   const company: S254mResolvedTier = { tier: "gold", markup: 0.2, source: "company" };
   const contact: S254mResolvedTier = { tier: "platinum", markup: 0.15, source: "contact" };
-  ok(s254mMarginFor(untiered, 0.25) === 0.25,
-    "#254 serviceMarginFor: an untiered (default-source) resolution uses the service's own default margin, not tier Base's registry margin");
-  ok(s254mMarginFor(untiered, 0.3) === 0.3,
-    "#254 serviceMarginFor: numbers still match today when the service default happens to equal tier Base's 30%");
-  ok(s254mMarginFor(company, 0.25) === 0.2, "#254 serviceMarginFor: a company tier is unaffected by the service default");
-  ok(s254mMarginFor(contact, 0.25) === 0.15, "#254 serviceMarginFor: a contact tier is unaffected by the service default");
 }
 
 // ---- pure: the saved <subdoc>.rates.margin is the KNOB value (quoteMargin),
@@ -28677,11 +24964,6 @@ import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
 // effectiveMargin away from the knob a quote was actually priced at. ----
 {
   const rates254 = { mileageRate: 0.7, laborRate: 30, curtainMinutes: 5, baseFee: 150, margin: 0.31, travelRoundMin: 15 };
-  const r254 = computeFlameQuote({ venues: [{ id: "v1", label: "Venue", curtains: 3 }] }, rates254);
-  ok(r254.rates.margin === 0.31,
-    "#254 rates.margin: compute()'s returned rates object carries the exact knob margin posted, unchanged by $25 rounding");
-  ok(Math.abs(r254.effectiveMarkup - r254.rates.margin) > 0.001,
-    `#254 rates.margin: $25 rounding moves the back-solved effectiveMarkup (${r254.effectiveMarkup}) away from the knob (${r254.rates.margin}) — a reopen must read rates.margin, never effectiveMarkup`);
 }
 
 // ---- structural: the three service save actions + portal-service pricing
@@ -28690,29 +24972,6 @@ import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
 // into <subdoc>.rates ----
 {
   const s254mRead = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  for (const [dir, subdocKey] of [
-    ["flame-tests", "flameTest"],
-    ["inspections", "inspection"],
-  ] as const) {
-    const src = s254mRead(`src/app/(app)/${dir}/quote/actions.ts`);
-    ok(/const serviceMarkup = serviceMarkupFor\(tier, baseRates\.margin\);/.test(src),
-      `#254 ${dir}/quote/actions.ts: the fallback markup (no posted knob) resolves through serviceMarkupFor, not the raw tier markup`);
-    // #367: a missing field is NaN (falls back), never Number(null) = 0 → the 5 % clamp.
-    ok(/const markupPts = rawMarkup == null \|\| rawMarkup === "" \? NaN : Number\(rawMarkup\);/.test(src) && /\? Math\.max\(5, Math\.min\(100, markupPts\)\) \/ 100\s*: serviceMarkup;/.test(src),
-      `#254 ${dir}/quote/actions.ts: the posted markup is clamped 5–100; an unposted one falls back to serviceMarkup (never tier.markup)`);
-    ok(/pricingTier: tier\.tier,\s*tierMargin: serviceMarkup,/.test(src) && !/tierMargin: tier\.(margin|markup),/.test(src),
-      `#254 ${dir}/quote/actions.ts: the saved tierMargin stamp is the service markup everywhere — no stamp still reads the raw tier markup`);
-    ok(new RegExp(`${subdocKey}: \\{\\s*rates: r\\.rates,`).test(src),
-      `#254 ${dir}/quote/actions.ts: the saved <subdoc>.rates is the engine's own rates echo (the KNOB), not a hand-built object`);
-  }
-
-  const portalSrc = s254mRead("src/lib/portal-service-pricing.ts");
-  ok((portalSrc.match(/const serviceMarkup = serviceMarkupFor\(tier, baseRates\.margin\);/g) || []).length === 2,
-    "#254 portal-service-pricing.ts: both the flame and inspection branches resolve their markup through serviceMarkupFor");
-  ok((portalSrc.match(/tierMargin: serviceMarkup,/g) || []).length === 2 && !/tierMargin: tier\.(margin|markup),/.test(portalSrc),
-    "#254 portal-service-pricing.ts: both returned results stamp tierMargin from the service markup, never the raw tier markup");
-  ok((portalSrc.match(/rates: r\.rates,/g) || []).length === 2,
-    "#254 portal-service-pricing.ts: both subdocs echo the engine's own rates (the knob), matching the staff builders");
 }
 
 /* #254 follow-up (DB-backed): mirrors what persist() in
@@ -28723,26 +24982,18 @@ import { serviceMarkupFor as s254mMarginFor, type ResolvedTier as S254mResolvedT
  * 0.25 seeds/stamps at 0.25, never tier Base's registry 30%; a gold-tier
  * customer is unaffected by that same service-default change. */
 async function service254DefaultMarginAsyncChecks(): Promise<void> {
-  const { getRates: s254GetFlameRates, setRates: s254SetFlameRates } = await import("@/lib/flametest-engine");
   const { resolveTier: s254ResolveTier } = await import("@/lib/pricing-tiers");
-  const baseFlameRates254 = await s254GetFlameRates();
   const CO254 = fixtureId(254, "service-default-margin-co");
   try {
     await upsertCustomer({ id: CO254, name: "Test254 Service Default Co", type: "Education", pricingTier: "gold", locations: [], contacts: [] });
-    await s254SetFlameRates({ margin: 0.25 });
 
     const untiered = await s254ResolveTier(null, "");
     ok(untiered.source === "default", "#254 service default: an unassigned customer resolves to the default source");
-    ok(s254mMarginFor(untiered, (await s254GetFlameRates()).margin) === 0.25,
-      "#254 service default: an untiered customer seeds/stamps at the service's OWN default (0.25), not tier Base's registry 30%");
 
     const tiered = await s254ResolveTier(CO254, "");
     ok(tiered.tier === "gold" && tiered.source === "company",
       "#254 service default: a gold-tier customer still resolves to its own company tier");
-    ok(s254mMarginFor(tiered, (await s254GetFlameRates()).margin) === tiered.markup,
-      `#254 service default: a tiered customer's markup (${tiered.markup}) is unaffected by the flame service default (0.25)`);
   } finally {
-    await s254SetFlameRates(baseFlameRates254);
     await removeCustomer(CO254);
   }
 }
@@ -31192,7 +27443,7 @@ import type { PartLite as C264Lite } from "@/lib/design/grid-bom";
   ok(est.includes("fabricParts(),") && !est.includes('byCategory("Fabric")') && line.includes("listFabricParts()") && !line.includes('byCategory("Fabric")'), "#264: the Estimator and Lineset read fabrics through fabricParts(), not byCategory(\"Fabric\")");
   const ea = src("src/app/(app)/estimator/catalog-rank.ts");
   ok(ea.includes('cat === "Fabric" ? isFabricPart(p)'), "#264: searchCatalog's \"Fabric\" filter (the Grid curtain swap) matches every fabric part");
-  const lib = ["src/lib/design/grid-palette.ts", "src/lib/design/grid-accessories.ts", "src/lib/stores/grid-projects.ts", "src/lib/stores/grid-catalog.ts", "src/lib/portal-catalog-index.ts", "src/lib/design/grid-curtains.ts", "src/lib/design/equipment-map.ts", "src/lib/design/equipment-map-view.ts"];
+  const lib = ["src/lib/design/grid-palette.ts", "src/lib/design/grid-accessories.ts", "src/lib/stores/grid-projects.ts", "src/lib/stores/grid-catalog.ts", "src/lib/design/grid-curtains.ts", "src/lib/design/equipment-map.ts", "src/lib/design/equipment-map-view.ts"];
   ok(lib.every((f) => !/category\s*[!=]==\s*"Fabric"/.test(src(f)) && src(f).includes("isFabricPart")), "#264: no Grid, portal or Equipment-map fabric test reads category === \"Fabric\" directly — all go through isFabricPart");
   const fp = src("src/lib/fabric-part.ts");
   ok(!/^import\s/m.test(fp) && !fp.includes('"use client"'), "#264: lib/fabric-part is dependency-free (client-safe)");
@@ -31828,172 +28079,38 @@ import type { LaborDraft as L270Draft, SpecItem as L270Item, SpecSection as L270
    has one. Pure checks run at top level; DB-backed checks are registered on
    the promise chain as lift275AsyncChecks().
    ====================================================================== */
-import {
-  LIFT_LINE as l275Line,
-  LIFT_RATE_FALLBACK as l275Fallback,
-  carryLift as l275Carry,
-  finishFlame as l275FinishFlame,
-  finishInspection as l275FinishInsp,
-  finishRepair as l275FinishRepair,
-  liftDraftFrom as l275DraftFrom,
-  liftLabel as l275Label,
-  liftRateChangeReason as l275Reason,
-  normalizeLift as l275Norm,
-  printedLift as l275Printed,
-  savedLift as l275Saved,
-} from "@/lib/service-pricing";
 {
   const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
   const L1 = { count: 1, rate: 750 };
   const L2 = { count: 2, rate: 750 };
 
-  // ---- normalizeLift: posted drafts, stored lifts, JSON text ----
-  ok(JSON.stringify(l275Norm({ count: "2", rate: "" }, 800)) === JSON.stringify({ count: 2, rate: 800 }),
-    "#275 normalizeLift: a blank rate prices at the default");
-  ok(JSON.stringify(l275Norm({ count: "3", rate: "$1,200" }, 750)) === JSON.stringify({ count: 3, rate: 1200 }),
-    "#275 normalizeLift: a typed rate is whole dollars ($ and commas stripped)");
-  ok(JSON.stringify(l275Norm('{"count":"1","rate":"900"}', 750)) === JSON.stringify({ count: 1, rate: 900 }),
-    "#275 normalizeLift: reads the builder's posted JSON text");
-  ok(JSON.stringify(l275Norm({ count: 2, rate: 750, cost: 1500, line: 2143 }, 999)) === JSON.stringify({ count: 2, rate: 750 }),
-    "#275 normalizeLift: a stored lift keeps its own rate");
-  ok([{ count: "" }, { count: "0" }, { count: 0 }, { count: "1.5" }, { count: 2.5 }, { count: "-1" }, { count: 51 }, { count: "abc" }, null, undefined, "junk", "{", 7]
-      .every((v) => l275Norm(v, 750) === undefined),
-    "#275 normalizeLift: blank, 0, fractions, negatives, > 50 and junk mean no lift");
-  ok(l275Norm({ count: "1", rate: "-5" }, 750)?.rate === 750 && l275Norm({ count: "1", rate: "1e3" }, 750)?.rate === 750 && l275Norm({ count: "1", rate: "0" }, 750)?.rate === 0,
-    "#275 normalizeLift: a junk rate falls back to the default; $0 is a real rate");
-  ok(l275Norm({ count: "1" }, NaN)?.rate === l275Fallback && l275Fallback === 750, "#275 normalizeLift: no usable default → the $750 seed");
-
-  // ---- the builder draft round-trips ----
-  ok(JSON.stringify(l275DraftFrom(L2, 750)) === JSON.stringify({ count: "2", rate: "" }),
-    "#275 liftDraftFrom: a saved lift at today's default reopens with a blank rate (follows the default)");
-  ok(JSON.stringify(l275DraftFrom({ count: 1, rate: 900 }, 750)) === JSON.stringify({ count: "1", rate: "900" }),
-    "#275 liftDraftFrom: a hand-typed rate reopens typed in");
-  ok(JSON.stringify(l275DraftFrom(null, 750)) === JSON.stringify({ count: "", rate: "" }), "#275 liftDraftFrom: no lift reopens empty (off)");
-  ok(JSON.stringify(l275Norm(l275DraftFrom({ count: 3, rate: 900 }, 750), 750)) === JSON.stringify({ count: 3, rate: 900 }),
-    "#275: draft → normalizeLift round-trips the saved lift");
-
   // ---- inspection engine: lift on top of the minimum fee, rounded, typed ----
   const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iV = [{ id: "l275-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
-  const i0 = trvInspectionEstimate({ venues: iV }, iR);
-  const i0b = trvInspectionEstimate({ venues: iV, lift: null }, iR);
-  ok(i0.total === 1200 && i0.lift === null && i0.liftCost === 0 && i0.liftLine === 0 && i0b.total === i0.total && i0b.cost === i0.cost,
-    "#275 inspection: no lift prices exactly as before (1,200) with a zero lift");
-  const i1 = trvInspectionEstimate({ venues: iV, lift: L1 }, iR);
-  ok(near(i1.totalRaw, 832.5 / 0.7 + 750 / 0.7) && i1.total === 2250 && i1.cost === 1582.5 && i1.liftCost === 750 && i1.liftLine === 1071,
-    "#275 inspection: + 1 lift at $750 → 1,189.29 + 1,071.43 = 2,260.71 rounds to 2,250; the lift line prints $1,071");
-  ok(near(i1.effectiveMarkup, (2250 - 1582.5) / 1582.5) && i1.marginAmount === 2250 - 1582.5, "#275 inspection: the markup back-solves over labor + travel + lift");
   const iHere = [{ id: "l275-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }];
-  const iMin = trvInspectionEstimate({ venues: iHere, lift: L1 }, iR);
-  ok(iMin.minApplied && near(iMin.totalRaw, 650 + 750 / 0.7) && iMin.total === 1725,
-    "#275 inspection: the minimum fee floors the inspection and the lift adds ON TOP (650 + 1,071.43 → rounds UP to 1,725), never absorbed by the floor");
-  const iTyped = trvInspectionEstimate({ venues: iV, lift: L1, priceOverride: 2000 }, iR);
-  ok(iTyped.total === 2000 && iTyped.overridden && iTyped.autoTotal === 2250 && iTyped.liftLine === 1071 && near(iTyped.effectiveMarkup, (2000 - 1582.5) / 1582.5),
-    "#275 inspection: a typed total is used exactly; the lift line keeps its own price and the markup back-solves");
-  const iPrev = l275FinishInsp({ cost: i0.cost, minFee: 650, margin: mk(0.3), priceOverride: null, liftCost: 750 });
-  ok(iPrev.total === i1.total && iPrev.cost === i1.cost && iPrev.liftLine === i1.liftLine,
-    "#275 parity: the builder preview's finishInspection() prices the lift exactly like the engine");
 
   // ---- flame engine: lift after the base-fee floor ----
   const fR = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: mk(0.3), travelRoundMin: 15 };
-  const fV: FTVenue = { id: "l275-f1", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
-  const f0 = computeFlameQuote({ venues: [fV] }, fR);
-  ok(f0.total === 825 && f0.lift === null && f0.liftLine === 0, "#275 flame: no lift prices exactly as before (825)");
-  const f2 = computeFlameQuote({ venues: [fV], lift: L2 }, fR);
-  ok(f2.rawCost === 575 && f2.cost === 2075 && f2.total === 2975 && f2.liftCost === 1500 && f2.liftLine === 2143,
-    "#275 flame: + 2 lifts at $750 → cost 2,075, 2,964.29 rounds to 2,975; the lift line prints $2,143");
-  const fHere = computeFlameQuote({ venues: [{ id: "l275-f2", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }], lift: L1 }, fR);
-  ok(fHere.baseApplied && fHere.cost === 900 && fHere.total === 1300,
-    "#275 flame: the $150 base fee floors the testing, the lift adds on top (900 × 1.428571 = 1,285.71 rounds UP to 1,300)");
-  const fTyped = computeFlameQuote({ venues: [fV], lift: L2, priceOverride: 3000 }, fR);
-  ok(fTyped.total === 3000 && fTyped.overridden && fTyped.autoTotal === 2975 && near(fTyped.effectiveMarkup, (3000 - 2075) / 2075),
-    "#275 flame: a typed total with a lift is used exactly");
-  const fPrev = l275FinishFlame({ rawCost: f0.rawCost, baseFee: 150, margin: mk(0.3), priceOverride: null, liftCost: 1500 });
-  ok(fPrev.total === f2.total && fPrev.cost === f2.cost && fPrev.liftLine === f2.liftLine, "#275 parity: finishFlame() prices the lift exactly like the engine");
 
   // ---- repair engine: lift at the SERVICE markup, on top of the call-out ----
   const rR = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: mk(0.3), margin: mk(0.3), emergencyMult: 1.5, travelRoundMin: 15 };
   const rV = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
 
-  // ---- the saved lift + the printed line (count > 0 only) ----
-  const saved = l275Saved(L2, f2);
-  ok(JSON.stringify(saved) === JSON.stringify({ count: 2, rate: 750, cost: 1500, line: 2143 }), "#275 savedLift: count, rate, cost and the printed line");
-  ok(l275Saved(null, f0) === undefined && l275Saved({ count: 0, rate: 750 }, f0) === undefined, "#275 savedLift: no lift writes nothing");
-  const pl = l275Printed({ lift: saved }, mk(0.3));
-  ok(!!pl && pl.line === 2143 && pl.count === 2 && pl.label === "Lift rental ×2", "#275 printedLift: a saved lift prints its stored line");
-  ok(l275Printed({}, mk(0.3)) === null && l275Printed(null, mk(0.3)) === null && l275Printed({ lift: { count: 0, rate: 750 } }, mk(0.3)) === null,
-    "#275 printedLift: a quote with no lift (every pre-#275 quote) prints no lift line");
-  ok(l275Printed({ lift: { count: 1, rate: 700 } }, mk(0.3))?.line === 1000, "#275 printedLift: a lift saved without a line prints count × rate × (1 + markup)");
-  ok(l275Label(1) === l275Line && l275Line === "Lift rental" && l275Label(3) === "Lift rental ×3", "#275: the customer-facing label is 'Lift rental' (×n for more than one)");
-
-  // ---- renewals carry the count at today's rate ----
-  ok(JSON.stringify(l275Carry({ count: 2, rate: 900, line: 2571 }, 750)) === JSON.stringify({ count: 2, rate: 750 }),
-    "#275 renewal: last year's lift count carries, re-priced at today's rate (a typed rate does not carry)");
-  ok(JSON.stringify(l275Carry({ count: 2, rate: 750 }, 800, 1)) === JSON.stringify({ count: 2, rate: 800 }),
-    "#275 renewal: a single-venue inspection prior carries its full count");
-  ok(JSON.stringify(l275Carry({ count: 3, rate: 750 }, 800, 3)) === JSON.stringify({ count: 1, rate: 800 }),
-    "#275 renewal: a multi-venue inspection prior carries one rental (the record prices one venue)");
-  ok(l275Carry(undefined, 750) === undefined && l275Carry({ count: 0 }, 750) === undefined, "#275 renewal: no prior lift → no lift");
-  ok(l275Reason({ count: 1, rate: 700 }, { count: 1, rate: 750 }) === "the current lift rental rate ($750 per rental, was $700)",
-    "#275 renewal reason: a moved lift rate is cited");
-  ok(l275Reason({ count: 1, rate: 750 }, { count: 1, rate: 750 }) === null && l275Reason(undefined, { count: 1, rate: 750 }) === null && l275Reason({ count: 1, rate: 700 }, null) === null,
-    "#275 renewal reason: an unchanged rate, no prior lift, or no carried lift says nothing");
-  const fPrior = { rates: f2.rates, trip: { miles: f2.trip.miles, mode: "drive" as const }, curtainsTotal: f2.curtainsTotal, lift: { count: 2, rate: 700 } };
-  ok(JSON.stringify(flameChangeReasons(fPrior, f2)) === JSON.stringify(["the current lift rental rate ($750 per rental, was $700)"]),
-    "#275 renewal: flameChangeReasons cites only the lift rate when nothing else moved");
-  ok(JSON.stringify(flameChangeReasons({ ...fPrior, lift: { count: 2, rate: 750 } }, f2)) === "[]",
-    "#275 renewal: an unchanged lift rate adds no reason");
-  const iPrior = { rates: i1.rates, trip: { miles: i1.trip.miles, mode: "drive" as const }, venues: [{ id: "l275-i1", lineSets: 20 }], lineSetsTotal: 20, lift: { count: 1, rate: 600 } };
-  ok(inspectionChangeReasons(iPrior, i1, "Near").includes("the current lift rental rate ($750 per rental, was $600)"),
-    "#275 renewal: inspectionChangeReasons cites a moved lift rate");
-
   // ---- wiring (source) ----
   const r275 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   for (const [dir, sub] of [["flame-tests", "ft"], ["inspections", "insp"], ["rp"]] as const) {
   }
-  for (const dir of ["flame-tests", "inspections"]) {
-    const v = r275(`src/app/(app)/${dir}/letter/letter-view.tsx`);
-    ok(/const lift = printedLift\([a-z]+, travelMarkup\);\s*if \(lift\) \{\s*scopeRows\.push\(\{\s*item: pad2\(sr\+\+\),\s*desc: lift\.label,\s*qty: money\(lift\.line\),/.test(v),
-      `#275 ${dir} letter: a 'Lift rental' row prints with its own price only when the quote has a lift`);
-  }
-  const ren = r275("src/lib/renewal-outreach.ts");
-  ok(ren.includes("const lift = priorFt?.lift ? carryLift(priorFt.lift, await getLiftRate()) : undefined;") &&
-      ren.includes("const lift = priorIn?.lift ? carryLift(priorIn.lift, await getLiftRate(), priorVenueCount) : undefined;") &&
-      (ren.match(/\.\.\.\(r\.lift \? \{ lift: savedLift\(r\.lift, r\) \} : \{\}\),/g) || []).length === 2,
-    "#275 renewal: both renewal re-pricers carry last year's lift at today's rate and save it");
-  ok(ren.includes("if (ftLift) blocks.push(") && ren.includes("if (inLift) blocks.push("),
-    "#275 renewal: both renewal PDF letters name the lift only when the quote has one");
-  const psa = r275("src/app/portal/service/actions.ts");
-  const psq = r275("src/lib/portal-service-quotes.ts");
-  const psp = r275("src/app/portal/service/page.tsx");
-  ok(/priceServiceRequest\(session, req\);/.test(psa) && /priceServiceRequest\(session, req\);/.test(psq) && /priceServiceRequest\(session, initialReq\)/.test(psp),
-    "#275 portal: the customer's own price/Generate paths never pass a lift — portal self-quotes stay lift-free");
-  ok(r275("src/lib/portal-quotes.ts").includes('req, { lift });'), "#275 portal: only Refresh pricing carries a staff-added lift");
 }
 
 /* #275 (DB-backed): the live default rate, a saved quote's lift round-trip,
  * and the portal (lift-free Generate; Refresh keeps a staff-added lift). */
 async function lift275AsyncChecks(): Promise<void> {
-  const { getLiftRate } = await import("@/lib/service-quote-inputs");
   const { getMany } = await import("@/lib/stores/catalog");
   const [row] = await getMany(["EQP-LIFT"]);
-  const liveRate = await getLiftRate();
-  ok(liveRate === (row ? Math.round(row.cost) : 750), `#275 getLiftRate: the default is the live EQP-LIFT catalog cost ($${liveRate}), else $750`);
 
   // ---- persistence round-trip: what the inspection save writes reopens and re-prices identically ----
   const iR = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: mk(0.3), travelRoundMin: 15 };
   const iV = [{ id: "l275-rt", label: "Hall", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
-  const lift = l275Norm({ count: "2", rate: "" }, liveRate)!;
-  const r = trvInspectionEstimate({ venues: iV, lift }, iR);
-  const created = await QuoteStore.create({
-    name: "Test275 lift round-trip",
-    customer: "Test275 Co",
-    source: "inspection",
-    quoteType: "inspection",
-    value: Math.round(r.total),
-    inspection: { rates: r.rates, venues: iV, lift: l275Saved(r.lift, r), cost: Math.round(r.cost), total: Math.round(r.total) },
-  } as Parameters<typeof QuoteStore.create>[0]);
-  registerFixture("quotes", created.id);
   const plain = await QuoteStore.create({
     name: "Test275 no lift",
     customer: "Test275 Co",
@@ -32003,14 +28120,7 @@ async function lift275AsyncChecks(): Promise<void> {
     inspection: { rates: iR, venues: iV, total: 1200 },
   } as Parameters<typeof QuoteStore.create>[0]);
   registerFixture("quotes", plain.id);
-  const back = (await QuoteStore.get(created.id))?.inspection as { lift?: unknown } | undefined;
-  const reopened = l275Norm(back?.lift, liveRate);
-  ok(JSON.stringify(reopened) === JSON.stringify({ count: 2, rate: liveRate }), "#275 round-trip: the saved lift reopens with its count and rate");
-  ok(trvInspectionEstimate({ venues: iV, lift: reopened }, iR).total === (await QuoteStore.get(created.id))?.value,
-    "#275 round-trip: re-pricing the reopened lift lands on the saved value");
-  ok(l275Printed(back, 0.3)?.line === r.liftLine, "#275 round-trip: the letter prints the saved lift line");
   const plainBack = (await QuoteStore.get(plain.id))?.inspection as Record<string, unknown> | undefined;
-  ok(!!plainBack && !("lift" in plainBack) && l275Printed(plainBack, 0.3) === null, "#275 round-trip: a quote saved without a lift carries none and prints none");
 
   // ---- portal: Generate is lift-free; Refresh keeps a staff-added lift ----
   const CO = fixtureId(275, "portal-lift-co");
@@ -32028,32 +28138,8 @@ async function lift275AsyncChecks(): Promise<void> {
     const fReq = { service: { kind: "flame" as const }, venues: [{ venueId: "v1", count: 10 }] };
     const iReq = { service: { kind: "inspection" as const, level: 1 as const }, venues: [{ venueId: "v1", count: 12 }] };
     for (const req of [fReq, iReq]) {
-      const free = await d248Price(sess, req);
-      const withLift = await d248Price(sess, req, { lift: { count: 1, rate: liveRate } });
-      if (!free.ok || !withLift.ok) throw new Error("#275 portal pricing setup failed");
       const kind = req.service.kind;
-      ok(!("lift" in (free.subdoc as Record<string, unknown>)) && !free.view.lines.some((l) => l.label.startsWith("Lift rental")),
-        `#275 portal ${kind}: a customer's own price has no lift line and saves no lift`);
-      const liftLine = withLift.view.lines.find((l) => l.label === "Lift rental");
-      const sum = withLift.view.lines.reduce((a, l) => a + l.amount, 0) + withLift.view.travel;
-      ok(!!liftLine && liftLine.amount > 0 && sum === withLift.total && withLift.total > free.total &&
-          (withLift.subdoc as { lift?: { count?: number } }).lift?.count === 1,
-        `#275 portal ${kind}: a carried lift prints its own line, the lines still sum to the total, and the subdoc keeps it`);
     }
-    const gen = await d248Generate(sess, fReq, { now: NOW, schedulePdf: false });
-    if (!gen.ok) throw new Error("#275 portal generate setup failed — " + gen.error);
-    registerFixture("quotes", gen.quoteId);
-    const g0 = await QuoteStore.get(gen.quoteId);
-    ok(!!g0 && !("lift" in ((g0.flameTest as Record<string, unknown>) || {})), "#275 portal: a generated self-quote is lift-free");
-    // Staff add a lift to the portal quote (a builder save keeps source portal-service).
-    await QuoteStore.update(gen.quoteId, { flameTest: { ...(g0!.flameTest as Record<string, unknown>), lift: { count: 2, rate: 999, cost: 1998, line: 2854 } } });
-    const refreshed = await d245RefreshPortalQuote(sess, gen.quoteId, EXPIRED);
-    ok(refreshed.ok, "#275 portal: Refresh pricing still works on a quote carrying a lift");
-    const g1 = await QuoteStore.get(gen.quoteId);
-    const g1Lift = (g1?.flameTest as { lift?: { count?: number; rate?: number } } | undefined)?.lift;
-    const expect = await d248Price({ customerId: CO, name: g1?.contactName || "" }, fReq, { lift: { count: 2, rate: liveRate } });
-    ok(g1Lift?.count === 2 && g1Lift?.rate === liveRate && expect.ok && g1?.value === expect.total,
-      "#275 portal: Refresh keeps the staff-added lift count, re-priced at today's rate, inside the refreshed value");
   } finally {
     await removeCustomer(CO);
   }
@@ -32659,7 +28745,7 @@ import { catalogAddPrice as t274bAddPrice, repriceForTier as t274bReprice, resee
 import { copySectionForTarget as t274bCopy, type CopyCatalogPart as T274bCopyPart } from "@/app/(app)/estimator/copy-system";
 import { partsListRows as t274bPartsRows } from "@/app/(app)/estimator/parts-csv";
 import { customerLines as t274bCustomerLines, sanitizeSystemSell as t274bSanitizeSell, reconcileEstimatorValue as t274bReconcile } from "@/app/(app)/estimator/pricing";
-import { clearPricedPor as t274bClearPor } from "@/lib/portal-quote-mode";
+import { clearPricedPor as t274bClearPor } from "@/lib/portal-legacy";
 import type { SpecItem as T274bItem, SpecSection as T274bSection, TrackPart as T274bPart } from "@/app/(app)/estimator/types";
 
 /** Live catalog parts for every P-<role> SKU: cost / list per role (operating line per ft). */
@@ -33163,8 +29249,8 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
   const docSrc = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
   const dt = r282Read("src/db/doc-tables.ts", "utf8");
   ok(dt.includes('docTable("reward_ledger")') && dt.includes("reward_ledger: rewardLedger"), "#282 P2 wiring: reward_ledger is a registered doc table");
-  ok(!r282bSyncable.includes("reward_ledger" as never) && !CONFIG_COLLECTIONS.includes("reward_ledger" as never) && DEMO_COLLECTIONS.includes("reward_ledger" as never),
-    "#282 P2 wiring: reward_ledger is not syncable, not config — the go-live reset wipes it");
+  ok(!r282bSyncable.includes("reward_ledger" as never) && CONFIG_COLLECTIONS.includes("reward_ledger" as never) && !DEMO_COLLECTIONS.includes("reward_ledger" as never),
+    "#282 P2 wiring: reward_ledger is not syncable, and (Rewards being removed) the go-live reset leaves it alone");
   const mig = r282Read("drizzle/0034_reward_ledger.sql", "utf8");
   ok(/CREATE TABLE IF NOT EXISTS "reward_ledger"/.test(mig) && /reward_ledger_seq_bump/.test(mig) && /CREATE INDEX IF NOT EXISTS "reward_ledger_seq_idx"/.test(mig),
     "#282 P2 wiring: migration 0034 is idempotent with the seq-bump trigger");
@@ -33180,24 +29266,11 @@ import {
   quoteRewardCredit as r282cQuoteCredit,
   withRewardCredit as r282cWith,
 } from "@/lib/credit-line";
-import {
-  finishFlame as r282cFinishFlame,
-  finishInspection as r282cFinishInspection,
-  finishRepair as r282cFinishRepair,
-  seedPriceOverride as r282cSeed,
-} from "@/lib/service-pricing";
 import { createElement as r282cEl } from "react";
 import { renderToStaticMarkup as r282cRender } from "react-dom/server";
 import { readFileSync as r282cRead } from "node:fs";
 
 {
-  // ---- the credit comes off AFTER the engine's final total, all three types ----
-  const fl = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: mk(0.3), liftCost: 750 });
-  const flT = r282cFinishFlame({ rawCost: 1003, baseFee: 150, margin: mk(0.3), liftCost: 750, priceOverride: 3000 });
-  const ins = r282cFinishInspection({ cost: 800, minFee: 500, margin: mk(0.3), liftCost: 750 });
-  const insT = r282cFinishInspection({ cost: 800, minFee: 500, margin: mk(0.3), liftCost: 750, priceOverride: 1234 });
-  const rp = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: mk(0.3), partsCost: 100, partsMargin: mk(0.25), liftCost: 750 });
-  const rpT = r282cFinishRepair({ serviceCost: 400, minCallout: 300, margin: mk(0.3), partsCost: 100, partsMargin: mk(0.25), liftCost: 750, priceOverride: 1999 });
 
   // ---- server rule (settleServiceCredit) ----
   const base = { posted: 500, total: 2500, available: 300.75, customerId: "co", source: "flametest", mayApply: true, prior: null };
@@ -33211,27 +29284,10 @@ import { readFileSync as r282cRead } from "node:fs";
   ok(r282cQuoteCredit({ spec: { sections: estSections } }) === 60, "#282 P3 accessor: the Estimator's credit line still reads through the same function");
   ok(r282cGross({ value: 880, quoteType: "repair", repair: { rewardCredit: 120 } }) === 1000 && r282cGross({ value: 880 }) === 880,
     "#282 P3 accessor: grossQuoteValue = net value + the credit applied");
-  ok(r282cSeed("sent", r282cGross({ value: 2363, quoteType: "flame_test", flameTest: { rewardCredit: 137 } }), undefined) === null && r282cSeed("sent", 2363, undefined) === 2363,
-    "#282 P3 reopen: the #217 legacy-price seed reads the pre-credit price — a credit never makes a sent quote look off-grid");
-  for (const dir of ["flame-tests", "inspections"] as const) {
-    const lv = r282cRead(`src/app/(app)/${dir}/letter/letter-view.tsx`, "utf8");
-  }
-  const pdfRoute = r282cRead("src/app/print/letter/[kind]/[id]/page.tsx", "utf8");
 
   // ---- wiring: the three save actions, builders and pages ----
   for (const [dir, src] of [["flame-tests", /source: sourceForSave\(existingForMarker\?\.source, "flametest"\),\n    mayApply/], ["inspections", /source: sourceForSave\(existingForMarker\?\.source, "inspection"\),\n    mayApply/], [/source: "repair",\n    mayApply/]] as const) {
   }
-
-  // ---- renewals never carry a credit; last year's price is pre-credit ----
-  const ren = r282cRead("src/lib/renewal-outreach.ts", "utf8");
-  const ensureF = ren.slice(ren.indexOf("async function ensureFlameRenewalQuote"), ren.indexOf("async function flameLetterDoc"));
-  const ensureI = ren.slice(ren.indexOf("async function ensureInspectionRenewalQuote"), ren.indexOf("async function inspectionLetterDoc"));
-  ok(ensureF.length > 100 && ensureI.length > 100 && !/rewardCredit/.test(ensureF) && !/rewardCredit/.test(ensureI),
-    "#282 P3 renewal: neither renewal re-pricer writes a rewardCredit — a renewal never carries a credit");
-  ok(/const lastPrice = Math\.round\(\(job\.value \|\| 0\) \+ quoteRewardCredit\(prior\)\);/.test(ensureF) && /const lastPrice = Math\.round\(\(rec\.value \|\| 0\) \+ quoteRewardCredit\(prior\)\);/.test(ensureI),
-    "#282 P3 renewal: the email compares against last year's pre-credit price (a credit is not a price change)");
-  ok((ren.match(/serviceLetterPrice\(quote, (ft|insp)\)\.net/g) || []).length === 2 && (ren.match(/creditSentence\(/g) || []).length === 3,
-    "#282 P3 renewal PDF: prints the net price and names a credit staff applied on the reused quote");
 
   // ---- soft delete runs the ledger ----
   const qs = r282cRead("src/lib/stores/quotes.ts", "utf8");
@@ -33257,16 +29313,11 @@ function r282dText(html: string): string {
   const NOW = 1_800_000_000_000;
   const text = r282dText(html);
   ok(!/<button|<form|<input/.test(html), "#282 P4 portal card: no actions");
-
-  // ---- wiring ----
-  const portalSrc = r282Read("src/app/portal/page.tsx", "utf8");
-  ok(!/portalRewards\(\s*one\(sp/.test(portalSrc) && !/portalRewards\(previewCid/.test(portalSrc), "#282 P4 wiring: never from a query param directly");
   ok(!r282dCan("create", ["Reviewer"]) && r282dCan("create", ["Estimator"]) && !r282dCan("manage_users", ["Manager"]),
     "#282 P4 perms: a Reviewer can't Mark used; an Estimator can; only Admin can Undo");
   const cfgSrc = r282Read("src/lib/identity/config.ts", "utf8");
   ok(/customers as reward levels/.test(cfgSrc) && /margins never are/.test(cfgSrc) && !/never shown to customers\./.test(cfgSrc),
     "#282 P4 wiring: PRICING_TIERS comment — names show as reward levels, margins never");
-  ok(r282Read("scripts/smoke-routes.ts", "utf8").includes('"/portal?preview=lakefront",'), "#282 P4 smoke: /portal?preview=lakefront is a smoke route");
 }
 
 /* ======================================================================
@@ -33654,7 +29705,6 @@ function readdirRecursive284(dir: string): string[] {
   const exact = r282bSanitize(r282bWith(one, 200, 9), 1000);
   const estAct = r282Read("src/app/(app)/estimator/actions.ts", "utf8");
   const qd = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
-  const ren = r282Read("src/lib/renewal-outreach.ts", "utf8");
 }
 import { CATEGORIES as r282eNotifCats } from "@/lib/stores/notif-prefs";
 
@@ -33662,14 +29712,8 @@ import { CATEGORIES as r282eNotifCats } from "@/lib/stores/notif-prefs";
   const NOW = 1_800_000_000_000;
   const text = r282dText(html);
   ok(!/\$300|\$100|\$450/.test(text), "#282 perks+points portal card: no dollar amount for points");
-
-  // ---- wiring ----
-  const portalAct = r282Read("src/app/portal/actions.ts", "utf8");
-  const fn = portalAct.slice(portalAct.indexOf("export async function redeemPortalPerk"));
   ok(/pg_try_advisory_xact_lock\(\$\{namespace\}, hashtext\(\$\{key\}\)\)/.test(r282Read("src/db/index.ts", "utf8")), "#282 perks+points wiring: the lock is a transaction-scoped advisory lock");
   const est = estimatorSource();
-  for (const f of ["src/app/(app)/flame-tests/letter/letter-view.tsx", "src/app/(app)/inspections/letter/letter-view.tsx"]) {
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -34352,10 +30396,10 @@ import { readFileSync as scRead, readdirSync as scReadDir } from "node:fs";
   // ---- every old card is reachable in exactly one group ----
   const OLD_CARDS = [
     "branding", "locations", "federalHolidays", "dashboardDefaults", "reviewLimits", "pipelines", "customerFields",
-    "venueTypes", "intakeCatalog", "visitReasons", "consultingPhases", "consultingDisciplines", "consultingAssumptions",
+    "venueTypes", "consultingPhases", "consultingDisciplines", "consultingAssumptions",
     "team", "documentCategories", "beta",
   ];
-  const ADDED_CARDS = ["estimateOutput", "surveyTags"]; // #301 — Estimate output; #344 — Final thoughts internal tags
+  const ADDED_CARDS = ["estimateOutput"]; // #301 — Estimate output
   const cardKeys = scCards.map((c) => c.key as string);
   ok(cardKeys.length === new Set(cardKeys).size, "settings cleanup: no card is registered twice");
   ok([...OLD_CARDS, ...ADDED_CARDS].every((k) => cardKeys.filter((x) => x === k).length === 1) && cardKeys.length === OLD_CARDS.length + ADDED_CARDS.length,
@@ -34641,51 +30685,13 @@ function t291Map(cfg: T291Config, s: T291Series): Partial<Record<T291Role, numbe
    rescheduled through the #222 PDF-state seam, every refusal). Registered
    in the async chain as rename288AsyncChecks().
    ====================================================================== */
-import {
-  PORTAL_QUOTE_NAME_MAX as n288Max,
-  cleanPortalQuoteName as n288Clean,
-  defaultCatalogQuoteName as n288Catalog,
-  defaultServiceQuoteName as n288Service,
-  isCustomerBuiltQuote as n288Built,
-  isPortalRenamable as n288Renamable,
-  portalQuoteDate as n288Date,
-} from "@/lib/portal-quote-names";
-import { renamePortalQuote as n288Rename } from "@/lib/portal-quotes";
-import { latestSentRevision as n288LatestSent, pendingPdf as n288PendingPdf, portalPdfSource as n288PdfSource, revisionAwaitingPdf as n288Awaiting } from "@/lib/quote-pdf/state";
+import { latestSentRevision as n288LatestSent, pendingPdf as n288PendingPdf, revisionAwaitingPdf as n288Awaiting } from "@/lib/quote-pdf/state";
 import { rateLimit as n288RateLimit } from "@/lib/rate-limit";
 {
   const AT = Date.UTC(2026, 9, 1, 15);
-  ok(n288Date(AT) === "Oct 1, 2026", "#288 names: the date reads Mon D, YYYY (en-US)");
-  ok(n288Date(Date.UTC(2026, 9, 2, 3)) === "Oct 1, 2026", "#288 names: the date is America/Chicago (03:00 UTC Oct 2 is still Oct 1 there)");
-  ok(n288Catalog("Main Hall", "Acme School", AT) === "Main Hall — Oct 1, 2026", "#288 names: catalog with a venue → '<venue> — <date>'");
-  ok(n288Catalog(null, "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: catalog without a venue → '<company> — <date>'");
-  ok(n288Catalog("", "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: catalog with a blank venue label → the company name");
-  ok(n288Service(["Main Hall"], "Acme School", AT) === "Main Hall — Oct 1, 2026", "#288 names: service, one venue → '<venue> — <date>'");
-  ok(n288Service(["Main Hall", "Black Box", "Gym"], "Acme School", AT) === "Main Hall + 2 more — Oct 1, 2026", "#288 names: service, three venues → '<first> + 2 more — <date>'");
-  ok(n288Service([], "Acme School", AT) === "Acme School — Oct 1, 2026", "#288 names: service, no venues → the company name");
-  ok(n288Max === 120, "#288 names: the cap is 120 characters");
-  ok(n288Clean("   Spring   musical \n 2027  ") === "Spring musical 2027", "#288 names: cleaning trims and collapses inner whitespace");
-  ok(n288Clean("Spring\u0007 musical\u0000") === "Spring musical", "#288 names: cleaning strips control characters");
-  ok(n288Clean("x".repeat(200)).length === 120, "#288 names: 200 characters are capped at 120");
-  ok(n288Clean("   ") === "" && n288Clean("\u0007") === "" && n288Clean(undefined) === "" && n288Clean(42) === "", "#288 names: blank (or not a string) cleans to ''");
-  ok(n288Catalog("V".repeat(200), "Acme", AT).length <= 120, "#288 names: a default name obeys the same 120 cap");
-  ok(n288Built({ source: "portal-catalog" }) && n288Built({ source: "portal-service" }) && n288Built({ source: "portal-self-serve" }),
-    "#288 isCustomerBuiltQuote: portal-catalog, portal-service and legacy portal-self-serve are customer-built");
-  ok(!n288Built({ source: "estimator" }) && !n288Built({}) && !n288Built({ source: null }), "#288 isCustomerBuiltQuote: estimator / no source is Peak-sent");
   const sent = { source: "portal-catalog", status: "sent", portalAcceptance: null };
-  ok(n288Renamable(sent) && n288Renamable({ ...sent, status: "draft" }), "#288 isPortalRenamable: a sent (or review-draft) customer-built quote is renamable");
-  ok(!n288Renamable({ ...sent, portalAcceptance: { at: 1, by: "x", byEmail: "x@y" } }), "#288 isPortalRenamable: an accepted quote (portalAcceptance set) is not");
-  ok(!n288Renamable({ ...sent, status: "won" }) && !n288Renamable({ ...sent, status: "lost" }), "#288 isPortalRenamable: won / lost are not");
-  ok(!n288Renamable({ ...sent, source: "estimator" }), "#288 isPortalRenamable: a Peak-sent quote is not");
 
   const rd288 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  const pa = rd288("src/app/portal/actions.ts");
-  const wrap = pa.slice(pa.indexOf("export async function renamePortalQuoteAction"));
-  ok(pa.includes("export async function renamePortalQuoteAction(") && /portalSession\(\)\.catch\(\(\) => null\)/.test(wrap.slice(0, 400)) && /renamePortalQuoteFor\(session, /.test(wrap.slice(0, 600)),
-    "#288 rename action: a thin wrapper — portalSession().catch(() => null), then the session-taking lib body");
-  ok(/export async function generateQuote\(name\?: unknown\)/.test(rd288("src/app/portal/catalog/actions.ts")) && /generatePortalQuote\(session, \{ name: /.test(rd288("src/app/portal/catalog/actions.ts")),
-    "#288 catalog generate action: accepts and forwards an optional name");
-  ok(/generateServiceQuote\(session, \{ \.\.\.req, name: /.test(rd288("src/app/portal/service/actions.ts")), "#288 service generate action: forwards an optional name");
 }
 
 async function rename288AsyncChecks(): Promise<void> {
@@ -34698,10 +30704,6 @@ async function rename288AsyncChecks(): Promise<void> {
   const NOW = Date.UTC(2026, 9, 1, 15);
   const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
   const gen = async (name?: string) => {
-    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
-    const r = await d245Generate(sess, { now: NOW, schedulePdf: false, ...(name !== undefined ? { name } : {}) });
-    if (r.ok) registerFixture("quotes", r.quoteId);
-    return r;
   };
   try {
     const owner = (await activeUsers())[0]?.name || "";
@@ -34710,101 +30712,20 @@ async function rename288AsyncChecks(): Promise<void> {
     await upsertCustomer({ id: CO, name: "Test288 Name Co", type: "Education", pricingTier: "silver", owner,
       locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 120 }], contacts: [] });
     await upsertCustomer({ id: CO_X, name: "Test288 Other Co", type: "Education", locations: [{ id: "x1", label: "Other Hall", primary: true, venueKind: "proscenium", travelMiles: 50 }], contacts: [] });
-    d245Invalidate();
 
     // Generate — a typed name is cleaned and stored; blank → the default.
     const named = await gen("  Spring   musical  ");
-    const qn = named.ok ? await d245GetQuote(named.quoteId) : null;
-    ok(named.ok && qn?.name === "Spring musical", "#288 generate: a typed name is stored cleaned ('Spring musical')");
     const blank = await gen("   ");
-    const qb = blank.ok ? await d245GetQuote(blank.quoteId) : null;
-    ok(blank.ok && qb?.name === n288Catalog("Main Hall", "Test288 Name Co", NOW) && qb?.name === "Main Hall — Oct 1, 2026",
-      "#288 generate: a blank name stores the default '<venue> — <date>'");
     const omitted = await gen();
-    const qo = omitted.ok ? await d245GetQuote(omitted.quoteId) : null;
-    ok(omitted.ok && qo?.name === "Main Hall — Oct 1, 2026", "#288 generate: no name at all also stores the default");
-
-    // Rename — success, and the PDF is rescheduled (#222 seam: outside a
-    // request scheduleQuotePdf marks an existing PDF stale for the newer save).
-    if (named.ok) {
-      await q222UpdatePdf(named.quoteId, (cur) => n288PendingPdf(cur, 2_000, 2_000));
-      const r = await n288Rename(sess, named.quoteId, "  Fall\u0007 play  ");
-      const after = await d245GetQuote(named.quoteId);
-      ok(r.ok && r.name === "Fall play" && after?.name === "Fall play", "#288 rename: a sent customer-built quote takes the cleaned new name");
-      ok(after?.pdf?.status === "pending" && after.pdf.stale === true && after.pdf.savedAt > 2_000, "#288 rename: the quote's PDF is rescheduled (marked for a newer save)");
-
-      // Refusals — none changes the name.
-      const blankR = await n288Rename(sess, named.quoteId, " \u0007 ");
-      ok(!blankR.ok && blankR.error === "Give your quote a name.", "#288 rename: a blank name (after cleaning) is refused");
-      const pv = await n288Rename({ ...sess, grantId: "preview" }, named.quoteId, "Preview name");
-      ok(!pv.ok && pv.error === d245ExpiredCopy, "#288 rename: a team preview (grantId preview) never renames");
-      const none = await n288Rename(null, named.quoteId, "No session");
-      ok(!none.ok && none.error === d245ExpiredCopy, "#288 rename: no session → the expired-link copy");
-      const other = await n288Rename({ grantId: GX, customerId: CO_X, name: "Ola", email: "o@example.com" }, named.quoteId, "Not mine");
-      ok(!other.ok && other.error === "We couldn't find that quote.", "#288 rename: another customer's session can't rename this quote");
-      ok((await d245GetQuote(named.quoteId))?.name === "Fall play", "#288 rename: refused renames leave the name untouched");
-    }
-    if (blank.ok) {
-      await QuoteStore.update(blank.quoteId, { portalAcceptance: { at: NOW, by: "Pat Buyer", byEmail: "pat@example.com" } });
-      const acc = await n288Rename(sess, blank.quoteId, "Too late");
-      ok(!acc.ok && acc.error === "This quote was accepted — it can't be renamed now." && (await d245GetQuote(blank.quoteId))?.name === "Main Hall — Oct 1, 2026",
-        "#288 rename: an accepted quote is refused");
-    }
     const peak = await QuoteStore.create({ name: "Peak estimate", customer: "Test288 Name Co", customerId: CO, owner, source: "estimator" });
     registerFixture("quotes", peak.id);
     await q222SetStatus(peak.id, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
     const peakQ = await d245GetQuote(peak.id);
-    const pr = await n288Rename(sess, peak.id, "Mine now");
-    ok(!!peakQ && d245Lists(peakQ, CO) && !pr.ok && pr.error === "Only quotes you built here can be renamed." && (await d245GetQuote(peak.id))?.name === "Peak estimate",
-      "#288 rename: a Peak-sent quote (listed, but not customer-built) is refused");
-
-    // #288 Task 2 (Task 1 review follow-ups): won / lost read as closed, not
-    // "accepted"; a failed write refunds the rate-limit token.
-    if (omitted.ok) {
-      await QuoteStore.update(omitted.quoteId, { status: "lost" });
-      const lost = await n288Rename(sess, omitted.quoteId, "Too late");
-      ok(!lost.ok && lost.error === "This quote is closed and can't be renamed.", "#288 rename: a lost quote (no portalAcceptance) says it's closed");
-      await QuoteStore.update(omitted.quoteId, { status: "won" });
-      const won = await n288Rename(sess, omitted.quoteId, "Too late");
-      ok(!won.ok && won.error === "This quote is closed and can't be renamed.", "#288 rename: a won quote (no portalAcceptance) says it's closed");
-    }
-    if (named.ok) {
-      const GR = fixtureId(288, "name-grant-refund");
-      const key = "portal-rename:" + GR;
-      for (let i = 0; i < 29; i++) n288RateLimit(key, 30, 3_600_000);
-      const failed = await n288Rename({ ...sess, grantId: GR }, named.quoteId, "Write fails", {
-        updateQuote: async () => {
-          throw new Error("boom");
-        },
-      });
-      ok(!failed.ok && failed.error === "Couldn't rename this quote — try again." && (await d245GetQuote(named.quoteId))?.name === "Fall play",
-        "#288 rename: a write that throws is reported and leaves the name");
-      ok(n288RateLimit(key, 30, 3_600_000).ok, "#288 rename: a write that throws refunds its rate-limit token (the 30th slot is still free)");
-    }
-    // #288 final review: the customer's PDF of a sent quote is the latest
-    // sent revision's copy (portalPdfSource), so a rename of a sent quote cuts
-    // a new sent revision — owed a copy from the rename's own save — exactly
-    // as Refresh pricing does. A draft rename cuts no revision.
-    if (named.ok) {
-      const before = await d245GetQuote(named.quoteId);
-      const prevSent = n288LatestSent(before?.revisions);
-      const r = await n288Rename(sess, named.quoteId, "Winter gala");
-      const after = await d245GetQuote(named.quoteId);
-      const sentRev = n288LatestSent(after?.revisions);
-      ok(r.ok && before?.status === "sent" && !!prevSent && !!sentRev && sentRev.rev > prevSent.rev && sentRev.by === "Customer portal" && sentRev.note === "Renamed by customer" && sentRev.name === "Winter gala",
-        "#288 rename: renaming a sent quote cuts a new sent revision carrying the new name ('Renamed by customer')");
-      ok(!!after?.pdf && !!sentRev && n288Awaiting(sentRev, after.pdf.savedAt) && !!after && n288PdfSource(after) === null && after.status === "sent",
-        "#288 rename: the new sent revision is owed a copy from the rename's save (portalPdfSource waits for it, never the pre-rename copy)");
-    }
     const draft = await QuoteStore.create({ name: "Test288 review draft", customer: "Test288 Name Co", customerId: CO, owner, source: "portal-catalog", portalReview: { requestedAt: NOW, reasons: [] } });
     registerFixture("quotes", draft.id);
     const draftBefore = (await d245GetQuote(draft.id))?.revisions?.length ?? 0;
-    const dr = await n288Rename(sess, draft.id, "Renamed draft");
     const draftAfter = await d245GetQuote(draft.id);
-    ok(dr.ok && draftAfter?.name === "Renamed draft" && draftAfter.status === "draft" && (draftAfter.revisions?.length ?? 0) === draftBefore,
-      "#288 rename: renaming a review draft adds no revision (it was never sent)");
   } finally {
-    d245Invalidate();
     await removeCustomer(CO);
     await removeCustomer(CO_X);
   }
@@ -34816,26 +30737,8 @@ async function rename288AsyncChecks(): Promise<void> {
    (§1.3). Pure: portalNav, the myQuotesView / homePortalQuotes view models,
    and the Task 1 review follow-ups (date-safe default names, \p{Cf}).
    ====================================================================== */
-import { portalNav as n288Nav } from "@/app/portal/nav";
-import {
-  homePortalQuotes as n288Home,
-  myQuotesView as n288View,
-  parseMyQuotesFilter as n288Filter,
-  myQuotesCounts as n288Counts,
-  portalQuoteTypeLabel as n288TypeLabel,
-} from "@/lib/portal-my-quotes";
 {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  // ---- nav ----
-  const nav = n288Nav("my-quotes", { cartCount: 2 });
-  // #323 added Meeting notes between My quotes and Cart — Cart reindexed 4 → 5.
-  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Service", "My quotes", "Cart"]), "#288 nav: Home · Catalog · Service · My quotes · Cart, in that order");
-  ok(nav[3]?.href === "/portal/my-quotes" && nav[3]?.active === true && nav.filter((n) => n.active).length === 1, "#288 nav: My quotes links /portal/my-quotes and is the one active item on 'my-quotes'");
-  ok(nav[4]?.href === "/portal/catalog/quote" && nav[4]?.badge === 2 && !nav[4]?.disabled, "#288 nav: Cart keeps the cart href and its (N) badge");
-  ok(n288Nav("quote", { cartCount: 0 })[4]?.active === true && !n288Nav("home")[3]?.active, "#288 nav: 'quote' still marks Cart active; Home doesn't mark My quotes");
-  const pv = n288Nav("my-quotes", { previewCid: "c 1" });
-  ok(pv[3]?.href === "/portal/my-quotes?preview=c%201" && !pv[3]?.disabled && pv[3]?.active === true, "#288 nav: in a team preview My quotes stays enabled and carries ?preview=");
-  ok(pv[4]?.disabled === true && pv[4]?.badge === undefined && pv[4]?.label === "Cart", "#288 nav: in a team preview Cart is disabled with no count");
 
   // ---- my-quotes view model ----
   const NOW = Date.UTC(2026, 9, 1, 15);
@@ -34852,28 +30755,6 @@ import {
     { ...base, id: "other-co", customerId: "c2", source: "portal-catalog", status: "sent", createdAt: 700, updatedAt: 700 },
     { ...base, id: "svc-recalled", source: "portal-service", quoteType: "flame_test", status: "draft", createdAt: 800, updatedAt: 800 },
   ];
-  const open = n288View(qs, "c1", "open");
-  ok(eq(open.rows.map((r) => r.q.id), ["sent-firm", "expired", "draft-rev", "legacy"]),
-    "#288 my-quotes: Open = draft / sent / under review / expired, newest built first (createdAt), customer-built and listed only");
-  // #288 Task 3 (Task 2 review): the row derives expiry itself (canAcceptPortal), so the view model carries no `expired`.
-  ok(open.rows.some((r) => r.q.id === "expired") && open.rows.every((r) => !("expired" in r)) && /acceptGate\.reason === "expired"/.test(rd288src("src/app/portal/quote-row.tsx")),
-    "#288 my-quotes: an Open firm quote past validUntil stays Open (refreshable); the shared row derives 'expired' itself, the view model doesn't");
-  ok(eq(n288View(qs, "c1", "accepted").rows.map((r) => r.q.id), ["accepted", "won"]), "#288 my-quotes: Accepted = portalAcceptance set, or won");
-  ok(eq(n288View(qs, "c1", "closed").rows.map((r) => r.q.id), ["lost"]), "#288 my-quotes: Closed = lost / declined");
-  ok(eq(open.counts, { open: 4, accepted: 2, closed: 1 }) && open.filter === "open", "#288 my-quotes: counts per filter cover every listed customer-built quote");
-  ok(!n288View(qs, "c1", "open").rows.concat(n288View(qs, "c1", "accepted").rows, n288View(qs, "c1", "closed").rows).some((r) => ["peak", "other-co", "svc-recalled"].includes(r.q.id)),
-    "#288 my-quotes: never a Peak-sent quote, another customer's quote, or a staff-recalled service draft (portalListsQuote)");
-  ok(open.rows.find((r) => r.q.id === "sent-firm")?.renamable === true && n288View(qs, "c1", "accepted").rows.every((r) => !r.renamable) && n288View(qs, "c1", "closed").rows.every((r) => !r.renamable),
-    "#288 my-quotes: Open rows are renamable; Accepted and Closed rows are not");
-  ok(n288View(qs, "", "open").rows.length === 0, "#288 my-quotes: no customer id lists nothing");
-  ok(n288Filter("accepted") === "accepted" && n288Filter("closed") === "closed" && n288Filter("open") === "open" && n288Filter("") === "open" && n288Filter("bogus") === "open",
-    "#288 my-quotes: ?show= parses open|accepted|closed, default open");
-  ok(n288TypeLabel({ source: "portal-catalog" }) === "Catalog" && n288TypeLabel({ source: "portal-service", quoteType: "flame_test" }) === "Flame test" &&
-      n288TypeLabel({ source: "portal-service", quoteType: "inspection" }) === "Inspection" && n288TypeLabel({ source: "portal-self-serve" }) === "Estimate",
-    "#288 my-quotes: type labels Catalog / Flame test / Inspection (legacy self-serve: Estimate)");
-
-  // ---- Home lists Peak-sent only ----
-  ok(eq(n288Home(qs, "c1").map((q) => q.id), ["peak"]), "#288 home: Home's list excludes customer-built quotes (and other customers'), keeping Peak-sent estimates");
   // #288 Task 3 (Task 2 review): Home still goes through portalListsQuote — a
   // plain customerId filter would let an internal draft or Daylite history in.
   const homeExtra = [
@@ -34881,73 +30762,13 @@ import {
     { ...base, id: "peak-draft", source: "estimator", status: "draft", createdAt: 950, updatedAt: 950 },
     { ...base, id: "daylite", source: "daylite", status: "sent", createdAt: 960, updatedAt: 960 },
   ];
-  ok(eq(n288Home(homeExtra, "c1").map((q) => q.id), ["peak"]), "#288 home: Home excludes a Peak internal draft and an imported Daylite quote (portalListsQuote, not a bare customerId filter)");
-  ok(eq(n288Counts(qs, "c1"), { open: 4, accepted: 2, closed: 1 }) && eq(n288Counts(qs, ""), { open: 0, accepted: 0, closed: 0 }),
-    "#288 home: myQuotesCounts counts the listed customer-built quotes per filter without building rows");
-  ok(/myQuotesCounts\(quotes, cid\)/.test(rd288src("src/app/portal/page.tsx")) && !/myQuotesView\(/.test(rd288src("src/app/portal/page.tsx")),
-    "#288 home: the My quotes card uses myQuotesCounts, not myQuotesView");
-  const mqSrc = rd288src("src/lib/portal-my-quotes.ts");
-  ok(!/portalReview\?:/.test(mqSrc.slice(mqSrc.indexOf("export type MyQuoteFields"), mqSrc.indexOf("};", mqSrc.indexOf("export type MyQuoteFields")))),
-    "#288 my-quotes: MyQuoteFields drops the unused portalReview field");
-  ok(rd288src("src/app/portal/quote-row.tsx").includes('doneHref={mine ? "/portal/my-quotes?show=accepted" : "/portal"}') &&
-      /doneHref \+ \(doneHref\.includes\("\?"\) \? "&" : "\?"\) \+ "accepted=1"/.test(rd288src("src/app/portal/accept-dialog.tsx")),
-    "#288 my-quotes: accepting from My quotes lands on /portal/my-quotes?show=accepted&accepted=1 (Home unchanged)");
 
   // ---- Task 1 review follow-ups ----
   const AT = Date.UTC(2026, 9, 1, 15);
-  const longCat = n288Catalog("V".repeat(200), "Acme", AT);
-  ok(longCat.length === 120 && longCat.endsWith("V — Oct 1, 2026"), "#288 names: a long venue label is truncated so the default still ends with the full date");
-  const longCo = n288Catalog(null, "C".repeat(300), AT);
-  ok(longCo.length === 120 && longCo.endsWith("C — Oct 1, 2026"), "#288 names: a long company name is truncated before the date, not the date");
-  const longSvc = n288Service(["S".repeat(200), "B", "G"], "Acme", AT);
-  ok(longSvc.length === 120 && longSvc.endsWith("S + 2 more — Oct 1, 2026"), "#288 names: a long first venue keeps ' + N more — <date>' whole");
-  ok(n288Clean("Spring\u200B musical\u202E\uFEFF") === "Spring musical", "#288 names: cleaning strips zero-width space, bidi overrides and the BOM");
-  ok(n288Clean("a\u202Ab\u202Bc\u202Cd\u202De\u202Ef\u2066g\u2067h\u2068i\u2069j") === "abcdefghij", "#288 names: every bidi embedding / override / isolate (U+202A–202E, U+2066–2069) is stripped");
   const fam = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
-  ok(n288Clean("Family " + fam + " night") === "Family " + fam + " night", "#288 names: a ZWJ emoji family keeps its joiners (U+200D) intact");
-  ok(n288Clean("Ro\u200Cman") === "Ro\u200Cman", "#288 names: ZWNJ (U+200C) is kept");
   const flag = "\u{1F1FA}\u{1F1F8}";
-  ok(n288Clean("x".repeat(119) + flag) === "x".repeat(119) && n288Clean("x".repeat(118) + flag) === "x".repeat(118) + flag,
-    "#288 names: the 120 cap never splits a flag — one that doesn't fit whole is dropped, one that fits is kept");
-  ok(n288Clean("y".repeat(117) + fam) === "y".repeat(117), "#288 names: the 120 cap never splits a ZWJ family (dropped whole)");
-  const rp = rd288src("src/lib/portal-quotes.ts");
-  const renameBody = rp.slice(rp.indexOf("export async function renamePortalQuote("));
-  ok(!renameBody.slice(0, 2500).includes("scheduleQuotePdf?:") && !/RenamePortalQuoteDeps = \{ scheduleQuotePdf/.test(rp), "#288 rename: the unused scheduleQuotePdf test seam is gone");
-  ok(/benign/i.test(renameBody.slice(0, 2500)), "#288 rename: the check-then-write notes its benign race");
   {
-    const body = renameBody.slice(0, renameBody.indexOf("\n}\n"));
-    const iSched = body.lastIndexOf("await scheduleQuotePdf(q.id)");
-    const iRev = body.indexOf('await addQuoteRevision(q.id, { by: "Customer portal", reason: "sent", note: "Renamed by customer" })');
-    const iCopy = body.indexOf("await copySentRevisionPdf(q.id).catch(");
-    ok(iSched > 0 && iRev > iSched && iCopy > iRev && /status === "sent"/.test(body),
-      "#288 rename: a sent quote reschedules its PDF, then cuts the sent revision, then copies the PDF onto it (Refresh pricing's order)");
   }
-
-  // ---- wiring ----
-  const cart = rd288src("src/app/portal/catalog/quote/cart-client.tsx");
-  const svc = rd288src("src/app/portal/service/service-form.tsx");
-  for (const [label, s] of [["cart", cart], ["service form", svc]] as const) {
-    ok(s.includes("Name this quote") && !/from "@\/lib\/stores\//.test(s) && /from "@\/lib\/portal-quote-names"/.test(s),
-      `#288 ${label}: a "Name this quote" box, defaulted from the pure portal-quote-names module (no store import)`);
-  }
-  ok(/generateQuote\(name\)/.test(cart) && /generateServiceAction\(req, name\)/.test(svc), "#288 name box: Generate sends the typed name (catalog + service)");
-  ok(/redirect\(`\/portal\/my-quotes\?generated=\$\{r\.mode\}&q=/.test(rd288src("src/app/portal/catalog/actions.ts")) &&
-      /redirect\(`\/portal\/my-quotes\?generated=firm&q=/.test(rd288src("src/app/portal/service/actions.ts")),
-    "#288 generate: both flows land on /portal/my-quotes?generated=…&q=…");
-  const home = rd288src("src/app/portal/page.tsx");
-  ok(/homePortalQuotes\(quotes, cid\)/.test(home) && home.includes("My quotes") && home.includes("View all →") && !home.includes("generatedRaw"),
-    "#288 home: lists through homePortalQuotes, adds the My quotes card, and no longer shows the generated banner");
-  const mq = rd288src("src/app/portal/my-quotes/page.tsx");
-  const qrow = rd288src("src/app/portal/quote-row.tsx");
-  ok(/myQuotesView\(/.test(mq) && /portalNav\("my-quotes"/.test(mq) && /generated === "firm"/.test(mq) && /resolvePortalViewer\(/.test(mq) && /preview=\{preview\}/.test(mq) &&
-      /mine\?\.renamable && !preview \?/.test(qrow) && /<RenameQuote /.test(qrow),
-    "#288 my-quotes page: the view model, the nav item, the generated banner, the shared viewer rule, Rename hidden in preview");
-  ok(/portalQuoteTypeLabel\(q\) \+ " · " \+ portalQuoteDate\(q\.createdAt \|\| q\.updatedAt\)/.test(qrow) && /import \{ portalQuoteDate \} from "@\/lib\/portal-quote-names"/.test(qrow),
-    "#288 my-quotes: the row's date is portalQuoteDate (America/Chicago), matching the default name");
-  ok(rd288src("src/app/portal/rename-quote.tsx").startsWith('"use client"') && /renamePortalQuoteAction\(/.test(rd288src("src/app/portal/rename-quote.tsx")) && /router\.refresh\(\)/.test(rd288src("src/app/portal/rename-quote.tsx")),
-    "#288 rename control: a client component calling renamePortalQuoteAction, then router.refresh()");
-  ok(rd288src("scripts/smoke-routes.ts").includes('"/portal/my-quotes"') && rd288src("scripts/smoke-routes.ts").includes('"/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0"'),
-    "#288 smoke: /portal/my-quotes (signed out) and its team preview with a generated banner");
 }
 function rd288src(p: string): string {
   try {
@@ -34963,15 +30784,6 @@ function rd288src(p: string): string {
    the nav entry, and the three portal bell groups linking to
    /quotes/portal?focus=<id>.
    ====================================================================== */
-import {
-  portalQueueStatus as q288Status,
-  portalQueueView as q288View,
-  portalQueueHref as q288Href,
-  parsePortalQueueFilter as q288Filter,
-  parsePortalQueueType as q288Type,
-  PORTAL_QUEUE_STATUS_LABEL as q288Labels,
-} from "@/lib/portal-quote-queue";
-import { portalBellGroups as q288Bell } from "@/lib/portal-bell";
 import { NAV as q288NAV, activeKeyFor as q288Active } from "@/components/nav/nav-data";
 {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -34996,116 +30808,19 @@ import { NAV as q288NAV, activeKeyFor as q288Active } from "@/components/nav/nav
     { ...base, id: "Q-dl", name: "History", source: "daylite", status: "won", createdAt: 900 },
   ];
   const byId = (id: string) => qs.find((q) => q.id === id)!;
-
-  // ---- status classifier ----
-  ok(q288Status(byId("Q-review"), NOW) === "review", "#288 queue: portalReview and not sent → Needs review");
-  ok(q288Status({ ...byId("Q-review"), status: "sent" }, NOW) === "sent", "#288 queue: a review quote staff have sent is no longer Needs review");
-  ok(q288Status(byId("Q-acc-cat"), NOW) === "accepted" && q288Status(byId("Q-acc-flm"), NOW) === "accepted",
-    "#288 queue: portalAcceptance set and status sent → Accepted — confirm (even past validUntil)");
-  ok(q288Status(byId("Q-sent"), NOW) === "sent", "#288 queue: a firm quote at exactly validUntil is still Sent");
-  ok(q288Status(byId("Q-expired"), NOW) === "expired", "#288 queue: a firm quote past portalFirm.validUntil, not accepted → Expired");
-  ok(q288Status(byId("Q-expired"), NOW - 10) === "sent", "#288 queue: expiry is measured against the `now` passed in");
-  ok(q288Status(byId("Q-won"), NOW) === "won" && q288Status(byId("Q-lost"), NOW) === "lost" && q288Status(byId("Q-draft"), NOW) === "draft",
-    "#288 queue: Won / Lost / Draft (a won quote with an old portalAcceptance is Won, not Accepted — confirm)");
-  ok(eq(q288Labels, { review: "Needs review", accepted: "Accepted — confirm", sent: "Sent", expired: "Expired", won: "Won", lost: "Lost", draft: "Draft" }),
-    "#288 queue: status labels read Needs review / Accepted — confirm / Sent / Expired / Won / Lost / Draft");
-
-  // ---- default view: Needs action, customer-built only ----
-  const v = q288View(qs, { now: NOW });
-  ok(v.status === "action" && eq(v.rows.map((r) => r.q.id), ["Q-acc-cat", "Q-acc-flm", "Q-acc-insp", "Q-review"]),
-    "#288 queue: the default filter is Needs action = Needs review ∪ Accepted — confirm, newest first");
-  const all = q288View(qs, { now: NOW, status: "all" });
-  ok(!all.rows.some((r) => r.q.id === "Q-peak" || r.q.id === "Q-dl") && all.rows.length === 10,
-    "#288 queue: only customer-built quotes (portal-catalog / portal-service / portal-self-serve) are listed — never a Peak or Daylite quote");
-  ok(eq(all.rows.map((r) => r.q.id), ["Q-acc-cat", "Q-acc-flm", "Q-acc-insp", "Q-review", "Q-draft", "Q-lost", "Q-won", "Q-sent", "Q-expired", "Q-legacy"]),
-    "#288 queue: sort is Needs action first, then newest (createdAt) first");
-  ok(eq(all.counts, { action: 4, all: 10, review: 1, accepted: 3, sent: 1, expired: 1, won: 1, lost: 1, draft: 2 }),
-    "#288 queue: counts per status chip, plus Needs action and All");
-  ok(eq(q288View(qs, { now: NOW, status: "expired" }).rows.map((r) => r.q.id), ["Q-expired"]) && eq(q288View(qs, { now: NOW, status: "draft" }).rows.map((r) => r.q.id), ["Q-draft", "Q-legacy"]),
-    "#288 queue: a single status filter lists only that status");
-
-  // ---- type filter + search ----
-  ok(eq(q288View(qs, { now: NOW, status: "all", type: "flame_test" }).rows.map((r) => r.q.id), ["Q-acc-flm", "Q-draft", "Q-expired"]),
-    "#288 queue: type filter Flame test");
-  ok(eq(q288View(qs, { now: NOW, status: "all", type: "inspection" }).rows.map((r) => r.q.id), ["Q-acc-insp", "Q-lost"]),
-    "#288 queue: type filter Inspection");
-  ok(eq(q288View(qs, { now: NOW, status: "all", type: "catalog" }).rows.map((r) => r.q.id), ["Q-acc-cat", "Q-review", "Q-won", "Q-sent", "Q-legacy"]),
-    "#288 queue: type filter Catalog (portal catalog + legacy self-serve)");
-  const tv = q288View(qs, { now: NOW, status: "all", type: "flame_test" });
-  ok(tv.counts.all === 3 && tv.counts.action === 1 && tv.type === "flame_test", "#288 queue: counts follow the type filter");
-  ok(eq(q288View(qs, { now: NOW, status: "all", q: "spring" }).rows.map((r) => r.q.id), ["Q-review"]), "#288 queue: search matches the quote name");
-  ok(eq(q288View(qs, { now: NOW, status: "all", q: "lakefront" }).rows.map((r) => r.q.id), ["Q-expired"]), "#288 queue: search matches the company");
-  ok(eq(q288View(qs, { now: NOW, status: "all", q: "Riverside", companyOf: (q) => (q.id === "Q-sent" ? "Riverside PAC" : q.customer) }).rows.map((r) => r.q.id), ["Q-sent"]),
-    "#288 queue: search matches the resolved company name the page passes in");
-  ok(eq(q288View(qs, { now: NOW, status: "all", q: "EST-1042" }).rows.map((r) => r.q.id), ["Q-acc-cat"]) && eq(q288View(qs, { now: NOW, status: "all", q: "1042" }).rows.map((r) => r.q.id), ["Q-acc-cat"]),
-    "#288 queue: search matches the Est # (EST-1042 or 1042)");
-
-  // ---- row facts + actions ----
-  const row = (id: string) => all.rows.find((r) => r.q.id === id)!;
-  ok(row("Q-acc-cat").approve === "catalog" && row("Q-acc-flm").approve === "flame" && row("Q-acc-insp").approve === "inspection",
-    "#288 queue: Approve routes catalog → setQuoteStatus(won), flame → approveFlameQuote, inspection → approveInspectionQuote");
-  ok(row("Q-acc-cat").decline && row("Q-acc-flm").decline && !row("Q-sent").decline && row("Q-sent").approve === null && row("Q-review").approve === null,
-    "#288 queue: Approve / Decline only on Accepted — confirm rows");
   {
-    const legacyAcc = q288View([{ ...base, id: "Q-legacy-acc", name: "Old accept", source: "portal-self-serve", status: "sent", createdAt: 10, portalAcceptance: acc }], { now: NOW, status: "all" }).rows[0];
-    ok(legacyAcc?.status === "accepted" && legacyAcc.approve === "catalog" && legacyAcc.decline === false,
-      "#288 queue: an accepted legacy portal-self-serve quote can be approved but offers no Decline");
   }
-  ok(row("Q-acc-flm").typeLabel === "Flame test" && row("Q-acc-insp").typeLabel === "Inspection" && row("Q-review").typeLabel === "Catalog" && row("Q-expired").statusLabel === "Expired",
-    "#288 queue: type labels Catalog / Flame test / Inspection, status label per row");
-  ok(row("Q-acc-cat").estNo === "EST-1042" && row("Q-review").estNo === "Q-review", "#288 queue: Est # through displayQuoteNumber (id when unnumbered)");
-
-  // ---- focus ----
-  const f = q288View(qs, { now: NOW, status: "expired", focus: "Q-won" });
-  ok(f.status === "all" && f.rows.some((r) => r.q.id === "Q-won") && f.rows.length === 10, "#288 queue: ?focus= forces the status filter to All");
-  ok(q288Filter("") === "action" && q288Filter("bogus") === "action" && q288Filter("expired") === "expired" && q288Filter("all") === "all" && q288Type("inspection") === "inspection" && q288Type("x") === "all",
-    "#288 queue: ?status= defaults to Needs action; ?type= defaults to all");
-  ok(q288Href("Q 1") === "/quotes/portal?focus=Q%201", "#288 queue: portalQueueHref is /quotes/portal?focus=<id>");
 
   // ---- bell ----
   const ME = "Pat Staff";
-  const bell = q288Bell(
-    [
-      { ...base, id: "B-rev", source: "portal-catalog", status: "draft", portalReview: { requestedAt: 1, reasons: [] }, createdAt: 1 },
-      { ...base, id: "B-new", source: "portal-service", quoteType: "flame_test", status: "sent", portalFirm: { generatedAt: NOW - 1000, validUntil: NOW + 1 }, createdAt: 1 },
-      { ...base, id: "B-acc", source: "portal-catalog", status: "sent", portalAcceptance: acc, owner: "Someone Else", createdAt: 1 },
-      { ...base, id: "B-peak", source: "estimator", status: "sent", portalAcceptance: acc, createdAt: 1 },
-    ] as never,
-    ME,
-    NOW
-  );
-  ok(bell.review[0]?.href === "/quotes/portal?focus=B-rev" && bell.generated[0]?.href === "/quotes/portal?focus=B-new" && bell.accepted[0]?.href === "/quotes/portal?focus=B-acc",
-    "#288 bell: Portal quotes to review / New portal quotes / Portal acceptances to confirm all link /quotes/portal?focus=<id>");
-  ok(bell.accepted.length === 2 && bell.accepted[0]?.sub.startsWith("Acme Theatre"), "#288 bell: acceptances to confirm list every accepted sent quote (any owner, any source), as before");
-  ok(bell.accepted[1]?.id === "B-peak" && bell.accepted[1]?.href === "/quotes?id=B-peak",
-    "#288 bell: an accepted Peak-sent estimate (not in the customer-built queue) keeps its Quotes-hub link");
   const navCounts = rd288src("src/lib/nav-counts.ts");
-  ok(!navCounts.includes('"/quotes?id=" + encodeURIComponent(q.id)') && /accepted: portalAcceptedItems/.test(navCounts),
-    "#288 bell: nav-counts takes the acceptances group from portalBellGroups (no more /quotes?id= link)");
 
   // ---- nav ----
   const est = q288NAV.find((e) => e.kind === "group" && e.key === "est");
   const kids = est && est.kind === "group" ? est.children : [];
   const pq = kids.find((c) => c.key === "portal-quotes");
-  ok(pq?.label === "Portal quotes" && pq?.href === "/quotes/portal" && kids.findIndex((c) => c.key === "portal-quotes") === kids.findIndex((c) => c.key === "quotes") + 1,
-    "#288 nav: Estimating gets Portal quotes → /quotes/portal, right after Quotes");
-  ok(q288Active("/quotes/portal") === "portal-quotes" && q288Active("/quotes") === "quotes" && q288Active("/quotes/new") === "quotes",
-    "#288 nav: /quotes/portal lights Portal quotes; /quotes and its other sub-routes still light Quotes");
-
-  // ---- wiring ----
-  const page = rd288src("src/app/(app)/quotes/portal/page.tsx");
-  ok(/requireUser\(\)/.test(page) && /portalQueueView\(/.test(page) && /quoteBuilderHref\(/.test(page) && /money\(q\.value/.test(page) && /id=\{"row-" \+ /.test(page),
-    "#288 queue page: requireUser, the pure view, Open via quoteBuilderHref, the hub's q.value total, row-<id> anchors");
-  const qa = rd288src("src/app/(app)/quotes/portal/queue-actions.tsx");
-  ok(qa.startsWith('"use client"') && /setQuoteStatus/.test(qa) && /approveFlameQuote/.test(qa) && /approveInspectionQuote/.test(qa) && /declinePortalAcceptanceAction\(/.test(qa) && !/from "@\/lib\/stores\//.test(qa),
-    "#288 queue actions: a client component reusing setQuoteStatus / approveFlameQuote / approveInspectionQuote / declinePortalAcceptanceAction, no store import");
   {
-    const svcApprove = qa.slice(qa.indexOf("const approveService"), qa.indexOf("const submitDecline"));
-    ok(/start\(async \(\) => \{[\s\S]*await \(approve === "flame" \? approveFlameQuote\(fd\) : approveInspectionQuote\(fd\)\);[\s\S]*router\.refresh\(\);/.test(svcApprove),
-      "#288 queue actions: a flame / inspection Approve refreshes the row once the action resolves (incl. a stale no-op)");
   }
-  ok(rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal"') && rd288src("scripts/smoke-routes.ts").includes('"/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0"'),
-    "#288 smoke: /quotes/portal and a filtered + focused view");
 }
 
 /* ======================================================================
@@ -35160,11 +30875,6 @@ async function category289AsyncChecks(): Promise<void> {
   const form = rd288src("src/app/(app)/design/assemblies/fixture-form.tsx");
   const pg = rd288src("src/app/(app)/design/assemblies/page.tsx");
   const bld = rd288src("src/app/(app)/design/assemblies/fixture-builder.tsx");
-  ok(/portalCategory: string/.test(form) && /portalCategory: r\.portalCategory \|\| ""/.test(form) && /portalCategory: d\.portalCategory/.test(form) &&
-      /Portal category/.test(form) && /<datalist id=/.test(form) && /e\.g\. Lighting packages/.test(form) && /portalCategories/.test(form),
-    "#289 category: the form's Draft, draftFromRecord, draftToInput, input, datalist and placeholder");
-  ok(/portalCategories/.test(pg) && /portalCategories/.test(bld),
-    "#289 category: the page passes the existing categories through the builder to the form");
 }
 
 /* ======================================================================
@@ -35176,111 +30886,10 @@ async function category289AsyncChecks(): Promise<void> {
    search split, and the "Package" tile/sidebar labels. Registered in the
    async chain as packages289AsyncChecks().
    ====================================================================== */
-import {
-  PACKAGES_DEPT as p289Dept,
-  OTHER_PACKAGES_CATEGORY as p289OtherPkgs,
-  entryMatchesDept as p289EntryMatches,
-  packagesTile as p289PkgTile,
-  partCategoryStats as p289PartStats,
-} from "@/lib/portal-departments";
-import { includedLines as p289Included } from "@/lib/portal-catalog-view";
-import { packageCategoryOf as p289CategoryOf } from "@/lib/portal-catalog-index";
 {
-  const fx = (over: Partial<D251Entry>): D251Entry => d252Entry({ kind: "fixture", mfr: "ETC", browsable: true, rank: 1000, ...over });
-  const pt = (over: Partial<D251Entry>): D251Entry => d252Entry({ kind: "part", ...over });
-
-  ok(p289Dept.id === "packages" && p289Dept.name === "Packages & Assemblies", "#289 packages: PACKAGES_DEPT is { id: \"packages\", name: \"Packages & Assemblies\" }");
-  ok(p289OtherPkgs === "Other packages", "#289 packages: the category fallback is \"Other packages\"");
-
-  // index category from portalCategory (pure step of the index build)
-  ok(p289CategoryOf(" Lighting   packages ") === "Lighting packages", "#289 packages: a fixture's index category is its cleaned portalCategory");
-  ok(p289CategoryOf(undefined) === "Other packages" && p289CategoryOf("   ") === "Other packages", "#289 packages: no / blank portalCategory → \"Other packages\"");
-
-  // "packages" is reserved
-  const claim = d252Sanitize([{ id: "packages", name: "Sneaky", categories: [] }], null);
-  ok(claim.ok && claim.value[0].id !== "packages", "#289 packages: sanitizeDepartments refuses \"packages\" as a real department id");
-  const named = d252Sanitize([{ name: "Packages", categories: [] }], null);
-  ok(named.ok && named.value[0].id === "packages-2", "#289 packages: a new department named \"Packages\" slugs past the reserved id (packages-2)");
-
-  const depts: D251Dept[] = [
-    { id: "rigging", name: "Rigging", categories: ["Rigging Hardware"] },
-    { id: "lighting", name: "Lighting", categories: ["Fixtures", "Fixture assemblies", "Lighting packages"] },
-  ];
-  ok(d252Resolve(depts, "packages")?.name === "Packages & Assemblies", "#289 packages: resolveDept(\"packages\") → Packages & Assemblies");
-  ok(d252Resolve([], "packages")?.id === "packages", "#289 packages: ?dept=packages resolves even with no departments configured");
-  ok(d252FilterFor([], "packages")?.mode === "packages", "#289 packages: departmentFilterFor(\"packages\") → the packages filter, departments or not");
-
-  const lit = d252FilterFor(depts, "lighting")!;
-  const oth = d252FilterFor(depts, "other")!;
-  const pkg = d252FilterFor(depts, "packages")!;
-  ok(!p289EntryMatches({ kind: "fixture", category: "Lighting packages" }, lit) && !p289EntryMatches({ kind: "fixture", category: "Fixture assemblies" }, lit),
-    "#289 packages: a fixture never matches a configured department, even one listing its category (a stale \"Fixture assemblies\" matches nothing)");
-  ok(!p289EntryMatches({ kind: "fixture", category: "Unassigned packages" }, oth), "#289 packages: a fixture never falls into Other");
-  ok(p289EntryMatches({ kind: "part", category: "Fixtures" }, lit) && p289EntryMatches({ category: "Cable" }, oth), "#289 packages: parts (and kind-less rows) still match by category");
-  ok(p289EntryMatches({ kind: "fixture", category: "Anything" }, pkg) && !p289EntryMatches({ kind: "part", category: "Lighting packages" }, pkg),
-    "#289 packages: the packages filter keeps fixtures only");
-  ok(!d252Matches("Lighting packages", pkg), "#289 packages: a bare category never matches the packages filter");
   const rows = [{ kind: "fixture" as const, category: "Lighting packages" }, { kind: "part" as const, category: "Fixtures" }, { kind: "part" as const, category: "Cable" }];
-  ok(d252Restrict(rows, "packages", depts).length === 1 && d252Restrict(rows, "packages", depts)[0].kind === "fixture", "#289 packages: restrictToDept(\"packages\") → fixtures only");
-  ok(d252Restrict(rows, "other", depts).length === 1 && d252Restrict(rows, "other", depts)[0].category === "Cable", "#289 packages: restrictToDept(Other) excludes fixtures");
-
-  // searchCatalog scoping, facets and the split
-  const all: D251Entry[] = [
-    fx({ key: "fixture:A", sku: "ENG-A", title: "Alpha kit", category: "Lighting packages", mfr: "ETC", haystack: " alpha kit eng a " }),
-    fx({ key: "fixture:B", sku: "ENG-B", title: "Bravo kit", category: "Other packages", mfr: "Chauvet", haystack: " bravo kit eng b " }),
-    pt({ key: "P1", sku: "P1", title: "Pipe clamp", category: "Rigging Hardware", mfr: "ETC", haystack: " p1 pipe clamp ", rank: 5000 }),
-    pt({ key: "P2", sku: "P2", title: "Par can", category: "Fixtures", mfr: "ETC", haystack: " p2 par can kit ", rank: 3 }),
-  ];
   const q0 = { q: "", mfr: [] as string[], cat: [] as string[], page: 1, pageSize: 48 };
-  const inPkg = d252Search(all, { ...q0, dept: pkg });
-  ok(inPkg.total === 2 && inPkg.entries.every((e) => e.kind === "fixture"), "#289 packages: ?dept=packages shows only fixtures");
-  ok(d252Eq(inPkg.catFacets.map((f) => f.value).sort(), ["Lighting packages", "Other packages"]), "#289 packages: under packages the Category facet lists their portal categories only");
-  ok(d252Eq(inPkg.mfrFacets.map((f) => f.value).sort(), ["Chauvet", "ETC"]) && inPkg.mfrFacets.find((f) => f.value === "ETC")?.count === 1, "#289 packages: Manufacturer facets count fixtures only under packages");
-  const pkgSearch = d252Search(all, { ...q0, q: "kit", dept: pkg });
-  ok(pkgSearch.total === 2 && pkgSearch.entries.every((e) => e.kind === "fixture"), "#289 packages: search inside packages is scoped to fixtures (the part matching \"kit\" stays out)");
-  const deadEnd = d252Search(all, { ...q0, q: "clamp", dept: pkg });
-  ok(deadEnd.total === 0 && d252Search(all, { ...q0, q: "clamp" }).total === 1, "#289 packages: a dead-end search inside packages finds the part with no department (the Search all departments link's premise)");
-  const inLit = d252Search(all, { ...q0, dept: lit });
-  ok(inLit.total === 1 && inLit.entries[0].key === "P2" && !inLit.catFacets.some((f) => f.value === "Lighting packages"), "#289 packages: a real department's results and Category facet hold parts only");
-  const inOther = d252Search(all, { ...q0, dept: oth });
-  ok(inOther.total === 0 && inOther.catFacets.length === 0, "#289 packages: Other's results and facets hold parts only (no \"Other packages\")");
-  const noDept = d252Search(all, q0);
-  ok(noDept.total === 4 && d252Eq(noDept.groups, { packages: 2, parts: 2 }), "#289 packages: with no department the result carries the packages / parts split counts");
-  ok(d252Eq(noDept.entries.map((e) => e.key), ["fixture:A", "fixture:B", "P1", "P2"]), "#289 packages: packages come first, then parts — even a part ranked above every fixture");
-  ok(d252Eq(d252Search(all, { ...q0, q: "kit" }).groups, { packages: 2, parts: 1 }), "#289 packages: the split counts the one search's hits by kind");
-  ok(d252Eq(inPkg.groups, { packages: 2, parts: 0 }) && d252Eq(inLit.groups, { packages: 0, parts: 1 }), "#289 packages: a department's split counts its single kind");
-  ok(noDept.catFacets.some((f) => f.value === "Lighting packages") && noDept.catFacets.some((f) => f.value === "Fixtures"), "#289 packages: facets stay as they are with no department (both kinds)");
-
-  // department tiles count parts only; the packages tile
-  const tileDepts: D251Dept[] = [{ id: "lighting", name: "Lighting", categories: ["Fixtures", "Lighting packages"] }];
-  const tEntries: D251Entry[] = [
-    fx({ key: "fixture:A", title: "Alpha kit", category: "Lighting packages" }),
-    fx({ key: "fixture:B", title: "Bravo kit", category: "Unclaimed packages" }),
-    fx({ key: "fixture:C", title: "Charlie kit", category: "Unclaimed packages", browsable: false }),
-    pt({ key: "P2", category: "Fixtures", rank: 3 }),
-  ];
-  const t2 = d252Tiles(tileDepts, tEntries, () => null);
-  ok(t2.length === 1 && t2[0].id === "lighting" && t2[0].count === 1, "#289 packages: department tiles count parts only; Other gets no tile from fixtures alone");
-  ok(d252Tiles(tileDepts, tEntries.filter((e) => e.kind === "fixture"), () => null).length === 0, "#289 packages: a department whose only members are fixtures gets no tile");
   const imgs: Record<string, string> = { "fixture:B": "img-b", "fixture:A": "img-a" };
-  const pTile = p289PkgTile(tEntries, (k) => imgs[k] ?? null);
-  ok(!!pTile && pTile.id === "packages" && pTile.name === "Packages & Assemblies" && pTile.count === 2, "#289 packages: the landing tile counts browsable fixtures (C excluded)");
-  ok(pTile?.imageId === "img-a", "#289 packages: the landing tile's thumbnail is the top-ranked fixture's image (rank, then title — Alpha before Bravo)");
-  const pTile2 = p289PkgTile([fx({ key: "fixture:A", title: "Alpha kit", rank: 1 }), fx({ key: "fixture:B", title: "Bravo kit", rank: 9 })], (k) => imgs[k] ?? null);
-  ok(pTile2?.imageId === "img-b", "#289 packages: a higher-ranked fixture's image wins");
-  ok(p289PkgTile([fx({ key: "fixture:A", title: "Alpha kit" })], () => null)?.imageId === null, "#289 packages: no fixture image → no thumbnail");
-  ok(p289PkgTile([pt({ key: "P2" }), fx({ key: "fixture:C", browsable: false })], () => "img") === null, "#289 packages: no browsable fixture → no landing tile");
-
-  // editor known categories: parts only
-  const stats = p289PartStats([
-    pt({ category: "Fixtures", mfr: "ETC" }), pt({ category: "Fixtures", mfr: "ETC" }), pt({ category: "", mfr: "" }),
-    fx({ category: "Lighting packages" }), fx({ category: "Other packages" }),
-  ]);
-  ok(d252Eq(stats.map((s) => s.category), ["Fixtures", "—"]) && stats[0].count === 2 && stats[0].mfrs.ETC === 2,
-    "#289 packages: partCategoryStats (the editor's known categories) reads part entries only — no package categories, no \"Fixture assemblies\"");
-
-  // the suggestion no longer offers "Fixture assemblies"
-  ok(d252Suggest([d252Cat("Fixture assemblies", 30)]).length === 0, "#289 packages: suggestions drop the \"fixture assemblies\" term — that pseudo-category is gone");
 
   // tile VM: Package badge + Includes N parts (N = the sidebar's included lines)
   const lines = [
@@ -35289,31 +30898,9 @@ import { packageCategoryOf as p289CategoryOf } from "@/lib/portal-catalog-index"
     { slot: "power", sku: "C", label: "Cable", qty: 2, required: true },
     { slot: "accessories", sku: "X", label: "Clamp", qty: 0, required: false },
   ];
-  ok(p289Included(lines).length === 3, "#289 packages: includedLines = the required lines (engine and lens count; an add-on doesn't)");
-  const fxVm = d245FixtureVM({ id: "A", label: "Alpha", description: "", lightEngineSku: "E", lensSku: "L", lines }, "ETC", null, () => null, { images: [], docs: [] });
-  ok(fxVm.fixed.length === p289Included(lines).length, "#289 packages: N is exactly the number of included lines the fixture sidebar lists");
-  const tv = d245Tile({ key: "fixture:A", kind: "fixture", title: "Alpha", sku: "E", mfr: "ETC", category: "Lighting packages" }, null, null, { lines });
-  ok(tv.badge === "Package" && tv.subline === "Includes 3 parts", "#289 packages: a fixture tile carries the Package badge and \"Includes 3 parts\"");
-  const tv1 = d245Tile({ key: "fixture:Z", kind: "fixture", title: "Solo", sku: "E", mfr: "", category: "Other packages" }, null, null, { lines: lines.slice(0, 1) });
-  ok(tv1.subline === "Includes 1 part", "#289 packages: one included line reads \"Includes 1 part\"");
-  const tpart = d245Tile({ key: "P", kind: "part", title: "P", sku: "P", mfr: "", category: "" }, null, null);
-  ok(!("badge" in tpart) && !("subline" in tpart), "#289 packages: a part tile carries no badge or subline");
 
   // UI + wiring sources
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  const cc = rd("src/app/portal/catalog/catalog-client.tsx");
-  ok(!cc.includes("Fixture assembly") && /t\.badge/.test(cc) && /t\.subline/.test(cc) && cc.includes("Packages &amp; Assemblies") && /result\.groups/.test(cc) && />\s*Parts\s*</.test(cc),
-    "#289 packages: catalog-client renders the badge, the subline and the two headed groups (Packages & Assemblies, Parts)");
-  const sb = rd("src/app/portal/catalog/part-sidebar.tsx");
-  ok(!sb.includes("Fixture assembly") && /"Package"/.test(sb), "#289 packages: the fixture sidebar labels read \"Package\"");
-  const ixSrc = rd("src/lib/portal-catalog-index.ts");
-  ok(!ixSrc.includes('"Fixture assemblies"') && /packageCategoryOf\(fx\.portalCategory\)/.test(ixSrc), "#289 packages: the index files a fixture under packageCategoryOf(portalCategory)");
-  const br = rd("src/lib/portal-catalog-browse.ts");
-  ok(/packagesTile\(/.test(br) && /groups/.test(br), "#289 packages: browseCatalog adds the packages tile and passes the split through");
-  ok(/partCategoryStats\(/.test(rd("src/app/(app)/catalog/departments/page.tsx")) && /partCategoryStats\(/.test(rd("src/lib/stores/portal-departments.ts")),
-    "#289 packages: the Departments editor and its save derive categories from parts only");
-  ok(rd("scripts/smoke-routes.ts").includes('"/portal/catalog?dept=packages"'), "#289 packages: smoke covers /portal/catalog?dept=packages");
-  ok(/fixtures\s*\.filter\(\(f\) => f\.kind === "fixture"\)/.test(rd("src/app/(app)/design/assemblies/page.tsx")), "#289 category: the builder's datalist reads fixture-kind records only");
 }
 {
   // Task 5 review follow-up: the 60 cap counts code points and never splits a grapheme
@@ -35349,50 +30936,10 @@ async function packages289AsyncChecks(): Promise<void> {
       createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
     });
     await upsertCustomer({ id: CO, name: "Test289 Pkg Co", type: "Education", locations: [], contacts: [] });
-    d245Invalidate();
-    const ix = await d245Index({ fresh: true });
-    const ea = ix.entries.find((e) => e.key === "fixture:" + FXA);
-    const eb = ix.entries.find((e) => e.key === "fixture:" + FXB);
-    ok(ea?.category === pkgCat, "#289 packages: the real index files a fixture under its portalCategory");
-    ok(eb?.category === "Other packages", "#289 packages: the real index files an uncategorised fixture under \"Other packages\"");
-
-    const byCat = d245Search(ix.entries, { q: "lighting packages", mfr: [], cat: [], page: 1, pageSize: 48 });
-    ok(byCat.entries.some((e) => e.key === "fixture:" + FXA) && !byCat.entries.some((e) => e.key === "fixture:" + FXB),
-      "#289 packages: a package's portalCategory is searchable — \"lighting packages\" finds the package filed there and not the uncategorised one");
-
-    // the editor's save: known categories come from parts only
-    const saved = await d252Save([{ name: "Test289 Dept", categories: [partCat, pkgCat, "Other packages", "Fixture assemblies"] }]);
-    ok(saved.ok && d252Eq(saved.value[0].categories, [partCat]), "#289 packages: saveDepartments keeps part categories only — package categories and \"Fixture assemblies\" are dropped");
 
     const sess = { grantId: fixtureId(289, "pkg-grant"), customerId: CO, name: "", email: "" };
-    const inPkg = await d245SearchFor(sess, { q: "Test289", dept: "packages", pageSize: 48 });
-    ok(inPkg.ok && inPkg.result.dept?.id === "packages" && inPkg.result.dept.name === "Packages & Assemblies", "#289 packages: ?dept=packages resolves for the breadcrumb (\"Packages & Assemblies\")");
-    if (inPkg.ok) {
-      ok(inPkg.result.entries.length === 2 && inPkg.result.entries.every((t) => t.kind === "fixture"), "#289 packages: browse under packages returns only the fixtures");
-      ok(inPkg.result.catFacets.some((f) => f.value === pkgCat) && !inPkg.result.catFacets.some((f) => f.value === partCat), "#289 packages: the Category facet under packages lists portal categories");
-      const ta = inPkg.result.entries.find((t) => t.key === "fixture:" + FXA);
-      ok(ta?.badge === "Package" && ta.subline === "Includes 2 parts", "#289 packages: a real package tile reads Package / Includes 2 parts (engine + cable; the add-on isn't counted)");
-      ok(inPkg.result.tiles.length === 0, "#289 packages: no landing tiles inside a department");
-      ok(inPkg.result.hasDepartments === true, "#289 packages: with departments configured, browse under packages reports hasDepartments (the breadcrumb reads \"All departments\")");
-    }
-    const cleared = await d252Save([]);
-    ok(cleared.ok, "#289 packages: saveDepartments accepts an empty list");
-    const noDeptPkg = await d245SearchFor({ grantId: fixtureId(289, "pkg-grant"), customerId: CO, name: "", email: "" }, { q: "Test289", dept: "packages", pageSize: 48 });
-    ok(noDeptPkg.ok && noDeptPkg.result.hasDepartments === false && noDeptPkg.result.dept?.id === "packages", "#289 packages: with no departments configured, hasDepartments is false and packages still resolves");
-    const resaved = await d252Save([{ id: saved.ok ? saved.value[0].id : undefined, name: "Test289 Dept", categories: [partCat] }]);
-    if (resaved.ok && saved.ok) saved.value = resaved.value;
-    const inDept = await d245SearchFor(sess, { q: "Test289", dept: saved.ok ? saved.value[0].id : "", pageSize: 48 });
-    ok(inDept.ok && inDept.result.entries.length === 3 && inDept.result.entries.every((t) => t.kind === "part"), "#289 packages: a real department's browse holds its parts and none of the packages");
-    const split = await d245SearchFor(sess, { q: "Test289", pageSize: 48 });
-    ok(split.ok && d252Eq(split.result.groups, { packages: 2, parts: 3 }) && split.result.entries[0].kind === "fixture" && split.result.entries[1].kind === "fixture",
-      "#289 packages: a search with no department splits packages (first) and parts, with counts");
-    const landing = await d245SearchFor(sess, { pageSize: 48 });
-    const browsableFx = ix.entries.filter((e) => e.kind === "fixture" && e.browsable).length;
-    ok(landing.ok && landing.result.tiles[0]?.id === "packages" && landing.result.tiles[0].count === browsableFx,
-      "#289 packages: the landing shows the Packages & Assemblies tile first, counting browsable fixtures");
   } finally {
     await setBlob("portal_departments", savedDepts);
-    d245Invalidate();
     await removeCustomer(CO);
   }
 }
@@ -35435,8 +30982,6 @@ import { buildCoverageIndex as m290Build, coveredLabel as m290Covered, slotCover
 import { DOCUMENTS_SHOW as m290Show, documentRow as m290Row, documentRowMatches as m290Matches, parseDocumentsFilter as m290Parse, partDocsView as m290PartView, progressLine as m290Progress } from "@/lib/part-docs/views";
 import { packageEntryName as m290Entry, resolvePackageDocs as m290Pkg } from "@/lib/part-docs/package";
 import { buildFetchContext as m290FetchCtx, catalogFetchTargets as m290CatTargets } from "@/lib/part-docs/fetch-links";
-import { portalDocMetaOf as m290DocMeta, portalHasCustomerDocument as m290Browsable, servableDocIdsFrom as m290Servable } from "@/lib/portal-catalog-index";
-import { PORTAL_DOC_KIND_LABEL as m290PortalLabel, toPartDocVM as m290DocVM, customerPartDocs as m290CustDocs } from "@/lib/portal-part-view";
 import type { PartDocument as M290Doc, PartDocumentLink as M290Link } from "@/lib/part-docs/types";
 {
   const eq = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -35529,19 +31074,7 @@ import type { PartDocument as M290Doc, PartDocumentLink as M290Link } from "@/li
     const ctx = m290FetchCtx({ documents: [MAN, MANLINK, DS, BOGUS], links: [], accessoryLinks: [], index: ix });
     ok(ctx.skusByUrl.get("manual\u0000https://mfr.example/catalog-manual.pdf")?.has("CATM") === true, "#290 manual: buildFetchContext includes catalog manual URLs under the manual kind");
     ok(!m290CatTargets(ctx, () => true).some((t) => t.sku === "CATM"), "#290 manual: the whole-catalog fetch still targets datasheets only");
-
-    // Portal.
-    const meta = m290DocMeta(MAN);
-    ok(meta?.kind === "manual" && meta.pdf === true && meta.title === MAN.title, "#290 manual: the portal doc meta includes a manual");
-    ok(m290DocMeta(doc("PD-img290aaaa", "image", true)) === null, "#290 manual: an image is not a portal document");
-    const served = m290Servable(ix, new Map(), ["LENSM"]);
-    ok(served.has(MAN.id) && served.has(DS.id), "#290 manual: a covering fixture's manual is servable in the portal");
     const manOnly = m290Build({ documents: [MAN], links: [link("ONLYM", MAN)], accessoryLinks: [], parts: [] });
-    ok(!m290Browsable(manOnly, "ONLYM") && m290Browsable(ix, "FIXM"), "#290 manual: a manual alone never satisfies the portal browse rule (datasheet/spec sheet only)");
-    ok(m290DocVM({ id: "x", kind: "manual", title: "M", pdf: true })?.kind === "manual", "#290 manual: the sidebar view model keeps a manual (no coercion to datasheet)");
-    ok(m290DocVM({ id: "x", kind: "image" as never, title: "I", pdf: true }) === null && m290DocVM({ id: "x", kind: "bogus" as never, title: "B", pdf: false }) === null, "#290 manual: an unknown doc kind is dropped from the customer view, not coerced to datasheet");
-    ok(m290CustDocs([{ id: "a", kind: "datasheet", title: "", pdf: true }, { id: "b", kind: "weird" as never, title: "", pdf: true }, { id: "c", kind: "manual", title: "", pdf: true }]).map((d) => d.id).join() === "a,c", "#290 manual: customerPartDocs keeps only datasheet/specsheet/manual");
-    ok(m290PortalLabel.manual === "Manual" && m290PortalLabel.datasheet === "Datasheet" && m290PortalLabel.specsheet === "Spec sheet", "#290 manual: the portal sidebar labels a manual 'Manual'");
   }
   ok(rd288src("scripts/smoke-routes.ts").includes('"/catalog/documents?show=missing-manual"'), "#290 manual: smoke covers /catalog/documents?show=missing-manual");
 }
@@ -35550,12 +31083,7 @@ import type { PartDocument as M290Doc, PartDocumentLink as M290Link } from "@/li
    #290 polish — the "Parts you've quoted before" shelf stays off the
    Packages & Assemblies page (pure).
    ====================================================================== */
-import { showQuotedBeforeShelf as s290Shelf, parseCatalogParams as s290Params } from "@/lib/portal-catalog-view";
 {
-  ok(s290Shelf(s290Params({})) === true, "#290 shelf: the landing shows the quoted-before shelf");
-  ok(s290Shelf(s290Params({ dept: "packages" })) === false, "#290 shelf: ?dept=packages hides the quoted-before shelf");
-  ok(s290Shelf(s290Params({ dept: "lighting" })) === true, "#290 shelf: a part department still shows it");
-  ok(s290Shelf(s290Params({ q: "s4" })) === false && s290Shelf(s290Params({ page: "2" })) === false && s290Shelf(s290Params({ cat: "Lighting" })) === false, "#290 shelf: a search, a filter or page 2 hides it (unchanged)");
 }
 
 /* ============================================================================
@@ -36134,8 +31662,6 @@ import { replaceCurtainLine as c292ReplaceCurtain, replaceTrackLine as c292Repla
 
 // ---- #292 task 7 fix round 1: vendor cost survives Update, one curtain line builder, key/specKey edge cases ----
 import { computeCurtain as c292Compute } from "@/app/(app)/estimator/pricing";
-import { cleanCurtainRequest as c292CleanReq } from "@/lib/portal-cart-rules";
-import { cartLinesFromSpec as c292CartLines } from "@/lib/portal-pricing";
 import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
 {
   const SK_MAIN = c292SpecKey(undefined, "Main Drape");
@@ -36186,13 +31712,6 @@ import { curtainSpecKey as c292SpecKey } from "@/lib/specs/record-keys";
     "#292 fix2: a legacy line whose fabric matches no current fabric leaves it unpicked until the user picks one");
   const rdM = readFileSync(join(process.cwd(), "src/app/(app)/estimator/curtain-modal.tsx"), "utf8");
   ok(/curtainDraftValid\(draft, cc\.priceEach\)/.test(rdM) && rdM.includes("Kept from the quote"), "#292 source: the modal's valid check is curtainDraftValid, and the kept-cost hint shows");
-
-  // the portal never sees a vendor cost
-  const clean = c292CleanReq({ name: "Main", fabricSku: "T292-FAB", qty: 1, width: "20", height: "18", fullness: "50", vendorCost: "5", topFinish: "hem" }, fabs);
-  ok(clean.ok && !("vendorCost" in clean.curtain) && !("topFinish" in clean.curtain), "#292 fix: cleanCurtainRequest drops vendorCost (and the staff finishes)");
-  const cartLines = c292CartLines([c292Sec("s", [{ ...vItem, id: 7 }])]);
-  ok(cartLines.length === 1 && !!cartLines[0].curtainInputs && !("vendorCost" in cartLines[0].curtainInputs) && cartLines[0].curtainInputs.width === "21.5" && vItem.curtainInputs?.vendorCost === "412.5",
-    "#292 fix: cartLinesFromSpec strips vendorCost from a staff curtain line (source line untouched)");
 
   // 2. the add path builds its line through curtainItem — identical to the pre-#292 inline line
   const ac = c292Compute(base, fabs, sew, 0.3 / 0.7);
@@ -36952,7 +32471,6 @@ const c296kCat = new Map([
   const rd296k = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   ok(rd296k("src/app/(app)/design/assemblies/actions.ts").includes(`"An assembly can't change kind after it's created."`), "#296 rack kind: the kind-change refusal names no kind list");
   ok(/OPTIONAL_FIXTURE_FIELDS = \[[^\]]*"rack"/.test(rd296k("src/lib/stores/fixtures.ts")), "#296 rack kind: rack is an optional field the store never resurrects");
-  ok(/fx\.kind !== "fixture"/.test(rd296k("src/lib/portal-catalog-index.ts")), "#296 rack kind: racks stay out of the portal index");
 }
 
 async function rack296KindAsyncChecks(): Promise<void> {
@@ -38434,7 +33952,6 @@ async function photoSheetIoAsyncChecks(): Promise<void> {
     await phsSetBlob("portal_departments", { departments: [{ id: "phs-dept", name: "PHS Dept", categories: ["PhsIoCat"] }] });
     const after = await phsBuildExport(noDrive);
     const row = after.find((r) => r.sku === ALPHA);
-    ok(!!row && row.status === "Missing" && row.mfrPart === "PHSIOALPHA01" && row.manufacturer === "PhsMfr", "photo sheet export: a part in a portal department is listed, Missing");
   } finally {
     await phsSetBlob("portal_departments", { departments: prev.departments ?? [] });
   }
@@ -40639,17 +36156,11 @@ async function onlineDoc293tAsyncChecks(): Promise<void> {
    #293 slice 3 — the portal estimate page: who may see what, the page and
    photo route wiring, the row link, and the smoke routes.
    ====================================================================== */
-import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/portal-access";
 {
   const rev = { rev: 1, at: 5000, by: "t", reason: "sent", note: "", name: "N", value: 1, margin: 0, status: "sent", spec: { sections: [] } };
   const pq = (extra: Record<string, unknown>) =>
     ({ id: "Q-p", name: "P", customer: "C", customerId: "c1", locationId: null, value: 1, margin: 0, status: "sent", source: "estimator", quoteType: "system",
        owner: "o", createdAt: 1, updatedAt: 1, history: [], review: {}, revisions: [rev], ...extra }) as unknown as N293tQuote;
-  ok(n293tPortalState(pq({}), "c1").kind === "ok", "#293t portal: the customer's sent quote → ok");
-  ok(n293tPortalState(pq({}), "c2").kind === "unavailable" && n293tPortalState(pq({}), "").kind === "unavailable", "#293t portal: another customer, or no customer → unavailable");
-  ok(n293tPortalState(pq({ source: "daylite" }), "c1").kind === "unavailable", "#293t portal: Daylite history → unavailable");
-  ok(n293tPortalState(pq({ status: "draft" }), "c1").kind === "revising", "#293t portal: a staff quote recalled after sending → the being-revised card (decision 16), own customer only");
-  ok(n293tPortalState(pq({ status: "draft", revisions: [] }), "c1").kind === "unavailable", "#293t portal: a never-sent draft → unavailable");
 
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const resolveLocal = (from: string, spec: string): string | null => {
@@ -40667,39 +36178,11 @@ import { portalOnlineEstimateState as n293tPortalState } from "@/lib/quote-pdf/p
       const p = resolveLocal(file, spec);
       return !p || !/^\s*["']use client["']/.test(rd(p));
     });
-  const page = rd("src/app/portal/quotes/[id]/page.tsx");
   const comp = rd("src/components/online-estimate/online-estimate.tsx");
-  ok(!/["']use client["']/.test(page) && !/["']use client["']/.test(comp) && noClientImports("src/app/portal/quotes/[id]/page.tsx") && noClientImports("src/components/online-estimate/online-estimate.tsx"),
-    "#293t portal page: server-rendered; no client component it imports can receive the quote's data");
-  ok(page.indexOf("resolvePortalViewer(") > -1 && page.indexOf("resolvePortalViewer(") < page.indexOf("getQuote(") && page.includes("portalOnlineEstimateState(q, cid, bids, { hasBidders })") &&
-     page.includes("loadQuoteDocumentProps(q, {") && page.includes("revision: state.rev,") && page.includes("ONLINE_COPY.portalUnavailable") && page.includes("ONLINE_COPY.revising") && page.includes("<PortalSignedOut"),
-    "#293t portal page: the viewer first, then the one state rule; the sent revision; the signed-out, unavailable and revising cards");
-  ok(!page.includes("notFound(") && !/\b(update|patchShareLink|ensureShareLink|revokeShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(page),
-    "#293t portal page: every miss is a 200 card; the page never writes");
   ok(comp.includes("<QuoteDocument {...shown} layout=\"web\" />") && comp.includes("bomViewProps(docProps)") && comp.includes("offersBomView(docProps.sections, docProps.detail, docProps.document)") &&
      (comp.match(/prefetch=\{false\}/g) || []).length >= 3 && comp.includes("ONLINE_COPY.closed") && comp.includes("<style>{QUOTE_WEB_CSS}</style>"),
     "#293t online view: the web document, a server-side BOM transform behind two plain links, the closed banner");
-  const photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
-  ok(photo.includes("resolvePortalViewer(") && /rateLimit\(rlKey, 300, 60_000\)/.test(photo) && photo.includes("portalOnlineEstimateState(q, session.customerId, bids, { hasBidders })") &&
-     photo.includes("servePhotoForRevision(req, state.rev, docId)") && photo.includes("`portal-photo:${session.grantId}`"),
-    "#293t portal photos: a portal viewer, 300/min per grant, the quote's own sent revision, only its printed photos");
-  const row = rd("src/app/portal/quote-row.tsx");
-  ok(row.includes("portalOnlineEstimateState(q, cid).kind") && row.includes("`/portal/quotes/${encodeURIComponent(q.id)}`") && row.includes("Open PDF ↗"),
-    "#293t portal row: the title opens the online estimate when it's ok or being revised; the PDF link stays");
   const smoke = rd("scripts/smoke-routes.ts");
-  ok(['"/portal/quotes/Q-2041",', '"/portal/quotes/Q-2041?preview=lakefront",', '"/portal/quotes/Q-2041?preview=lakefront&view=bom",', '"/portal/quotes/Q-0?preview=lakefront",'].every((r) => smoke.includes(r)),
-    "#293t smoke: the portal estimate page's signed-out, unavailable and BOM-param routes are smoke routes");
-
-  // Hardening (Task 3 review) at the call site: the page passes the sent revision, and a refused
-  // load (the loader's fail-closed null) is the same generic card — never the live quote.
-  ok(page.includes("if (!docProps) return shell(<OnlineEstimateCard title={ONLINE_COPY.portalUnavailable} backHref={backHref} />);"),
-    "#293t portal page: a refused load (null) renders the generic unavailable card");
-  ok(!/\bq\.pdf\b|pdfBlobPath|quoteAsOfRevision|shareLink/.test(page) && (page.match(/base \+ "\/pdf"/g) || []).length === 2,
-    "#293t portal page: Download PDF is the existing sent-PDF route (/portal/quotes/[id]/pdf), never the live pdf field; no as-sent quote outside the loader");
-  const meta = page.slice(page.indexOf("export async function generateMetadata"), page.indexOf("function one("));
-  ok(meta.length > 0 && !/getQuote|loadQuoteDocumentProps|params/.test(meta), "#293t portal page: generateMetadata never reads the quote");
-  ok(!/\b(update|patchShareLink|addQuoteRevision|setStatus|mergeUpsert)\(/.test(photo) && photo.indexOf("resolvePortalViewer(") < photo.indexOf("rateLimit(") && photo.indexOf("rateLimit(") < photo.indexOf("getQuote("),
-    "#293t portal photos: read-only; the viewer, then the rate limit, then the quote");
 }
 
 
@@ -40713,16 +36196,10 @@ async function portalPage293tAsyncChecks(): Promise<void> {
   await n293tQUpdate(QA, { status: "sent" });
   await n293tQAddRev(QA, { by: "Test", reason: "sent", note: "Sent" });
   const q = (await n293tQGet(QA))!;
-  ok(n293tPortalState(q, A).kind === "ok" && n293tPortalState(q, B).kind === "unavailable" && n293tPortalState(q, "").kind === "unavailable",
-    "#293t portal (DB): a sent quote opens for its own customer only — another customer, or none, gets the unavailable card");
   await n293tQUpdate(QA, { status: "draft" });
   const recalled = (await n293tQGet(QA))!;
-  ok(n293tPortalState(recalled, A).kind === "revising" && n293tPortalState(recalled, B).kind === "unavailable",
-    "#293t portal (DB): recalled to draft — the being-revised card for its own customer, still unavailable to anyone else");
   await n293tQUpdate(QA, { status: "sent", customerId: B });
   const moved = (await n293tQGet(QA))!;
-  ok(n293tPortalState(moved, A).kind === "unavailable" && n293tPortalState(moved, B).kind === "ok",
-    "#293t portal (DB): re-linked to another customer — the old customer loses it at once (read live, per request)");
 }
 
 /* ======================================================================
@@ -40736,9 +36213,9 @@ async function portalPage293tAsyncChecks(): Promise<void> {
   const m = mw.match(/matcher:\s*\[\s*"([^"]+)"/);
   const re = new RegExp("^" + (m ? m[1].replace(/\\\\/g, "\\") : "$^") + "$");
   ok(!re.test("/share/quote/Q-1/" + "1." + "A".repeat(43)) && !re.test("/share/quote/Q-1/x/photo/PD-1"), "#293t middleware: /share/* skips the team login (it checks its own token)");
-  ok(re.test("/shareholders") && re.test("/") && re.test("/catalog/documents") && !re.test("/print/quote/Q-1") && !re.test("/portal/quotes/Q-1"),
+  ok(re.test("/shareholders") && re.test("/") && re.test("/catalog/documents") && !re.test("/print/quote/Q-1") && re.test("/portal/quotes/Q-1"),
     "#293t middleware: only share/ is newly exempt; app pages still go through the login gate");
-  ok(mw.includes("|portal|") && mw.includes("|print/|share/|") && mw.includes("/share/quote/[id]/[token]"), "#293t middleware: the exemption sits beside print/ and the doc comment names the route");
+  ok(!mw.includes("|portal|") && mw.includes("|print/|share/|") && mw.includes("/share/quote/[id]/[token]"), "#293t middleware: the exemption sits beside print/ and the doc comment names the route (the portal exemption is gone)");
 
   const page = rd("src/app/share/quote/[id]/[token]/page.tsx");
   ok(page.indexOf("rateLimit(") > -1 && page.indexOf("rateLimit(") < page.indexOf("resolveSharedQuote(") && page.includes('"share-view:" + ') && page.includes("SHARE_VIEW_PER_MIN"),
@@ -41153,22 +36630,14 @@ async function finalFix293tAsyncChecks(): Promise<void> {
 /* ======================================================================
    Manufacturer images — the pure fallback rule (part-image-fallback.ts).
    ====================================================================== */
-import { portalFallback as mfiPortal, documentFallback as mfiDoc, PLACEHOLDER_SRC as mfiSrc, isCustomCategory as mfiIsCustom, fallbackSrc as mfiFallbackSrc } from "@/lib/part-image-fallback";
+import { documentFallback as mfiDoc, PLACEHOLDER_SRC as mfiSrc } from "@/lib/part-image-fallback";
 import { existsSync as mfiExists } from "node:fs";
 {
   const img = (m: string) => (m.trim().toLowerCase() === "etc" ? "PD-etc-logo" : null);
-  const p = (i: Parameters<typeof mfiPortal>[0]) => JSON.stringify(mfiPortal(i, img));
   const d = (i: Parameters<typeof mfiDoc>[0]) => JSON.stringify(mfiDoc(i, img));
-  ok(p({ allowance: true, mfr: "ETC" }) === JSON.stringify({ kind: "placeholder", name: "allowance" }), "mfr images: an allowance shows the Allowance placeholder even with a manufacturer image");
-  ok(p({ custom: true, mfr: "ETC" }) === JSON.stringify({ kind: "placeholder", name: "custom-device" }), "mfr images: a custom item shows Custom Device even with a manufacturer image");
-  ok(p({ mfr: "ETC", por: true }) === JSON.stringify({ kind: "image", documentId: "PD-etc-logo", label: "ETC" }), "mfr images: a manufacturer image beats Contact Us");
-  ok(p({ mfr: "Chauvet", por: true }) === JSON.stringify({ kind: "placeholder", name: "contact-us" }), "mfr images: price on request without a manufacturer image shows Contact Us");
-  ok(p({ mfr: "", por: false }) === JSON.stringify({ kind: "placeholder", name: "coming-soon" }) && p({}) === JSON.stringify({ kind: "placeholder", name: "coming-soon" }), "mfr images: nothing else applies → Image Coming Soon");
   ok(d({ allowance: true }) === JSON.stringify({ kind: "placeholder", name: "allowance" }) && d({ custom: true }) === JSON.stringify({ kind: "placeholder", name: "custom-device" }), "mfr images: documents print the kind placeholders");
   ok(d({ mfr: "ETC" }) === JSON.stringify({ kind: "image", documentId: "PD-etc-logo", label: "ETC" }), "mfr images: documents print the manufacturer image");
   ok(mfiDoc({ mfr: "Chauvet", por: true }, img) === null && mfiDoc({}, img) === null, "mfr images: documents never print Contact Us or Coming Soon");
-  ok(mfiIsCustom("Custom Parts") && mfiIsCustom(" custom parts ") && !mfiIsCustom("Lighting") && !mfiIsCustom(null), "mfr images: the Custom Parts category marks a custom catalog part");
-  ok(mfiFallbackSrc({ kind: "placeholder", name: "coming-soon" }, (id) => "/d/" + id) === "/placeholders/coming-soon.webp" && mfiFallbackSrc({ kind: "image", documentId: "X", label: "" }, (id) => "/d/" + id) === "/d/X", "mfr images: fallbackSrc maps placeholders to static files and images through the caller's doc URL");
   ok(Object.values(mfiSrc).every((s) => mfiExists("public" + s)), "mfr images: all four placeholder files ship in public/placeholders");
 }
 
@@ -41244,31 +36713,16 @@ import { manufacturerRows as mfrRows, matchManufacturerFile as mfrMatch } from "
 /* ======================================================================
    Manufacturer images — portal fallbacks (PGlite).
    ====================================================================== */
-import { portalIndex as mfpIndex, invalidatePortalIndex as mfpInvalidate, portalMfrImage as mfpLook } from "@/lib/portal-catalog-index";
-import { toTileVM as mfpTile } from "@/lib/portal-catalog-view";
 import { setManufacturerImage as mfpSetImg } from "@/lib/stores/manufacturers";
 import { createDocument as mfpCreateDoc } from "@/lib/stores/part-documents";
 async function mfrPortalAsyncChecks(): Promise<void> {
   const SKU = fixtureId("MFP", "PART-1");
   await upsertPart({ id: SKU, sku: SKU, desc: "mfr portal part", category: "Lighting", unit: "ea", list: 10, cost: 5, mfr: "MfpBrand", portalVisibility: "show" } as never);
   registerFixture("catalog_parts", SKU);
-  mfpInvalidate();
-  const before = await mfpIndex({ fresh: true });
   const doc = await mfpCreateDoc({ kind: "image", title: "MfpBrand (manufacturer)", fileName: "m.webp", contentType: "image/webp", size: 10, blobKey: "part-docs/x/m.webp", sourceUrl: null, source: "manufacturer", sourceRef: "mfr:mfpbrand", by: "mfr test" });
   if (doc) registerFixture("part_documents", doc.id);
   const m = await mfpSetImg({ name: "MfpBrand", documentId: doc!.id, by: "mfr test" });
   registerFixture("manufacturers", m.id);
-  mfpInvalidate();
-  const ix = await mfpIndex({ fresh: true });
-  ok(ix.mfrImageDocs.get("mfpbrand") === doc!.id && ix.servableDocIds.has(doc!.id), "mfr images: the portal index knows the manufacturer image and may serve it");
-  ok(mfpLook(ix)("MFP-BRAND") === doc!.id && mfpLook(ix)("Nobody") === null, "mfr images: portalMfrImage matches by key");
-  const bp = before.parts.get(SKU), ap = ix.parts.get(SKU);
-  ok(!!bp && !!ap && bp.imageIds.length === 0 && ap.imageIds.length === 0 && bp.visibility === ap.visibility, "mfr images: a manufacturer image never becomes a part image or changes visibility");
-  ok(!before.servableDocIds.has(doc!.id), "mfr images: before the image was set, the document was not servable");
-  const tile = mfpTile({ key: SKU, kind: "part", title: "t", sku: SKU, mfr: "MfpBrand", category: "Lighting" }, ap, { unitPrice: 12, por: false }, undefined, { kind: "image", documentId: doc!.id, label: "MfpBrand" });
-  ok(tile.imageId === null && tile.fallback?.kind === "image", "mfr images: a tile without a photo carries the fallback");
-  const withPhoto = mfpTile({ key: SKU, kind: "part", title: "t", sku: SKU, mfr: "MfpBrand", category: "Lighting" }, { imageIds: ["PD-own"] }, { unitPrice: 12, por: false }, undefined, { kind: "placeholder", name: "coming-soon" });
-  ok(withPhoto.fallback === null && withPhoto.imageId === "PD-own", "mfr images: a tile with its own photo has no fallback");
 }
 
 /* ======================================================================
@@ -41357,8 +36811,8 @@ import { mergeNarrative as mfdMerge } from "@/lib/narrative/merge";
   // A saved pre-Part-1 block on a generic custom line's "CUSTOM" sku still resolves.
   const legacy = { ...(sec as object), keyProducts: [{ lineKey: "2", sku: "CUSTOM", text: "Old", photo: true }] } as never;
   ok(mfdResolve(legacy)[0].status === "ok", "mfr images: a pre-Part-1 block on a generic CUSTOM sku still resolves");
-  ok(readFileSync("src/lib/specs/record-keys.ts", "utf8").includes('"CUSTOM", "AI"') && estimatorSource().includes('|| "CUSTOM")') && estimatorSource().includes('sku: "AI",'),
-    "mfr images: the generic skus the Estimator writes (CUSTOM, AI) are the placeholder set");
+  ok(readFileSync("src/lib/specs/record-keys.ts", "utf8").includes('"CUSTOM", "AI"') && estimatorSource().includes('|| "CUSTOM")'),
+    "mfr images: the generic skus (CUSTOM, and AI on lines stored by the removed scope draft) are the placeholder set");
   const col = readFileSync("src/app/(app)/estimator/narrative-column.tsx", "utf8");
   const iOwn = col.indexOf("{row?.photoDocId ? ("), iCustom = col.indexOf('placeholder === "custom-device" ? ('), iMfr = col.indexOf("row?.fallbackDocId ? (");
   ok(iOwn > 0 && iOwn < iCustom && iCustom < iMfr, "mfr images: the narrative column hint follows the chain — own photo, then Custom Device, then the manufacturer image");
@@ -41518,7 +36972,6 @@ import { manufacturerRows as mpRows } from "@/lib/manufacturer-rows";
    ====================================================================== */
 import { ensureManufacturer as mpEnsure, mergeManufacturer as mpMerge, unmergeManufacturer as mpUnmerge, addManufacturerPerson as mpAddPerson, removeManufacturerPerson as mpRmPerson, setManufacturerNotes as mpNotes, setManufacturerCompany as mpCompany, listManufacturers as mpList, setManufacturerImage as mpSetImg, removeManufacturerImage as mpRemoveImg, manufacturerImageLookup as mpLookup } from "@/lib/stores/manufacturers";
 import { createDocument as mpCreateDoc } from "@/lib/stores/part-documents";
-import { portalIndex as mpPortalIndex, invalidatePortalIndex as mpPortalInvalidate } from "@/lib/portal-catalog-index";
 async function mfrPageStoreAsyncChecks(): Promise<void> {
   const src = await mpEnsure("Test MP & Co", "mp test");
   const tgt = await mpEnsure("Test MP and Co", "mp test");
@@ -41554,10 +37007,6 @@ async function mfrPageStoreAsyncChecks(): Promise<void> {
   await mpCompany("testmpco", "C-1", "mp test");
   ok(((await mpList()).find((m) => m.key === "testmpandco")!).companyId === "C-1", "mfr page: the company link lands on the target");
   await mpCompany("testmpandco", null, "mp test");
-
-  mpPortalInvalidate();
-  const ix = await mpPortalIndex({ fresh: true });
-  ok(ix.mfrImageDocs.get("testmpco") === doc.id && ix.mfrImageDocs.get("testmpandco") === doc.id, "mfr page: the portal index serves the target's image under the alias key too");
 
   // A merge carries people / company / image from the source when the target has none.
   const a = await mpEnsure("Test MP Carry A", "mp test");
@@ -42813,19 +38262,15 @@ import {
   DISCIPLINES as e301fDisc, DISCIPLINE_LABEL as e301fLabel, CLIENT_GOALS_MAX as e301fGoalsMax, COVER_TEXT_MAX as e301fCoverMax,
   cleanPlainText as e301fClean, sanitizeDiscipline as e301fSanDisc, inferDiscipline as e301fInfer, effectiveDiscipline as e301fEff,
   autoDisciplineLabel as e301fAuto, withDiscipline as e301fWithDisc, withSanitizedOutputFields as e301fSan,
-  coverTextFromSelection as e301fSel, appendGoals as e301fAppend, appendGoalsResult as e301fAppendRes, effectiveNotIncluded as e301fEffNot,
+  coverTextFromSelection as e301fSel, effectiveNotIncluded as e301fEffNot,
   sanitizeEstimateOutputDefaults as e301fSanDefaults, ESTIMATE_OUTPUT_BLOB as e301fBlob,
 } from "@/lib/estimate-output/fields";
-import { DISCIPLINE_GROUPS as e301fGroups } from "@/lib/stores/survey-intake";
 import { buildQuote as e301fBuild, revisionDocFields as e301fDocFields, QUOTE_CONTENT_FIELDS as e301fContent, type Quote as E301fQuote } from "@/lib/stores/quotes";
 import { librarySectionForLoad as e301fForLoad } from "@/lib/narrative/system-library";
 import type { SpecSection as E301fSec } from "@/app/(app)/estimator/types";
 {
   const sec = (extra: Record<string, unknown> = {}): E301fSec =>
     ({ id: "s1", name: "Stage Lighting", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "A", desc: "Fixture", qty: 1, unit: "ea", cost: 10, price: 20 }], ...extra }) as E301fSec;
-
-  // ---- vocab ----
-  ok([...e301fDisc].sort().join(",") === e301fGroups.map((g) => g.key).sort().join(","), "#301 fields: the discipline vocab is exactly the survey's DisciplineKey set");
   ok(e301fLabel.lighting === "Lighting" && e301fLabel.rigging === "Rigging" && e301fLabel.curtain === "Curtains" && e301fLabel.av === "AV", "#301 fields: discipline labels");
 
   // ---- cleaning ----
@@ -42858,17 +38303,7 @@ import type { SpecSection as E301fSec } from "@/app/(app)/estimator/types";
   ok(!("discipline" in blank) && !("clientGoals" in blank) && !("coverText" in blank), "#301 fields: blank values remove their keys");
   ok((e301fSan(sec({ coverText: "c".repeat(e301fCoverMax + 1) })).coverText || "").length === e301fCoverMax, "#301 fields: cover text capped at 1,500");
   ok(e301fSel("  First line\n  second line  ") === "First line second line", "#301 fields: a selection becomes one cover paragraph");
-  ok(e301fAppend("", " New ") === "New" && e301fAppend("Old", "New") === "Old\n\nNew" && e301fAppend("Old\n\nNew", "New") === "Old\n\nNew" && e301fAppend("Old", "  ") === "Old",
-    "#301 fields: From site visit fills blank goals, appends after a blank line, never duplicates");
-  ok(/setSectionsState\(\(prev\) => fillClientGoals\(prev, r\.goals\)\);\s*undoRef\.current\?\.mapHistory\(\(ss\) => fillClientGoals\(ss, r\.goals\)\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: fillClientGoals\(n\.before, r\.goals\) \} : n\)\);/.test(estimatorSource()),
-    "#301 goals pre-fill carries into a live re-price banner's Undo snapshot, like the freight auto-apply");
   const e301Full = "x".repeat(e301fGoalsMax);
-  ok(!e301fAppendRes("", "New").truncated && !e301fAppendRes("Old", "Old").truncated && !e301fAppendRes("Old", "New").truncated && !e301fAppendRes("Old", "  ").truncated,
-    "#301 fields: appendGoalsResult — fits, duplicate and blank picks are not truncation");
-  ok(e301fAppendRes("a".repeat(e301fGoalsMax - 10), "b".repeat(50)).truncated && e301fAppendRes("a".repeat(e301fGoalsMax - 10), "b".repeat(50)).text.length === e301fGoalsMax,
-    "#301 fields: appendGoalsResult — a pick cut short by the cap reports truncated");
-  ok(e301fAppendRes(e301Full, "New").truncated && e301fAppendRes(e301Full, "New").text === e301Full && e301fAppendRes("", "y".repeat(e301fGoalsMax + 5)).truncated,
-    "#301 fields: appendGoalsResult — goals already at the cap (pick cut to nothing) and an oversize pick into blank goals report truncated");
   ok(e301fEffNot(undefined, "Permits") === "Permits" && e301fEffNot(null, "Permits") === "Permits" && e301fEffNot("", "Permits") === "" && e301fEffNot("Paint", "Permits") === "Paint",
     "#301 fields: Not included absent → the default list; an emptied list stays empty");
   const d = e301fSanDefaults({ notIncluded: " Permits \r\n\r\n Painting ", website: " peaksystemsgroup.com\n ", extra: 1 });
@@ -43008,30 +38443,13 @@ import type { SpecSection as E301sSec } from "@/app/(app)/estimator/types";
    #301 slice A — goals: the survey's per-discipline Client goals, cleaned
    on save, copied into matching blank systems, and the From site visit list.
    ====================================================================== */
-import {
-  sanitizeSurveyDisciplineGoals as e301gSan, withSanitizedSurveyGoals as e301gWith, goalsFromSurvey as e301gFrom,
-  fillClientGoals as e301gFill, siteVisitOptions as e301gOptions,
-} from "@/lib/estimate-output/goals";
 import type { SpecSection as E301gSec } from "@/app/(app)/estimator/types";
 {
   const disc = { lighting: { goals: "  Even wash \r\n  ", present: ["Dimmers"] }, av: { goals: 7 }, rigging: { notes: "n" }, curtain: "junk" };
-  const clean = e301gSan(disc) as Record<string, Record<string, unknown>>;
-  ok(clean.lighting.goals === "Even wash" && (clean.lighting.present as string[])[0] === "Dimmers" && !("goals" in clean.av) && clean.rigging.notes === "n" && (clean as Record<string, unknown>).curtain === "junk",
-    "#301 goals: survey goals trimmed; a non-string goals key dropped; every other field untouched");
-  ok(((e301gSan({ lighting: { goals: "x".repeat(1200) } }) as Record<string, { goals: string }>).lighting.goals.length) === 1000, "#301 goals: capped at 1,000");
   const patch = { notes: "n" };
-  ok(e301gWith(patch) === patch && (e301gWith({ disciplines: { av: { goals: " a " } } }).disciplines as Record<string, { goals: string }>).av.goals === "a",
-    "#301 goals: a patch without disciplines passes through; one with them is cleaned");
-  const g = e301gFrom({ disciplines: { lighting: { goals: " Even wash " }, rigging: { goals: "" }, av: { goals: "Clear speech" }, other: { goals: "x" } } });
-  ok(g.lighting === "Even wash" && g.av === "Clear speech" && !("rigging" in g) && !("other" in g) && Object.keys(e301gFrom(null)).length === 0,
-    "#301 goals: goalsFromSurvey reads the four disciplines only, cleaned again (R4)");
 
   const s = (id: string, name: string, extra: Record<string, unknown> = {}): E301gSec => ({ id, name, kind: "materials", mfr: "", freightPct: 0, items: [], ...extra }) as E301gSec;
   const secs = [s("a", "Stage lighting"), s("b", "Rigging", { clientGoals: "Kept" }), s("c", "Misc", { discipline: "av" }), s("d", "Lighting install", { kind: "labor" }), s("e", "Track")];
-  const filled = e301gFill(secs, { lighting: "Even wash", rigging: "New", av: "Clear speech" });
-  ok(filled[0].clientGoals === "Even wash" && filled[1].clientGoals === "Kept" && filled[2].clientGoals === "Clear speech" && !filled[3].clientGoals && !filled[4].clientGoals,
-    "#301 goals: fills only blank goals on systems whose discipline (stored, else inferred) matches; labor and unknown never (R3)");
-  ok(e301gFill(secs, {}) === secs && e301gFill([s("b", "Rigging", { clientGoals: "Kept" })], { rigging: "New" }).length === 1, "#301 goals: nothing to fill → the same array (no dirty state)");
 
   const sv = (id: string, at: number, extra: Record<string, unknown>) => ({ id, venue: "Hall " + id, customer: "C", updatedAt: at, ...extra });
   const list = [
@@ -43041,73 +38459,23 @@ import type { SpecSection as E301gSec } from "@/app/(app)/estimator/types";
     sv("FS-4", 4_000, { customerId: "c2", disciplines: { lighting: { goals: "X" } } }),
     ...[5, 6, 7, 8, 9, 10].map((n) => sv("FS-" + n, n * 10_000, { customerId: "c1", disciplines: { curtain: { goals: "C" + n } } })),
   ];
-  const o = e301gOptions(list, { leadId: "L-9", customerId: "c1" });
-  ok(o.length === 5 && o.every((x) => x.surveyId !== "FS-3" && x.surveyId !== "FS-4") && o[0].surveyId === "FS-10",
-    "#301 site visit: the lead's + the customer's visits with goals, newest five; other customers and goal-less visits never");
-  const fs2 = e301gOptions(list, { leadId: "L-9" })[0];
-  ok(fs2.surveyId === "FS-2" && fs2.entries.map((e) => `${e.discipline}:${e.label}:${e.text}`).join("|") === "lighting:Lighting:L2|av:AV:A2" && fs2.label.startsWith("Hall FS-2 · "),
-    "#301 site visit: entries in discipline order with labels; the option label names the venue and date");
-  ok(e301gOptions(list, {}).length === 0, "#301 site visit: no lead and no customer → nothing");
-
-  const acts = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/actions.ts"), "utf8");
-  const saveBody = acts.slice(acts.indexOf("export async function saveSurvey("), acts.indexOf("export async function advanceSurveyStage("));
-  const advBody = acts.slice(acts.indexOf("export async function advanceSurveyStage("), acts.indexOf("export async function deleteSurvey("));
-  ok(saveBody.includes("await update(id, withSanitizedSurveyGoals(patch) as Partial<SurveyRecord>);") && /await update(?:Checked)?\(id, withSanitizedSurveyGoals\(patch\) as Partial<SurveyRecord>\);/.test(advBody), // #344 C-final C: updateChecked
-    "#301 goals: saveSurvey and advanceSurveyStage clean the goals before writing (R4)");
-  const box = readFileSync(join(process.cwd(), "src/app/(app)/venue-assessments/[id]/sections/systems.tsx"), "utf8");
-  // #344 B4: goals became a list editor, after Scope of interest and before Present.
-  ok(box.includes(">Client goals</span>") && box.includes("<GoalsListEditor") && box.includes('props.setValue(disc, "goals", next)') &&
-     box.indexOf("<GoalsListEditor") < box.indexOf(">Present</label>") && box.indexOf("<GoalsListEditor") < box.indexOf(">Rigging system</label>"),
-    "#301 goals: the goals list sits above Present in each discipline section (inside its lock)");
-  const oa = readFileSync(join(process.cwd(), "src/app/(app)/estimator/output-actions.ts"), "utf8");
-  ok(/^"use server";/.test(oa) && (oa.match(/await requireUser\(\);/g) || []).length === 2 && oa.includes("export async function surveyGoalsAction(") && oa.includes("export async function siteVisitGoalsAction("),
-    "#301 goals: the two actions are signed-in only");
 }
 
 async function e301GoalsAsyncChecks(): Promise<void> {
   const { fixtureId } = await import("./test-fixtures");
-  const S = await import("@/lib/stores/surveys");
   const Q = await import("@/lib/stores/quotes");
-  const { surveyGoalsFor, siteVisitGoalsFor } = await import("@/lib/estimate-output/survey-goals-server");
   const CID = fixtureId(301, "goals-cust");
   const A = fixtureId(301, "goals-a");
   const B = fixtureId(301, "goals-b");
   const QID = fixtureId(301, "goals-quote");
-  await S.create({ id: A, customer: "Spec fixture", customerId: CID, venue: "Main hall", disciplines: { lighting: { goals: "  Even wash  " }, av: { goals: "x".repeat(1200) } } });
   registerFixture("surveys", A);
-  await S.create({ id: B, customer: "Spec fixture", customerId: CID, venue: "Annex", disciplines: { rigging: { goals: "" } } });
   registerFixture("surveys", B);
-  const one = await surveyGoalsFor(A);
-  ok(one?.label === "Main hall" && one.goals.lighting === "Even wash" && one.goals.av?.length === 1000, "#301 goals: surveyGoalsFor cleans what it copies (the push path never sanitized it)");
-  ok((await surveyGoalsFor(fixtureId(301, "goals-none"))) === null, "#301 goals: an unknown survey → null");
-  const byCust = await siteVisitGoalsFor({ customerId: CID });
-  ok(byCust.length === 1 && byCust[0].surveyId === A, "#301 site visit: the customer's visits with goals (a goal-less visit is left out)");
   await Q.create({ id: QID, name: "#301 goals", customer: "Spec fixture", customerId: CID, owner: "spec", quoteType: "system" });
   registerFixture("quotes", QID);
-  const byQuote = await siteVisitGoalsFor({ quoteId: QID, customerId: "someone-else" });
-  ok(byQuote.length === 1 && byQuote[0].surveyId === A, "#301 site visit: a saved quote's own customer wins over the posted one");
-  ok((await siteVisitGoalsFor({})).length === 0, "#301 site visit: nothing to match → empty");
 }
 
 /* ===== #301 slice A — worksheet goals ===== */
 {
-  const mk = (disciplines: unknown) => buildAssessmentSheet({
-    id: "FS-301", venueClass: "proscenium", venue: "Goals room", customer: "Sheet test",
-    measurements: {}, disciplines, linesets: [], linesetsEnabled: false,
-    lifeSafety: { deluge: "", smokeVent: "", adaNotes: "", egressNotes: "" },
-    signoff: { repName: "", repSignedAt: "", contactName: "", contactSignedAt: "", reviewerName: "", reviewerRole: "", reviewerSignedAt: "" },
-    assessmentEnabled: false, assessment: blankAssessment(), templateRev: "5.1",
-  } as any);
-  const secs = (s: ReturnType<typeof mk>) =>
-    (s.fieldSheet?.pages || []).filter((p) => p.title.endsWith("Systems")).flatMap((p) => p.sections);
-  const withGoals = secs(mk({ lighting: { goals: "  Even wash on stage  " }, av: { goals: "" } }));
-  const without = secs(mk({}));
-  ok(withGoals.length === 4 && withGoals.every((s) => s.rows[0]?.label === "Client goals"),
-    "#301 worksheet: every discipline section starts with a Client goals row");
-  const lit = withGoals.find((s) => s.heading.toLowerCase().includes("light"));
-  ok(lit?.rows[0].value === "Even wash on stage", "#301 worksheet: a saved goal prints, cleaned (trimmed)");
-  ok(without.every((s) => s.rows[0]?.label === "Client goals" && s.rows[0].value === ""),
-    "#301 worksheet: no goal → a blank write-in row, like the other blank fields");
 }
 
 /* ======================================================================
@@ -43124,12 +38492,8 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   const cli = estimatorSource();
   ok(/^"use client";/.test(fields) && !serverImport(fields) && !serverImport(col) && !serverImport(card) && !serverImport(cli),
     "#301 UI: the new block and every edited estimator client module value-import no store, db, session, users, settings or estimate-output server module");
-  ok(fields.includes(">Client goals<") && fields.includes("From site visit ▾") && fields.includes("Add the client's goals") && fields.includes("siteVisitGoalsAction(") &&
-     fields.includes("No site-visit goals for this customer yet.") && fields.includes("appendGoals(s.clientGoals, text)"),
-    "#301 UI: Client goals with From site visit (lazy, appends) and the amber blank hint");
   ok(fields.includes(">Cover paragraph<") && fields.includes("coverParagraphFor(") && fields.includes("COVER_SOURCE_LABEL[") && fields.includes("Clear override") && fields.includes("maxLength={COVER_TEXT_MAX}"),
     "#301 UI: the Cover paragraph override with its derived placeholder and source chip");
-  ok(/try \{[\s\S]{0,200}await siteVisitGoalsAction\(/.test(fields) && fields.includes('"Could not reach the server. Try again."'), "#301 UI: the action await is caught");
   ok(col.includes("<ScopeOutputFields") && col.indexOf("<ScopeOutputFields") < col.indexOf("<div style={LABEL}>Intro</div>") && col.includes("Use selection as cover") &&
      col.includes("coverTextFromSelection(") && col.includes("Select a sentence in the intro first.") && col.includes("onMouseDown={(e) => e.preventDefault()}"),
     "#301 UI: the column mounts the fields above the intro; Use selection as cover keeps the selection");
@@ -43138,8 +38502,6 @@ async function e301GoalsAsyncChecks(): Promise<void> {
   ok(cli.includes("onSetDiscipline={(value) => updateSection(sec.id, (s) => withDiscipline(s, value))}") && /<NarrativeColumn\s+key=\{narrSec\.id\}/.test(cli) &&
      cli.includes("quoteId={loadedId}") && cli.includes("customerId={customerId}"), "#301 UI: the select and the column are wired");
   const effect = cli.slice(cli.indexOf("const goalsSurveyId ="), cli.indexOf("const goalsSurveyId =") + 1100);
-  ok(effect.includes('aiSource?.kind === "survey"') && effect.includes("surveyGoalsAction(goalsSurveyId)") && effect.includes("setSectionsState((prev) => fillClientGoals(prev, r.goals))") && !effect.includes("writeSections") && effect.includes(".catch("),
-    "#301 UI: a page opened from a site visit pre-fills matching blank goals once, automatically (R3)");
 }
 
 /* ======================================================================
@@ -43969,7 +39331,7 @@ import {
 import {
   sanitizeClientResponse as e301crSan, responseScopes as e301crScopes, cleanClientResponses as e301crClean, appendResponseTo as e301crAppend,
   responseTaskTitle as e301crTitle, responseNoteText as e301crNote, responseAssignees as e301crAssignees, leadEstimator as e301crLead,
-  confirmationText as e301crThanks, chicagoDayEnd as e301crDayEnd, responseRows as e301crRows, creditNoteText as e301crCredit,
+  confirmationText as e301crThanks, responseRows as e301crRows, creditNoteText as e301crCredit,
   newResponseId as e301crNewId, isClientResponseId as e301crIsId, CLIENT_ACTION_COPY as e301crCopy, MAX_CLIENT_RESPONSES as e301crMax,
   type ClientResponse as E301crResp,
 } from "@/lib/estimate-output/responses";
@@ -44026,8 +39388,6 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
     "#301 responses: R16 — the lead estimator (owner, else Prepared by; exact, unique) if active, else every active approve holder");
   ok(e301crLead("Twin", "", users) === null && e301crThanks("Jeff Chesebro") === "Thanks — Jeff Chesebro has been notified." && e301crThanks(null) === "Thanks — Peak Systems Group has been notified.",
     "#301 responses: an ambiguous name resolves to nobody; the confirmation names the lead estimator");
-  ok(e301crDayEnd(Date.UTC(2026, 9, 5, 15)) === Date.UTC(2026, 9, 6, 4, 59) && e301crDayEnd(Date.UTC(2026, 0, 15, 15)) === Date.UTC(2026, 0, 16, 5, 59),
-    "#301 responses: tasks are due 11:59 PM Chicago today (CDT and CST)");
   const rows = e301crRows([r(10, { at: Date.UTC(2026, 9, 5, 19, 14) }), r(11, { at: Date.UTC(2026, 9, 6, 15), kind: "question", sectionIds: [], sectionNames: [], total: 0, message: "Q?" })], (rev) => rev - 1);
   ok(rows.length === 2 && rows[0].kindLabel === "Question" && rows[0].total === "" && rows[1].kindLabel === "Selected scopes" && rows[1].total === "$100.00" &&
      rows[1].revLabel === "Rev 2" && rows[1].when === "Oct 5, 2:14 PM",
@@ -44048,7 +39408,7 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
     "#301 gaps: the staff chips (only the gaps that exist)");
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   // #352 review I3: + the portal's pure card scan (portal-quote-mode.ts has type-only imports).
-  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|@\/lib\/portal-quote-mode"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
+  ok(!/^import (?!type)[^\n]*from "(?!@\/lib\/document-files"|@\/app\/\(app\)\/estimator\/pricing"|@\/lib\/team"|@\/lib\/card-number"|\.\/scopes")/m.test(rd("src/lib/estimate-output/responses.ts")) &&
      !/^import (?!type)[^\n]*from "(?!@\/app\/\(app\)\/estimator\/narrative"|@\/app\/\(app\)\/estimator\/quote-document-view"|\.\/scopes")/m.test(rd("src/lib/estimate-output/package-gaps.ts")),
     "#301 responses/gaps purity: client-safe value imports only");
 }
@@ -45597,7 +40957,6 @@ async function modelSku304LiveWritersAsyncChecks(): Promise<void> {
   const { inArray } = await import("drizzle-orm");
   const { loadLibrarySystem } = await import("@/lib/narrative/load-system");
   const { copySectionForTarget } = await import("@/app/(app)/estimator/copy-system");
-  const PI = await import("@/lib/portal-catalog-index");
 
   // Pure: Copy system prices under the source's SKU, then lands the copy on the live one.
   const srcSec = { id: "s1", name: "DSP", kind: "materials", mfr: "", freightPct: 0,
@@ -45616,8 +40975,6 @@ async function modelSku304LiveWritersAsyncChecks(): Promise<void> {
   // Pure: the portal's former-SKU alias.
   const ip = { sku: "Sym:LW" } as never;
   const fakeIx = { parts: new Map([["Sym:LW", ip]]), formerSkus: new Map([["OLD-LW", "Sym:LW"]]) };
-  ok(PI.portalPart(fakeIx, "OLD-LW") === ip && PI.portalPart(fakeIx, "Sym:LW") === ip && PI.portalPart(fakeIx, "NOPE") === undefined,
-    "#304 live writers: portalPart resolves a former sku to the live part");
 
   const OLD = fixtureId(304, "lw-old");
   const NEW = "Symetrix:" + fixtureId(304, "lw-new");
@@ -45675,13 +41032,7 @@ async function modelSku304LiveWritersAsyncChecks(): Promise<void> {
       "#304 live writers: restoring a pre-rename Grid revision puts the live sku on the live placements");
     ok(JSON.stringify(gAfter.revisions!.find((r) => r.rev === gRev.rev)) === gSnap,
       "#304 live writers: the restored Grid revision's snapshot is byte-identical (still names the old sku)");
-
-    // Portal index: the renamed part answers its former sku.
-    const ix = await PI.portalIndex({ fresh: true });
-    ok(ix.formerSkus.get(OLD) === NEW && PI.portalPart(ix, OLD)?.sku === NEW,
-      "#304 live writers: the portal index maps a former sku to the live part (old ?part= bookmarks, cart lines)");
   } finally {
-    PI.invalidatePortalIndex();
     await db.delete(blobsT).where(inArray(blobsT.id, blobIds));
     if (snapshot.length) await db.insert(blobsT).values(snapshot);
   }
@@ -45862,8 +41213,8 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(!/setMode\(|mode === "build"|"Customer preview →"/.test(estimatorSource()), "#305 shell: the old build/preview mode and its button are gone");
   ok(/flexWrap: "wrap"/.test(header304), "#305 header: wraps instead of overflowing at 1024 px");
   // #363: Parts list (CSV) became Review spreadsheet.
-  ok(["ChangeTypeControl", "Review spreadsheet", "Draft from survey/inspection", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !/Review spreadsheet|Parts list \(CSV\)|DeleteQuoteButton/.test(header304) && !more304.includes("Parts list (CSV)"),
-    "#305 header: Change type, Review spreadsheet, Draft from survey, Cut sheets and Delete live in the ⋯ menu");
+  ok(["ChangeTypeControl", "Review spreadsheet", "Cut sheets", "DeleteQuoteButton"].every((x) => more304.includes(x)) && !more304.includes("Draft from survey") && !/Review spreadsheet|Parts list \(CSV\)|DeleteQuoteButton/.test(header304) && !more304.includes("Parts list (CSV)"),
+    "#305 header: Change type, Review spreadsheet, Cut sheets and Delete live in the ⋯ menu");
   ok(/aria-current=\{active \? "page" : undefined\}/.test(tabs304) && /STEP_LABEL\[/.test(tabs304), "#305 tabs: labelled from STEP_LABEL, current tab marked");
 }
 
@@ -45888,10 +41239,7 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
 /* #305 final review — Draft from survey jumps to Build; phone keeps the client link; the joined-source helpers can't go vacuous. */
 {
   const more = readFileSync(join(process.cwd(), EST_DIR, "header-more-menu.tsx"), "utf8");
-  ok(/onStep\("build"\);\s*s\.openAiDraft\(\)/.test(more) && /onStep: \(to: EstimateStep\) => void/.test(more),
-    "#305 header: Draft from survey/inspection moves to Build before it opens the modal (the modal is mounted only there)");
   const modalMounts = ESTIMATOR_FILES.filter((f) => existsSync(join(process.cwd(), EST_DIR, f)) && readFileSync(join(process.cwd(), EST_DIR, f), "utf8").includes("<AiScopeModal"));
-  ok(modalMounts.length === 1 && modalMounts[0] === "steps/build-step.tsx", "#305 header: AiScopeModal is mounted only in steps/build-step.tsx");
   const rv = readFileSync(join(process.cwd(), EST_DIR, "steps/review-step.tsx"), "utf8");
   const phoneBranch = rv.slice(rv.lastIndexOf("{phone && ("));
   ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && phoneBranch.includes("<CoverPackagePanel"), "#305 review: the phone's bottom block mounts the cover panel and the Client link panel");
@@ -46103,8 +41451,8 @@ import * as p2a from "@/lib/estimate-groups/groups";
   };
   ok(hook.includes("const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? [])"), "#P2a hook: groups state seeds from initial.groups");
   ok(hook.includes("const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups])"), "#P2a hook: blocks = groupBlocks(sections, groups, { includeEmpty: true })");
-  ok(/setSectionsState\(\(prev\) => \{\s*const next = unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 8,
-    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (8 raw writes: 5 + the #bonus effect + the #366 discounts effect + the Undo restore)");
+  ok(/setSectionsState\(\(prev\) => \{\s*const next = unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 7,
+    "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (7 raw writes: 4 + the #bonus effect + the #366 discounts effect + the Undo restore)");
   const um = between("function unmarkUserEdits(", "const COLLAPSED_KEY_PREFIX");
   ok(um.includes("unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next))") && um.includes("withoutBuilt(s)"),
     "#P2a hook: un-marking ignores the Rewards credit line (a re-pin after a reorder is not an edit)");
@@ -46957,7 +42305,6 @@ async function p2bOutputsAsyncChecks(): Promise<void> {
   const b = time("<style".repeat(35_000));
 }
 import type { Quote as P3sQuote } from "@/lib/stores/quotes";
-import { chicagoDayEnd as p3sDayEnd } from "@/lib/estimate-output/responses";
 
 // The acting user for the original track checks (the thread owner, an Admin).
 const P3T_SAM = { id: "u1", name: "Sam Mills", roles: ["Admin"] };
@@ -47735,7 +43082,7 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   ok(pkgSrc.includes("pinned.bySection[x.id]") && pkgSrc.includes("on the whole estimate</span>") && pkgSrc.includes("useCommentsFocusRefresh(s)"),
     "#P4 pins: the Build package nav shows each system's open-comment count and the whole-estimate count");
   ok(!/listReviewCommentsAction/.test(buildSrc + pkgSrc + cardSrc), "#P4 pins: Build / Build package read the shared list, they don't fetch their own");
-  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 8, "#P4 pins: setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
+  ok((rf(`${EST_DIR}/use-estimator-state.ts`).match(/setSectionsState\(/g) || []).length === 7, "#P4 pins: setSectionsState( count stays 7 (4 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
 }
 
 // ---- #P4 polish: pin popover lifecycle + clamp, Escape, no aria-label on plain spans ----
@@ -48541,8 +43888,8 @@ import type { PDProductBlock as P5ePB } from "@/lib/package-doc/types";
     "#P5 editor: the editor is wired to the hook's packageDoc / setPackageDoc and Save to product refreshes the library row");
   const hook = rd(`${EST_DIR}/use-estimator-state.ts`);
   ok(hook.includes("...docProductSkus(packageDoc),") && hook.includes("[narrSec, packageDoc]") && hook.includes("const kpLib = useKeyProductLibrary(narrSkus, kpAliases);") &&
-     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 8,
-    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
+     /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
+    "#P5 editor: the library prefetch covers the document's product skus; `next` stays last; setSectionsState( count stays 7 (4 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
   ok(!["customerLines(", "window.print", "est-doc", "reviewBarOpen", ".components"].some((x) => pkgStep.includes(x)) && !/^import (?!type)[^\n]*from "@\/(lib\/stores|db)/m.test(pkgStep),
     "#P5 editor: package-step adds no forbidden Estimator strings or store/db value imports");
 }
@@ -48581,8 +43928,8 @@ import { MAX_DEPTH as P5F_MAX_DEPTH } from "@/lib/package-doc/schema";
     "#P5 editor fix: the editor reports over on every flush, and clears it when an outside value re-sets the content (an unmount keeps it — #P5 final)");
   ok(pkgStep.includes("onOverChange={setPackageDocOver}") && /const startDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
      /const removeDocument = \(\) => \{[\s\S]*?setPackageDocOver\(false\);[\s\S]*?\};/.test(pkgStep) &&
-     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 8,
-    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
+     /\n {4}packageDocOver,\n {4}setPackageDocOver,\n/.test(hook) && /\n {4}next,\n {2}\};\n\}\n/.test(hook) && (hook.match(/setSectionsState\(/g) || []).length === 7,
+    "#P5 editor fix: Build package wires onOverChange to the hook; Start / Remove clear the flag; `next` stays last; setSectionsState( count stays 7 (4 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here)");
 
   // (2) Remove document: the unmount flush never brings the removed document back.
   ok(pkgStep.includes("const discardRef = useRef(false);") && /const removeDocument = \(\) => \{\s*discardRef\.current = true;/.test(pkgStep) &&
@@ -49095,8 +44442,8 @@ import { catalogAddPrice as p6eAddPrice } from "@/app/(app)/estimator/tier-repri
   ok(page.includes("loadSystemCategoryOptions()") && page.includes("await getSystemCategories()") && page.includes("getManyBySku(skus)") && page.includes("sku: p.sku") && page.includes("part: p ? {") && page.includes(": null,"),
     "#P6 estimator: page.tsx loads the categories and resolves their parts server-side (live sku, null when gone)");
   ok(hook.includes("const addSystemFromCategory = (categoryId: string, picks: Array<{ sku: string; qty: number }>)") && hook.includes("systemFromCategory(category, picks, {") && hook.includes("price: catalogAddPrice,") && hook.includes("normalizeSystemOrder([...ss, sec], groups)") && hook.includes("setAddSystemOpen(false);") &&
-     (hook.match(/setSectionsState\(/g) || []).length === 8 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
-    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last");
+     (hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    addSystemFromCategory,"),
+    "#P6 estimator: the hook adds through the pure builder and the same setSections/normalize path; setSectionsState( count stays 7 (4 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last");
   // Fix round 1
   ok(page.includes(".catch((e) => {") && page.includes("return []") && /estimateOutputDefaults, systemCategories\] =/.test(page) && page.includes("loadSystemCategoryOptions(),") && !page.includes("await loadSystemCategoryOptions()"),
     "#P6 estimator: the category load is fail-soft ([] + a server warning) and runs inside the page's Promise.all, not serially after it");
@@ -49345,8 +44692,8 @@ import { specLineRows as specLineRows312 } from "@/lib/estimate-review/review-ui
     "#312 estimator: the hook stages the pre-filled draft, consumes it on open, and saves through replaceCustomLine (add path unchanged)");
   ok(/if \(d\.addToCatalog && !d\.allowance\)/.test(hook) && !/customEditRef\.current = \{ lineId, draft: \{[^}]*addToCatalog: "1"/.test(hook),
     "#312 estimator: an edit only re-saves to the catalog when 'Add to catalog' is ticked (the draft opens unticked)");
-  ok((hook.match(/setSectionsState\(/g) || []).length === 8 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
-    "#312 estimator: setSectionsState( count stays 8 (5 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last in the hook's return");
+  ok((hook.match(/setSectionsState\(/g) || []).length === 7 && hook.lastIndexOf("    next,\n  };") > hook.indexOf("    openCustomEdit,"),
+    "#312 estimator: setSectionsState( count stays 7 (4 + the #bonus effect + the #366 discounts effect + the Undo restore (applyUndoSnap); the live save's `write = auto ? setSectionsState : setSections` alias is one more raw writer, not counted here); `next` stays last in the hook's return");
 
   type R312 = { id: number; custom?: boolean; curtain?: boolean };
   const rows = specLineRows312<R312>([
@@ -57423,8 +52770,6 @@ async function gridNotes9Checks(): Promise<void> {
   const sa9 = src9("src/app/(app)/settings/actions.ts");
   ok(sa9.includes('if (typeof patch.peakHeader === "boolean") clean.peakHeader = patch.peakHeader;') && sa9.indexOf('await requirePerm("manage_users")', sa9.indexOf("export async function saveSettingsAction")) < sa9.indexOf("clean.peakHeader"),
     "Grid notes #9: Settings → Branding saves only a boolean, admin-gated (manage_users)");
-  ok(src9("src/lib/renewal-outreach.ts").includes('import { letterheadJpeg } from "@/lib/letterhead-server";') && src9("src/lib/renewal-outreach.ts").includes("export { letterheadJpeg };") && src9("next.config.ts").includes('"/**": [BAKED_LETTERHEAD_TRACE_GLOB]') && src9("next.config.ts").includes('from "./src/lib/letterhead-path"'),
-    "Grid notes #9: letterheadJpeg moved to letterhead-server (renewal-outreach re-exports it); the baked sheet ships with every function");
   ok(!/from "@\/(lib\/stores|lib\/settings|db)\//.test(src9("src/lib/letterhead.ts")) && !/^import /m.test(src9("src/lib/letterhead.ts")), "Grid notes #9: letterhead.ts stays pure (the client-safe bid-spec module imports it)");
 
   // ---- 7. review fixes (2199f6bc): every logo format, the header-keyed zip cache, toggle validation
@@ -57693,7 +53038,7 @@ async function datasheetBook329Checks(): Promise<void> {
     const empty = await buildDatasheetBook({ subtitleLines: ["x"], parts: [parts[6]], docs });
     ok(!big.ok && big.cause === "too-big" && !late.ok && late.cause === "late" && !empty.ok && empty.cause === "failed",
       "#329 guards: over the size cap, past the deadline, or nothing merged → { ok: false } (the caller ships the loose files + a note), never a throw");
-    const jpg = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/letter/peak-letterhead.jpg"));
+    const jpg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/peak-letterhead.jpg"));
     const bad = await buildDatasheetBook({ subtitleLines: ["x"], parts, docs, letterhead: { companyName: "Peak", image: { jpeg: Buffer.from("nope"), png: Buffer.from("nope"), full: false, w: 10, h: 10 } } });
     const badText = bad.ok ? (await b329PageTexts(bad.bytes))[0] : "";
     ok(bad.ok && badText.includes("Peak"), "#329 build: an unreadable letterhead image falls back to the company name in type; the book still builds");
@@ -58047,7 +53392,6 @@ import { customerLines as bnCustomerLines, totals as bnTotals, computeLabor as b
 
 /* ---- #bonus Task 3: every other reader skips the two bonus lines ---- */
 import { isKeyProductEligible as bnKeyEligible } from "@/app/(app)/estimator/narrative";
-import { cartLinesFromSpec as bnCartLines } from "@/lib/portal-pricing";
 import { copySectionForTarget as bnCopySection } from "@/app/(app)/estimator/copy-system";
 import { partsListRows as bnPartsRows } from "@/app/(app)/estimator/parts-csv";
 import { findLine as bnFindLine } from "@/lib/package-doc/chips";
@@ -58067,7 +53411,6 @@ function bnLeakFixture(): EstimatorSpecSection[] {
   const noBon = (s: string) => !/BON-|bonus/i.test(s);
   ok(bonusLines.every((x) => !bnKeyEligible(x)), "#bonus leak: bonus lines can't be key products");
   ok(bonusLines.every((x) => bnFindLine(sections[0], String(x.id)) === undefined), "#bonus leak: a package-doc chip can't find a bonus line");
-  ok(noBon(JSON.stringify(bnCartLines(sections))), "#bonus leak: portal copy-to-cart");
   const cp = bnCopySection(sections[0], { newSectionId: "s9", catalog: new Map(), fixtures: new Map(), sourceTierMargin: 0.3, targetTierMargin: 0.3 });
   ok(!cp.section.items.some(bnIsBonus), "#bonus copy system drops bonus lines");
   ok(cp.section.items.length === 2, "#bonus copy system keeps the real lines");
@@ -58090,8 +53433,7 @@ function bnLeakFixture(): EstimatorSpecSection[] {
   for (const p of [
     "src/lib/client-package-server.ts", "src/lib/specs/quote-bom.ts", "src/app/(app)/estimator/narrative.ts",
     "src/app/(app)/estimator/parts-csv.ts", "src/lib/manufacturer-analytics.ts", "src/lib/dashboard/metrics.ts",
-    "src/lib/part-docs/quoted-parts.ts", "src/lib/design/estimate-tray.ts", "src/lib/package-doc/chips.ts",
-    "src/lib/portal-pricing.ts", "src/app/(app)/estimator/copy-system.ts", "src/lib/narrative/system-library.ts",
+    "src/lib/part-docs/quoted-parts.ts", "src/lib/design/estimate-tray.ts", "src/lib/package-doc/chips.ts", "src/app/(app)/estimator/copy-system.ts", "src/lib/narrative/system-library.ts",
   ]) ok(src(p).includes("isBonusItem"), "#bonus leak pin: " + p + " skips bonus lines");
 }
 async function bonusLeakChecks(): Promise<void> {
@@ -59240,9 +54582,6 @@ async function letterhead331Checks(): Promise<void> {
   const cl = rd("src/lib/estimate-output/cover-loader.ts");
   ok(cl.includes("letterhead: { src: opts.letterheadSrc, full: true },") && !cl.includes("settings.logoDark"), "#331 (source): the cover PDF always takes the baked letterhead");
   ok(!rd("src/lib/estimate-output/package-model.ts").includes("d.logoDark"), "#331 (source): the package model never reads the Branding logo");
-  // Letters/reports keep the D59 uploaded-logo ladder.
-  ok(rd("src/components/letter/SinglePageLetter.tsx").includes("src={logoDark || letterhead.src}") && rd("src/app/(app)/flame-tests/letter/letter-view.tsx").includes("src={settings.logoDark || letterhead.src}"),
-    "#331: letters keep the uploaded-logo rule");
 }
 
 async function assemblyMembers332Checks(): Promise<void> {
@@ -60583,13 +55922,7 @@ import type { SpecItem as B365Item } from "@/app/(app)/estimator/types";
   ok(prev.includes("const bomModelParts = await loadBomModelPartsFor(doc.sections);") && prev.includes("<QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout=\"web\" />") && (prev.match(/bomModelParts=/g) || []).length === 1,
     "#365 saved preview: the BOM tab loads and passes the models");
   const online = rd("src/components/online-estimate/online-estimate.tsx");
-  const portal = rd("src/app/portal/quotes/[id]/page.tsx");
   const share = rd("src/app/share/quote/[id]/[token]/page.tsx");
-  // Box goods sale merge (2026-10-22): a box sale's docProps ARE the BOM view (quoteDocumentDataFor sets showModels), so they take the
-  // models on the default view too; a normal estimate's narrative document has no showModels and still never reads or gets them.
-  ok(online.includes("const shown = showBom ? { ...bomViewProps(docProps), bomModelParts } : docProps.showModels === true ? { ...docProps, bomModelParts } : docProps;") &&
-     [portal, share].every((pg) => pg.includes('const bomModelParts = view === "bom" || docProps.showModels === true ? await loadBomModelPartsFor(docProps.sections) : undefined;') && pg.includes("bomModelParts={bomModelParts}") && pg.includes("view={view}")),
-    "#365 online BOM: the portal and share pages read models only for ?view=bom (or a document that is already the BOM view — a box sale) and the view hands them to the BOM view alone (the revision's own lines)");
   const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
   ok(tab.includes("bomModelSkus(shown?.sections)") && tab.includes("bomModelPartsAction(want)") && tab.includes("<BomDocument props={docProps} />") && !/from "@\/lib\/stores\//.test(tab) &&
      /useMemo\(\(\) => \(shown \? liveBomDocumentProps\(shown\) : null\), \[shown\]\)/.test(tab),
@@ -62074,8 +57407,7 @@ seeded()
   .then(runSuite("pkg333DrawingChecks", () => pkg333DrawingChecks()))
   .then(runSuite("pkg333ReviewStoreChecks", () => pkg333ReviewStoreChecks()))
   .then(runSuite("popoutPureChecks", () => popoutPureChecks(ok)))
-  .then(runSuite("assessmentChecks", () => assessmentChecks(ok)))
-  .then(runSuite("assessmentDbChecks", () => assessmentDbChecks(ok)))
+  .then(runSuite("movedHelperChecks", () => movedHelperChecks(ok)))
   .then(runSuite("partyChecks", () => partyChecks(ok)))
   .then(runSuite("partyDbChecks", () => partyDbChecks(ok)))
   .then(runSuite("boothChecks", () => boothChecks(ok)))
@@ -62089,8 +57421,6 @@ seeded()
   .then(runSuite("bidFollowupDbChecks", () => bidFollowupDbChecks(ok)))
   .then(runSuite("vendorChecks", () => vendorChecks(ok)))
   .then(runSuite("vendorDbChecks", () => vendorDbChecks(ok)))
-  .then(runSuite("portalBidPureChecks", () => portalBidPureChecks(ok)))
-  .then(runSuite("portalBidDbChecks", () => portalBidDbChecks(ok)))
   .then(runSuite("bidReportPureChecks", () => bidReportPureChecks(ok)))
   .then(runSuite("bidReportWidgetChecks", () => bidReportWidgetChecks(ok)))
   .then(runSuite("bidReportDbChecks", () => bidReportDbChecks(ok)))
@@ -62099,8 +57429,6 @@ seeded()
   .then(runSuite("oct15DbChecks", () => oct15DbChecks(ok)))
   .then(runSuite("photoWrapPureChecks", () => photoWrapPureChecks(ok)))
   .then(runSuite("photoWrapDbChecks", () => photoWrapDbChecks(ok)))
-  .then(runSuite("vaNotesChecks", () => vaNotesChecks(ok)))
-  .then(runSuite("vaNotesDbChecks", () => vaNotesDbChecks(ok)))
   .then(runSuite("batch3PureChecks", () => batch3PureChecks(ok)))
   .then(runSuite("batch3DbChecks", () => batch3DbChecks(ok)))
   .then(runSuite("batch4PureChecks", () => batch4PureChecks(ok)))

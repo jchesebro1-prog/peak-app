@@ -79,7 +79,7 @@ function viewedChecks(ok: Ok) {
   ok(panel.includes('data-testid="client-link-viewed"') && panel.includes("{status.viewed}"), "#58: Send & track's Client link panel shows the Viewed stamp");
   ok(/sentRevs: sentRevisionRows\(q\), viewed: viewedStamp\(q\) \}/.test(src("src/lib/quote-share/links.ts")), "#58: the panel's status carries the stamp (staff-only server action)");
   for (const f of ["src/app/share/quote/[id]/[token]/page.tsx", "src/app/share/quote/[id]/[token]/package-page.tsx", "src/app/share/quote/[id]/[token]/package-slots.tsx",
-    "src/components/estimate-output/package-view.tsx", "src/lib/estimate-output/package-model.ts", "src/app/portal/quotes/[id]/page.tsx", "src/app/portal/quotes/[id]/bom-view.tsx"]) {
+    "src/components/estimate-output/package-view.tsx", "src/lib/estimate-output/package-model.ts"]) {
     const t = src(f);
     ok(!t.includes("viewedStamp") && !t.includes("lastViewedAt") && !t.includes("COPY.viewed") && !t.includes("shareOpens"), `#58: the customer never sees it — ${f} reads no open stamp`);
   }
@@ -174,8 +174,6 @@ function presentationChecks(ok: Ok) {
   ok(photoSkusOf([old] as never[]).length === 0 && photoSkusOf([{ ...old, presentation: "narrative" }] as never[]).join() === "A",
     "#61: a system with no stored presentation stays Itemized (existing estimates unchanged); only an explicit Narrative prints narrative");
   ok(src("src/app/(app)/estimator/quote-document.tsx").includes('presentation: sec.presentation || "itemized"'), "#61: the document still reads an absent presentation as Itemized");
-  ok(!src("src/lib/portal-pricing.ts").includes("NEW_SYSTEM_PRESENTATION") && !src("src/lib/assessments/findings-quote.ts").includes("NEW_SYSTEM_PRESENTATION"),
-    "#61: portal-built and assessment-findings systems stay itemized");
 }
 
 /* --- #62 anyone with `create` edits the shared system intros (already so — pinned) --- */

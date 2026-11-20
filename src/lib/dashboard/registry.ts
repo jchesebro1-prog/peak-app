@@ -42,7 +42,6 @@ export const WIDGETS = [
   { id: "my-designs", title: "My designs", desc: "Your budgetary designs in the sandbox.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "my-pipeline", title: "My pipeline", desc: "Your quotes by status with the stage sheet.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "catalog", title: "Catalog", desc: "Price books and part counts.", size: "half", timeframe: "none", surfaces: HOME },
-  { id: "venue-assessments", title: "Venue assessments", desc: "Recent assessments and pending syncs.", size: "half", timeframe: "none", surfaces: HOME },
   { id: "team-activity", title: "Team activity", desc: "What everyone else touched recently.", size: "half", timeframe: "none", surfaces: HOME },
   { id: "needs-attention", title: "Needs attention", desc: "Reviews waiting on you and stale sent quotes.", size: "half", timeframe: "none", surfaces: HOME },
   /* ---- Reports: Sales ---- */
@@ -92,7 +91,7 @@ export const PRESETS: Record<Surface, readonly WidgetId[]> = {
   home: [
     "my-open-pipeline", "my-win-rate", "my-out-for-signature", "my-avg-quote",
     "my-leads", "my-designs", "my-pipeline",
-    "catalog", "venue-assessments", "team-activity", "needs-attention",
+    "catalog", "team-activity", "needs-attention",
   ],
   reports: [
     "total-quoted", "won-value", "win-rate", "avg-quote",

@@ -17,7 +17,7 @@ export type SettingsPerm = "manage_users";
 export const SETTINGS_SECTIONS = [
   { key: "company", label: "Company", desc: "Branding, locations, holidays and dashboard defaults.", perm: "manage_users" },
   { key: "sales", label: "Sales", desc: "Review limits, pipelines and customer fields.", perm: "manage_users" },
-  { key: "field", label: "Field & Venues", desc: "Venue types, site intake, site-visit reasons and internal tags.", perm: "manage_users" },
+  { key: "field", label: "Field & Venues", desc: "Venue types.", perm: "manage_users" },
   { key: "consulting", label: "Consulting", desc: "Phases, disciplines and the assumptions library.", perm: "manage_users" },
   { key: "team", label: "Team & Access", desc: "Team members, roles and permissions.", perm: "manage_users" },
   { key: "data", label: "Data & Tools", desc: "Import, templates, document categories and go-live tools.", perm: "manage_users" },
@@ -77,9 +77,6 @@ export const SETTINGS_CARDS = [
   { key: "customerFields", label: "Customer fields", group: "sales" },
   { key: "estimateOutput", label: "Estimate output", group: "sales" },
   { key: "venueTypes", label: "Venue types", group: "field" },
-  { key: "intakeCatalog", label: "Site intake — type catalog", group: "field" },
-  { key: "visitReasons", label: "Site visits — reason picklist", group: "field" },
-  { key: "surveyTags", label: "Final thoughts — internal tags", group: "field" },
   { key: "consultingPhases", label: "Consulting — phase menu (+ phase weights)", group: "consulting" },
   { key: "consultingDisciplines", label: "Consulting — disciplines", group: "consulting" },
   { key: "consultingAssumptions", label: "Consulting — assumptions library", group: "consulting" },

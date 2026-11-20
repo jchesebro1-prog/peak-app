@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
 import type { FixAddressResult } from "@/lib/address-verify/fix";
-import type { FixTarget, FixTargetDetails, GeoStatus, LatLng, VerifyKind, VerifyList, VerifyStatusFilter } from "@/lib/address-verify/types";
+import type { FixTargetDetails, LatLng, VerifyKind, VerifyList, VerifyStatusFilter } from "@/lib/address-verify/types";
 
 /**
  * Address verification actions (spec 2026-10-09 "Fixing an address", "Where
@@ -64,30 +64,6 @@ export async function townCentreForFixAction(city: string, state: string): Promi
   const { samePlace } = await import("@/lib/address-verify/same-place");
   const [hit] = await pacedSearchCity(c, st, { limit: 1 }, { maxWaitMs: 3_000 });
   return hit && samePlace(c, hit.city) ? { lat: hit.lat, lng: hit.lng } : null;
-}
-
-/**
- * The booking warning: is the address this visit will use verified? Never blocks.
- *
- * "live" mode geocodes an unseen free-text address and WRITES a place-book row
- * per distinct text. Callers must therefore invoke this on blur or debounced
- * (never per keystroke), or every half-typed address leaves a row behind.
- * Task 11's booking form calls it that way.
- */
-export async function addressStatusAction(input: {
-  customerId?: unknown;
-  locationId?: unknown;
-  address?: unknown;
-}): Promise<{ status: GeoStatus; label: string; fix: FixTarget | null }> {
-  await requireUser();
-  const r = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
-  const { addressStatesForVisits } = await import("@/lib/address-verify/targets");
-  const states = await addressStatesForVisits(
-    [{ id: "check", customerId: text(r.customerId, 200) || null, locationId: text(r.locationId, 200) || null, address: text(r.address, 1000) }],
-    "live"
-  );
-  const st = states.get("check");
-  return st ? { status: st.status, label: st.label, fix: st.fix } : { status: "unresolved", label: "", fix: null };
 }
 
 export async function listAddressesToVerifyAction(input?: unknown): Promise<VerifyList> {

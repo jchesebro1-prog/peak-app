@@ -2,9 +2,6 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getSettings, mergedConsultingDisciplines, phaseWeightsFor } from "@/lib/settings";
 import { peakHeaderDefault } from "@/lib/letterhead";
-import { mergedCatalog } from "@/lib/stores/survey-intake";
-import { mergedVisitReasons } from "@/lib/stores/site-visits";
-import { resolveSurveyTags } from "@/lib/survey-tags";
 import { mergedConsultingPhases } from "@/lib/stores/engagements";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { resolveFieldDefs } from "@/lib/customer-fields";
@@ -132,9 +129,6 @@ export default async function SettingsPage({
             peakHeader: peakHeaderDefault(settings),
             dashboardDefaults: settings.dashboardDefaults,
           }}
-          intakeCatalog={mergedCatalog(settings.intakeCatalog)}
-          visitReasons={mergedVisitReasons(settings.visitReasons)}
-          surveyTags={resolveSurveyTags(settings.surveyInternalTags)}
           consultingPhases={mergedConsultingPhases(settings.consultingPhases)}
           consultingAssumptions={mergedConsultingAssumptions(settings.consultingAssumptions)}
           phaseWeights={phaseWeightsFor(

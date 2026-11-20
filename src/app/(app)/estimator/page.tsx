@@ -19,8 +19,6 @@ import {
 import { activeUsers } from "@/lib/users";
 import { getSettings, type Office } from "@/lib/settings";
 import { loadPipelines } from "@/lib/pipelines-server";
-import { get as getSurvey } from "@/lib/stores/surveys";
-import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates, loadBonusRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { loadFreightRule } from "@/lib/freight-rule-load";
 import { allSpecRecords } from "@/lib/stores/spec-records";
@@ -41,7 +39,7 @@ import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
 import { quoteSentOnce } from "@/lib/quote-people-lock";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { sourceForSave } from "@/lib/portal-quote-mode";
+import { sourceForSave } from "@/lib/portal-legacy";
 import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 import { normalizeSystemOrder, sanitizeGroups } from "@/lib/estimate-groups/groups";
 import { sanitizePackageDoc } from "@/lib/package-doc/sanitize";
@@ -51,7 +49,6 @@ import ActionError from "@/components/action-error";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
 import { repricedOnReviseOf } from "@/lib/estimate-reprice/rules";
 import type {
-  AiSource,
   CustomerLite,
   InitialQuote,
   PaymentTerms,
@@ -248,9 +245,6 @@ async function initialFrom(
     notIncluded: typeof q.notIncluded === "string" ? q.notIncluded : null,
     // #333: the Client package selection, normalised on read (absent = defaults).
     packageSelection: normalizePackageSelection(q.packageSelection),
-    // #245 Task 13: the staff Portal panel — present only for a portal-
-    // catalog quote. porItems is a point-in-time read of the loaded spec's
-    // `por` lines; the next Save recomputes what remains (clearPricedPor).
     // Estimator bonuses: judge the source the next save will write (a grid
     // quote saves as "estimator"), the same as saveQuoteAction's canonicalizer.
     bonusSource: sourceForSave(q.source, "estimator"),
@@ -262,24 +256,8 @@ async function initialFrom(
     leadId: q.leadId || null,
     // Box goods sale (spec 2026-10-21): the stored flag (a non-system quote reads false).
     boxSale: boxSaleOf(q),
-    portal:
-      q.source === "portal-catalog"
-        ? {
-            quoteId: q.id,
-            portalFirm: q.portalFirm ?? null,
-            portalReview: q.portalReview ?? null,
-            portalAcceptance: q.portalAcceptance ?? null,
-            portalDecline: q.portalDecline ?? null,
-            porItems: (sections || []).flatMap((s) =>
-              s.items.filter((it) => it.por).map((it) => ({ desc: it.desc, qty: it.qty }))
-            ),
-            // #250: priced curtains still waiting on Peak's confirmation.
-            confirmItems: (sections || []).flatMap((s) =>
-              s.items.filter((it) => it.portalConfirm).map((it) => ({ desc: it.desc, qty: it.qty }))
-            ),
-            back: `/estimator?id=${encodeURIComponent(q.id)}`,
-          }
-        : null,
+    // A stored quote of the removed customer portal: left exact on load, prints its stored "Valid until".
+    portal: q.source === "portal-catalog" ? { portalFirm: q.portalFirm ?? null } : null,
   };
 }
 
@@ -320,34 +298,12 @@ export default async function EstimatorPage({
   const sp = await searchParams;
   const rawId = Array.isArray(sp.id) ? sp.id[0] : sp.id;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
-  // #245 Task 13: the Portal panel's Approve button reuses the Quotes-hub
-  // status action verbatim (setQuoteStatus) — a gate refusal redirects back
-  // here with ?statusError=; surfaced in the panel, cleared on the next load.
-  const portalStatusError = one(sp.statusError) || null;
   // Guided intake hand-off (quotes/new, #160): only applies to a fresh
   // builder — an explicit ?id= always wins.
   const handoff = rawId ? null : readHandoff(sp);
   const preCustomer = handoff?.customerId || undefined;
   // #110: the intake's "Custom category" card hands its name over the same way.
   const preCategory = handoff?.category || undefined;
-
-  /* ---- Scope draft source (S12/D83 — rules-based): resolve the linked
-     survey/inspection. ?surveyId= / ?inspectionId= links the source; we
-     resolve a friendly label so the client can render the Draft-scope
-     affordance (assembly happens server-side in draftQuoteScopeAction). */
-  let aiSource: AiSource | null = null;
-  {
-    const surveyId = one(sp.surveyId);
-    const inspectionId = one(sp.inspectionId);
-    if (surveyId) {
-      const s = await getSurvey(surveyId);
-      if (s) aiSource = { kind: "survey", id: s.id, label: s.venue || s.customer || s.id };
-    } else if (inspectionId) {
-      const ins = await getInspection(inspectionId);
-      if (ins)
-        aiSource = { kind: "inspection", id: ins.id, label: ins.venue || ins.customer || ins.id };
-    }
-  }
 
   const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
   // #221: a quote created by a different builder (flame test, repair,
@@ -513,7 +469,7 @@ export default async function EstimatorPage({
 
   return (
     <>
-    {/* #340: "Quote these findings" created this quote but couldn't link its findings. */}
+    {/* A message a redirect into the Estimator carried (?err=). */}
     <ActionError message={one(sp.err)} />
     <EstimatorClient
       initial={initial}
@@ -536,11 +492,9 @@ export default async function EstimatorPage({
       customers={customers}
       travel={travel}
       next={next}
-      aiSource={aiSource}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
       freightRule={freightRule}
-      portalStatusError={portalStatusError}
       // #368: what the last Revise re-priced (the Build banner shows it while the estimate is a draft).
       repricedOnRevise={repricedOnReviseOf(q?.repricedOnRevise)}
       // Spec records design §6: the Spec select's options, as plain strings.

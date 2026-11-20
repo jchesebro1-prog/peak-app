@@ -5,7 +5,7 @@
  * also stores structured `curtainInputs` and, with a track, a shared
  * `curtainTrackKey`.
  */
-import type { CurtainRequest } from "@/lib/portal-cart-types";
+import type { CurtainRequest } from "@/lib/curtain-request";
 import { parseEstimatorCurtainDesc } from "@/lib/curtain-cut-sheets/parse";
 import { newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
 import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH, isBottomFinish, isMountTypeId, isTopFinish } from "@/lib/curtain-cut-sheets/vocab";

@@ -29,10 +29,9 @@ import {
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
 import type { DocumentCategoryInput } from "@/lib/document-categories";
-import type { SurveyTagInput } from "@/lib/survey-tags";
 import type { QuotePipeline } from "@/lib/pipelines";
 import type { VenueTypeInput } from "@/lib/venue-types";
-import { saveDocumentCategoriesLocked, saveSurveyTagsLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
+import { saveDocumentCategoriesLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
@@ -252,41 +251,6 @@ export async function saveLogoAction(
       return { ok: false as const, error: "Logo is too large — keep it under ~300 KB." };
   }
   await setSettings({ [kind]: dataUrl });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/**
- * Site-intake type catalog (survey-intake.ts DEFAULT_INTAKE_CATALOG
- * overrides). Only known categories are accepted; each list is trimmed,
- * de-blanked and capped so a bad payload can't bloat the settings row.
- */
-export async function saveIntakeCatalogAction(catalog: Record<string, string[]>) {
-  await requirePerm("manage_users");
-  const { DEFAULT_INTAKE_CATALOG } = await import("@/lib/stores/survey-intake");
-  const clean: Record<string, string[]> = {};
-  for (const key of Object.keys(DEFAULT_INTAKE_CATALOG)) {
-    const list = catalog?.[key];
-    if (!Array.isArray(list)) continue;
-    clean[key] = list
-      .map((t) => String(t ?? "").trim())
-      .filter(Boolean)
-      .slice(0, 60);
-  }
-  await setSettings({ intakeCatalog: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Site-visit reason picklist (D76 — DEFAULT_VISIT_REASONS overrides).
- *  Trimmed, de-blanked, capped; an empty list falls back to the defaults. */
-export async function saveVisitReasonsAction(reasons: string[]) {
-  await requirePerm("manage_users");
-  const clean = (Array.isArray(reasons) ? reasons : [])
-    .map((t) => String(t ?? "").trim())
-    .filter(Boolean)
-    .slice(0, 40);
-  await setSettings({ visitReasons: clean });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
@@ -723,20 +687,6 @@ export async function saveDocumentCategoriesAction(
   // #343 — merged on the stored list under the settings row lock (a failed
   // read throws: it must never pass for "no list saved yet").
   const merged = await saveDocumentCategoriesLocked(input);
-  if (!merged.ok) return merged;
-  revalidatePath("/", "layout");
-  return { ok: true };
-}
-
-/* ---- Venue Assessments internal tags (#344) ---- */
-
-/** Whole-list save of Settings → Field → Final thoughts tags, merged on the stored list under the settings lock
- *  (a failed read throws — it must never merge onto the starter list and silently drop custom tags). */
-export async function saveSurveyTagsAction(
-  input: SurveyTagInput[]
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requirePerm("manage_users");
-  const merged = await saveSurveyTagsLocked(input);
   if (!merged.ok) return merged;
   revalidatePath("/", "layout");
   return { ok: true };

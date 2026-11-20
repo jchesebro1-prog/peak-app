@@ -3,7 +3,7 @@ import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
-import type { PortalVisibility } from "@/lib/portal-visibility";
+import type { PortalVisibility } from "@/lib/catalog-internal";
 import type { RackPartFacts } from "@/lib/rack/types";
 import type { TagFields } from "@/lib/design/conduit-riser/tags";
 import { orderNumberOf } from "@/lib/catalog-rename/sku";
@@ -218,15 +218,8 @@ export type CatalogPart = {
   specUpdatedAt?: number;
   specUpdatedBy?: string;
 
-  /** Customer portal visibility (#245 Task 5, spec §1.3) — Auto (the rule
-   *  decides, see src/lib/portal-visibility.ts), Show (always browsable), or
-   *  Hide (never quotable or browsable in the portal). Absent means "auto";
-   *  the part editor stores auto by omitting the key rather than writing the
-   *  string, same convention as the rest of this doc's optional fields, so
-   *  mergeUpsert never has to distinguish "never set" from "explicitly set
-   *  back to auto". Written only through mergeUpsert — no importer or
-   *  enricher patch object carries this key, so a price-book import,
-   *  DaVinci enrich, or ports-rule apply never clears a stored override. */
+  /** A stored override of the removed customer portal (Auto / Show / Hide). Nothing reads or edits it any more; a
+   *  save from the part editor leaves the stored value alone (the form no longer posts the key). */
   portalVisibility?: PortalVisibility;
   /** #293: the part's write-once customer paragraph (plain text, D488 rules)
    *  — sales prose for the Estimator's narrative, distinct from specBody (CSI

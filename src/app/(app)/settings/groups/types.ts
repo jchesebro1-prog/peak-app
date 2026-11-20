@@ -60,9 +60,6 @@ export type SettingsData = {
   meId: string;
   meName: string;
   settings: CompanySettingsVM;
-  intakeCatalog: Record<string, string[]>;
-  visitReasons: string[];
-  surveyTags: import("@/lib/survey-tags").SurveyTag[];
   consultingPhases: string[];
   consultingAssumptions: string[];
   /** #145 D165/D166 — one weight per CURRENT phase (phaseWeightsFor already

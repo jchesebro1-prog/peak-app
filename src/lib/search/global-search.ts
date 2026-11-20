@@ -15,10 +15,6 @@ import type { Party } from "@/lib/parties/rules";
 import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 import { partSearchHaystack, staffPartLabel, type SearchPartLike } from "@/lib/catalog-rename/sku";
-import { normalizeAssessment } from "@/lib/stores/assessments";
-import { normalizeFinding } from "@/lib/stores/findings";
-import { sitesForCompanies } from "@/lib/identity/sites";
-import { assessmentSearchResult, findingSearchResult, matchesAssessment, matchesFinding } from "@/lib/assessments/integration";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
@@ -67,19 +63,14 @@ export async function globalSearch(rawQ: string): Promise<Group[]> {
   // the doc), then apply the precise per-field filter below. Avoids
   // materializing whole tables — the catalog alone is ~10.7k rows.
   const CANDIDATES = 100;
-  const [quotes, designs, surveys, inspections, companies, people, parts, partialQuotes, assessmentDocs, findingDocs] =
+  const [quotes, designs, companies, people, parts, partialQuotes] =
     await Promise.all([
       searchDocs("quotes", q, CANDIDATES),
       searchDocs("designs", q, CANDIDATES),
-      searchDocs("surveys", q, CANDIDATES),
-      searchDocs("inspections", q, CANDIDATES),
       allCompanies(),
       allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
       quotesByPartialNumber(q, CANDIDATES),
-      // #340 — assessments and findings: SQL candidates (anywhere in the doc), the precise match below.
-      searchDocs("assessments", q, CANDIDATES),
-      searchDocs("findings", q, CANDIDATES),
     ]);
 
   const groups: Group[] = [];
@@ -181,32 +172,6 @@ export async function globalSearch(rawQ: string): Promise<Group[]> {
         color: "#3155a8",
       }))
   );
-  add(
-    "Surveys",
-    surveys
-      .filter((d) => matches(q, d.id, d.customer, d.venue))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.customer || d.id),
-        sub: `${d.id} · ${String(d.venue || "site survey")}`,
-        href: `/venue-assessments`,
-        letter: "S",
-        color: "#1f7a52",
-      }))
-  );
-  add(
-    "Inspections",
-    inspections
-      .filter((d) => matches(q, d.id, d.customer, d.venue))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.customer || d.id),
-        sub: `${d.id} · ${String(d.venue || "rigging inspection")}`,
-        href: `/inspections`,
-        letter: "I",
-        color: "#7b3f8a",
-      }))
-  );
   // Companies + People search the identity tables directly (D85); volumes
   // are small, and matching in JS mirrors the per-field precision above.
   add(
@@ -248,34 +213,6 @@ export async function globalSearch(rawQ: string): Promise<Group[]> {
         letter: "P",
         color: "#1f7a52",
       }))
-    );
-  }
-  // #340 assessments (AS-1001 · customer, venue · status) and findings (the printed id, the description). A company
-  // whose NAME matches also brings its assessments in (the doc holds the customer id, never the name).
-  {
-    const byName = companies.filter((c) => matches(q, c.name)).slice(0, 10).map((c) => c.id);
-    const nameHits = byName.length ? await listDocsByField("assessments", "customerId", byName) : [];
-    const seenA = new Set<string>();
-    const cands = [...assessmentDocs, ...nameHits].filter((d) => (seenA.has(d.id) ? false : (seenA.add(d.id), true))).map((d) => normalizeAssessment(d));
-    const custBy = new Map(companies.map((c) => [c.id, c.name]));
-    const siteBy = new Map<string, string>();
-    const siteGroups = await sitesForCompanies([...new Set(cands.map((a) => a.customerId))]);
-    for (const list of siteGroups.values()) for (const s of list) siteBy.set(s.id, s.name || s.locationName || s.id);
-    const nm = (a: { customerId: string; siteId: string }) => ({ customer: custBy.get(a.customerId) ?? a.customerId, venue: siteBy.get(a.siteId) ?? "" });
-    add(
-      "Assessments",
-      cands
-        .filter((a) => matchesAssessment(q, a, nm(a)))
-        .sort((a, b) => b.visitDate - a.visitDate || b.id.localeCompare(a.id, undefined, { numeric: true }))
-        .map((a) => assessmentSearchResult(a, nm(a)))
-    );
-    add(
-      "Findings",
-      findingDocs
-        .map((d) => normalizeFinding(d, d.id))
-        .filter((f) => matchesFinding(q, f))
-        .sort((a, b) => (a.printedId === null ? 1 : 0) - (b.printedId === null ? 1 : 0) || (a.printedId ?? "").localeCompare(b.printedId ?? "", undefined, { numeric: true }) || a.key.localeCompare(b.key))
-        .map((f) => findingSearchResult(f))
     );
   }
   add(

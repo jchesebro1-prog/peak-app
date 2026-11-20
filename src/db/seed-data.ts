@@ -7,9 +7,6 @@ import { customersSeed } from "./seeds/customers";
 import { quotesSeed } from "./seeds/quotes";
 import { catalogSeed } from "./seeds/catalog";
 import { leadsSeed } from "./seeds/leads";
-import { surveysSeed } from "./seeds/surveys";
-import { flameJobsSeed } from "./seeds/flame-jobs";
-import { inspectionsSeed } from "./seeds/inspections";
 import { designsSeed } from "./seeds/designs";
 import { gridProjectsSeed } from "./seeds/grid-projects";
 import { vendorProfilesSeed } from "./seeds/vendors";
@@ -103,9 +100,6 @@ const DEMO_SEEDS: Array<[CollectionName, () => Doc[]]> = [
   ["catalog_parts", catalogSeed as unknown as () => Doc[]],
   ["quotes", quotesSeed as unknown as () => Doc[]],
   ["leads", leadsSeed as unknown as () => Doc[]],
-  ["surveys", surveysSeed as unknown as () => Doc[]],
-  ["flame_jobs", flameJobsSeed as unknown as () => Doc[]],
-  ["inspections", inspectionsSeed as unknown as () => Doc[]],
   ["designs", designsSeed as unknown as () => Doc[]],
   ["grid_projects", gridProjectsSeed as unknown as () => Doc[]],
   ["vendor_profiles", vendorProfilesSeed as unknown as () => Doc[]],
@@ -155,13 +149,33 @@ export const CONFIG_COLLECTIONS: readonly CollectionName[] = [
   "subassemblies",
   "spec_records",
   "spec_record_revisions",
-  // Collections of removed features (Assist, Inbox, Krisp): the tables stay in place, unused — the go-live wipe
-  // must not empty them.
+  // Collections of removed features: the tables stay in place, unused — the go-live wipe must not empty them.
+  // Stage 2 (Assist, Inbox, Krisp).
   "assist_runs",
   "comms",
   "meetings",
   "recordings",
-  "venue_profiles", // #340: the rolling per-venue profile is authored knowledge, not demo data
+  // Stage 3 (flame tests, inspections, venue assessments / site visits, the Assessments engine, the portal).
+  "surveys",
+  "site_visits",
+  "flame_jobs",
+  "inspections",
+  "assessments",
+  "findings",
+  "venue_profiles",
+  "portal_carts",
+  // Stage 1 (projects, repairs, rentals, tasks, Rewards, triage) — the same rule, added with stage 3.
+  "projects",
+  "repair_jobs",
+  "assignments",
+  "tasks",
+  "task_templates",
+  "equipment_items",
+  "equipment_locations",
+  "equipment_bookings",
+  "reward_ledger",
+  "triage_snapshots",
+  "triage_marks",
 ];
 
 export const DEMO_COLLECTIONS: CollectionName[] = (Object.keys(

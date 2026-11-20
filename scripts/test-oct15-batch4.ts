@@ -8,7 +8,6 @@ import type { Ok } from "./ok-type";
 import { effectivePriceDate, priceBooks } from "../src/lib/catalog-books";
 import { pricesAsOf } from "../src/lib/fixture-assemblies";
 import { catalogEffectiveAtFor } from "../src/lib/vendor-status";
-import { unitPriceFor } from "../src/lib/portal-price-rules";
 import { marginToMarkup as mk } from "../src/lib/markup";
 
 const ROOT = join(__dirname, "..");
@@ -43,10 +42,6 @@ function priceDateChecks(ok: Ok) {
   // #354 review M6: the portal's stale-cost rule reads the part's own latest date, so a re-confirmed price un-stales.
   const stale = { markup: mk(0.3), staleCostMonths: 12, now };
   const oldPart = { mfr: "Acme", cost: 10, list: 20, pricedAt: now - 400 * DAY };
-  ok(unitPriceFor({ ...oldPart, pricedAt: effectivePriceDate(oldPart) }, stale).porReason === "stale-cost" &&
-     !unitPriceFor({ ...oldPart, pricedAt: effectivePriceDate({ ...oldPart, priceDate: fresh }) }, stale).por,
-    "#354 review: a price a recent file re-confirmed (priceDate) is not stale on the portal; an unconfirmed old one still is");
-  ok((src("src/lib/portal-catalog-index.ts").match(/pricedAt: effectivePriceDate\(p\)/g) || []).length === 2, "#354 review: the portal index reads effectivePriceDate for both its part rows");
   const hub = src("src/app/(app)/import/catalog-commit.ts");
   ok(!hub.includes("setPriceListEffective"), "#32: the Import hub no longer re-dates the manufacturer's book");
   const reg = src("src/app/(app)/import/registry.ts");

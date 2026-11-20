@@ -43,8 +43,6 @@ export const NAV: NavEntry[] = [
     mobileLabel: "EST",
     children: [
       { key: "quotes", label: "Quotes", href: "/quotes" },
-      /* #288 (spec §1.7): the staff work queue of customer-built portal quotes. */
-      { key: "portal-quotes", label: "Portal quotes", href: "/quotes/portal" },
       /* #22 Mine/All nav children — querystring hrefs render verbatim.
        * KNOWN cosmetic limitations (accepted, logged in PUNCHLIST #22):
        * activeKeyFor is pathname-only, so a My-X child never lights its own
@@ -64,16 +62,6 @@ export const NAV: NavEntry[] = [
   },
   {
     kind: "group",
-    key: "pm",
-    label: "Service",
-    mobileLabel: "SVC",
-    children: [
-      { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
-      { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
-    ],
-  },
-  {
-    kind: "group",
     key: "crm",
     label: "Customers",
     mobileLabel: "CRM",
@@ -85,8 +73,6 @@ export const NAV: NavEntry[] = [
       { key: "vendors", label: "Vendors", href: "/vendors" }, // #122 — vendor companies + price-list ledger
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
-      { key: "field", label: "Venue Assessments", href: "/venue-assessments" },
-      { key: "assessments", label: "Assessments", href: "/assessments" }, // #340 — the assessments engine
     ],
   },
   {
@@ -144,9 +130,6 @@ export function activeKeyFor(pathname: string): string {
   // /design → designoverview fallback below would otherwise light every
   // /design/specs/* route as the Design overview tab.
   if (pathname.startsWith("/design/specs")) return "specs";
-  // #288: the Portal quotes queue — before the "/quotes" segment map below,
-  // which would otherwise light every /quotes/* route as Quotes.
-  if (pathname === "/quotes/portal" || pathname.startsWith("/quotes/portal/")) return "portal-quotes";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/leads": "leads",
@@ -156,15 +139,11 @@ export function activeKeyFor(pathname: string): string {
     "/design": "designoverview",
     "/knowledge": "knowledgeoverview", // #136 — every /knowledge/* route lights the KNOWLEDGE pill
     "/reviews": "reviews",
-    "/flame-tests": "flametests",
-    "/inspections": "inspections",
     "/companies": "companies",
     "/vendors": "vendors",
     "/people": "people",
     "/venues": "venues",
     "/customers": "companies", // legacy route redirects to /companies (D85)
-    "/venue-assessments": "field",
-    "/assessments": "assessments", // #340 — every /assessments/* route lights the Assessments child
     "/catalog": "catalog", // #213 — lights the Catalog child of Estimating
     "/reports": "reports",
     "/templates": "settings",

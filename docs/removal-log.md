@@ -450,3 +450,304 @@ would be worth having.
 - `AGENTS.md` got a short stage-2 note at the top of the phase list; phases 7, 8, 26 (Drive half),
   42 (Phase 3), 46, 53–58, 60, 63 still describe removed code. `MASTER-HOWTO.md` and `docs/specs/*`
   are untouched.
+
+## Stage 3 — done 2026-11-20
+
+Scope: Flame Tests (dashboard, scheduler, results, today sheet, quote builder, letter, report,
+renewals), Rigging Inspections (inbox, capture editor, report, quote builder, pricing, renewals,
+issue library), Venue Assessments / Field Survey (`FS-####`, the capture editor, ink / sketch pads,
+field files, survey travel, the field-sheet PDF, `/api/surveys/*`, site visits and their request
+queue), the Assessments engine (`AS-####`, findings register, venue profiles, pick lists,
+`/assessments`, `/print/assessment*`, the photo queue), the customer portal (everything under
+`/portal`, grants and sign-in links, carts, the portal catalog and departments, portal service
+quotes and pricing, the staff Portal quotes queue, the Portal panel, bell groups, the bidder / owner
+rules, document sharing) and the service engines and shared pieces that then had no caller. There
+was no removal map for this stage; the scope came from the hand-off specs
+(`docs/handoff/client-portal-spec.md`, `flame-inspections-spec.md`, `venue-assessments-spec.md`)
+and from the import graph.
+
+State at hand-off: `tsc --noEmit` 0 errors; `eslint src --quiet` 0 errors; every `scripts/test-*.ts`
+exits 0 (figures under Tests). Nothing committed by the stage-3 agent. No table, migration or
+`src/db/schema.ts` change; no data script. `npm run build` was NOT run, and the dev server was never
+started — nothing here was looked at in a browser.
+
+### Rules that changed
+
+- **Old flame-test and inspection quotes are rows only.** Same treatment stage 1 gave repair and
+  rental quotes: `quoteBuilderHref` sends all four types to their Quotes-hub row (`/quotes?id=`),
+  the hub hides the "Open … quote" button (`hasNoBuilder` in `src/lib/quote-links.ts`), and they no
+  longer get a saved PDF (`pdfKindForQuoteType` is `"quote"` for system estimates, else null). Status
+  moves, history, value and the estimate number (`FLM-` / `RIG-`) still read. "+ New quote" and the
+  guided intake no longer offer them; the hub's type filter chips for them are gone (`?type=` still
+  filters).
+- **A quote the portal created is an ordinary quote.** Its stored `source` (`portal-catalog`,
+  `portal-service`) is kept on save, it opens and lists like any other, and nothing portal-specific
+  is offered: no Portal panel, no Approve / Decline of an acceptance, no "Portal" chip. Three stored
+  facts are still honoured so an old one reads the same: a price-on-request line prints "Price on
+  request" until it is priced (the save then clears `por`), its "Valid until" / review / tax lines
+  still print, and its prices are not rounded to $25 on load. The hub's "Accepted" chip (a customer
+  accepted it in the portal; mark it Won to confirm) stays, as does the "accepted in portal" row in
+  a company's activity feed.
+- **Leads convert without a site survey.** The convert gate (a completed linked survey, or "Skip
+  survey") is gone with surveys; Convert lead just converts. "Request site visit" and the visit /
+  survey chips are gone from the lead drawer, and marking a lead lost no longer closes a visit.
+- **Client goals is a plain field.** The Estimator's "From site visit ▾" menu and the automatic
+  pre-fill from `?surveyId=` are gone; the per-system Client goals box and the Discipline select are
+  unchanged. "Draft from survey/inspection" (More ▾) is gone.
+- **The customer estimate no longer mentions a portal.** The Acceptance block on every estimate PDF
+  read "To proceed, sign and return this quote — or accept it online through your <company>
+  customer portal." It now reads "To proceed, sign and return this quote." Four stored document
+  baselines were edited for exactly that sentence (see Tests).
+- **Offline sync carries booth captures only.** `SYNCABLE_COLLECTIONS` and the device's
+  `FIELD_COLLECTIONS` are both `["booth_captures"]`. "Download today's jobs" (the chip button and
+  `/api/sync/today`) is gone — every job it listed was a removed record.
+- **The bell** lost "Survey requests to schedule", "Site visit requests", "Inspections to
+  schedule", "Flame tests due for renewal", the three portal groups and "New documents from
+  customers", with their Account switches. It now holds approvals, back-from-review and lead
+  follow-ups.
+- **Documents are team files.** The Internal / Shared choice, the visibility filter and the Shared
+  chip are gone from the Documents card; every new upload is stored `internal` / `team`. A file a
+  customer once uploaded keeps its "From customer" chip (and "New" until someone downloads it or
+  presses Mark seen).
+- **Catalog.** The part editor's Customer visibility select (Auto / Show / Hide) and its reason
+  line are gone, as is the assembly form's Portal category box and Catalog → Departments. Stored
+  `portalVisibility` and `portalCategory` values are left alone: the part form no longer posts the
+  key (so `mergeUpsert` keeps it) and the assembly draft still round-trips its stored category.
+- **Estimating Rules** lost the Flame-test pricing and Inspection pricing groups, the seven
+  flights-over-drive rates, the four portal rates and the Venue class doctrine editor. "Portal &
+  freight" is now "Freight" (same group key and rate ids). "Reset all" no longer writes the flame /
+  repair / inspection rate blobs, and the one-time margin → markup conversion no longer touches
+  them.
+- **Settings.** Field & Venues holds only Venue types (the site-intake type catalog, the site-visit
+  reasons and the Final thoughts tags are gone). Review limits shows System and Consulting columns
+  only; limits stored for flame / repair / inspection / rental quotes round-trip through a save
+  untouched and still apply to an old quote of that kind.
+
+### Deleted (309 files: 307 under `src/`, 2 test scripts)
+
+- Screens / routes: `src/app/(app)/{flame-tests,inspections,venue-assessments,assessments}/`,
+  `src/app/portal/`, `src/app/(app)/quotes/portal/`, `src/app/(app)/catalog/departments/`,
+  `src/app/print/{letter,assessment,assessment-findings}/`,
+  `src/app/api/{assessments,surveys,venue-assessments}/`, `src/app/api/sync/today/`,
+  `home-venue-assessments.tsx`, `quote-builder-travel.ts`, `_letters/util.tsx`,
+  `companies/[id]/portal-access.tsx`, `companies/delete-visit-button.tsx`,
+  `settings/survey-tags-card.tsx`, and in the Estimator `portal-panel.tsx`, `ai-scope-modal.tsx`,
+  `output-actions.ts`.
+- Libraries: `src/lib/{assessments,ink,field-files}/`, every `src/lib/portal*.ts` (27 files), every
+  `src/lib/survey-*.ts`, `flametest-engine, inspection-engine, renewal-outreach, service-pricing,
+  service-quote-inputs, travel-plan, trip-travel, tier-seed, field-lists, lead-thread,
+  venue-doctrine, venue-3d-views, venue-assessment-certs, venue-assessment-sheet,
+  visit-edit-rights, visit-fields`, the stores `assessment, assessments, assessment-rows,
+  assessment-picklists, findings, venue-profiles, flame-jobs, inspections, surveys, survey-intake,
+  linesets, site-visits, venue-classes, portal-carts, portal-departments`,
+  `parties/{portal-bid,portal-bid-server,portal-owner-bom}.ts`, `quote-pdf/portal-access.ts`,
+  `estimate-output/{goals,survey-goals-server}.ts`, `address-verify/targets.ts`,
+  `sync/today-jobs.ts`.
+- Components: `src/components/{assessments,ink}/`, `letter/{SinglePageLetter,FitOnePage}.tsx`
+  (`letter/print-button.tsx` stays — Design and cut sheets use it), `section-rail/`,
+  `sync/download-today.tsx`, `quote-pdf/saved-pdf-button.tsx`, `address-fix/address-flag.tsx`,
+  `service-total-field.tsx`, `travel-mode-panel.tsx`, `lift-rental-panel.tsx`,
+  `tier-seed-prompt.tsx`, `venue-availability-check.tsx`.
+- Seeds: `src/db/seeds/{flame-jobs,inspections,surveys}.ts`.
+- Assets: the two extra copies of `peak-letterhead.jpg` under the flame-test and inspection letter
+  routes. The baked letterhead is now read from `src/app/(app)/estimator/peak-letterhead.jpg` (the
+  same bytes; `src/lib/letterhead-path.ts` and `next.config.ts` follow).
+- Scripts: `test-assessments.ts`, `test-va-notes.ts` (neither had a `package.json` entry; both ran
+  inside the harness chain).
+
+### Later-stage files touched
+
+Stage 4 (Design), cut minimally and still present:
+
+- `design/engagements/data.ts` — the Oversight tab's site-visit list is always empty.
+- `design/engagements/actions.ts` — `linkVisitAction` answers "Site visits are no longer part of
+  this app." (the view still imports it).
+- `design/engagements/letter/page.tsx` — imports the letterhead from the Estimator.
+- `design/assemblies/{page,fixture-builder,fixture-form}.tsx` — the Portal category box only;
+  `design/assemblies/actions.ts` — one call that dropped the portal catalog cache.
+- `src/lib/design/grid-virtual-parts.ts`, `src/lib/rack/part-facts.ts` — import path of
+  `isInternalCategory` only.
+
+Nothing of stage 4 was deleted early.
+
+### New small modules (helpers moved out of deleted files)
+
+- `src/lib/price-rounding.ts` — from `service-pricing.ts`: `PRICE_STEP`, `PRICE_OVERRIDE_MAX`,
+  `LOW_MARKUP_WARN`, `roundToStep`, `ceilToStep`, `normalizePriceOverride`, `fmtDollars`, `fmtPct`,
+  `typedPriceWarning`, `PriceWarning`. Unchanged code; the Estimator's system price and the review
+  limits use it. The flame / inspection / repair finish functions, the lift rental and the travel
+  line split were not kept.
+- `src/lib/portal-legacy.ts` — `sourceForSave`, `clearPricedPor` (what a stored portal quote still
+  needs from an Estimator save).
+- `src/lib/card-number.ts` — `looksLikeCardNumber` (the client-response PO guard).
+- `src/lib/catalog-internal.ts` — `isInternalCategory`, the stored `PortalVisibility` type.
+- `src/lib/curtain-request.ts` — the `CurtainRequest` type (`SpecItem.curtainInputs`).
+- `src/lib/text-caps.ts` — `capGraphemes`, `INVISIBLE_STRIP` (assembly names).
+- `src/lib/csv.ts` — `csvCell`, `toCsv` (the sourcing report's formula-safe CSV).
+- `src/lib/photo-resize.ts` — the device photo shrink (Booth mode's card photo), with its own
+  `PHOTO_CAPS`.
+- `src/lib/identity/short-code.ts` — `CODE_RE` (the `short_code` columns on companies and venues
+  stay and stay validated; nothing prints a code any more).
+- `hasNoBuilder` in `src/lib/quote-links.ts`; `REVIEW_KINDS_SHOWN` in `src/lib/review-limits.ts`.
+- `scripts/test-moved-helpers.ts` — the deleted suites' checks for the moved helpers, plus pins on
+  this stage's wiring (see Tests).
+
+### Wiring
+
+- Nav: the "Service" group (Flame Tests, Rigging Inspections) is gone; Estimating lost Portal
+  quotes; Customers lost Venue Assessments and Assessments. Top level is Home · Estimating ·
+  Customers · Design · Knowledge.
+- Home: the Venue assessments widget is gone (registry, preset, the legacy `surveys` layout key).
+  A saved layout naming it is skipped.
+- ⌘K: no Surveys, Inspections, Assessments or Findings groups.
+- Company page: the Site surveys, Assessments, Findings, Portal access and Site visits cards and the
+  "Portal activity" line are gone. Venue page: the Venue profile, Assessments and Findings cards are
+  gone. Activity feeds and venue history list notes, quotes and consulting engagements. The venues
+  directory's "last activity" comes from quotes and engagements.
+- Settings → Data → Addresses to verify lists venues and leads (no Visits chip). The booking-form
+  address check (`addressStatusAction`) is gone.
+- Import / Export: `flametests`, `inspections`, `surveys` types removed. The quotes import still
+  accepts `flame_test` / `inspection` as a type for history rows.
+- Templates: only the consulting proposal and consulting specification remain (the flame,
+  inspection, repair, renewal-email, service-completion and warranty templates are gone; overrides
+  stored for them stay in the settings row).
+- Middleware: `portal` is no longer exempt from the team session, so `/portal/...` now redirects to
+  sign-in and then 404s. `print/`, `share/`, `d/ds/`, `c/`, `placeholders/`, the booth and lead
+  intake APIs and the cron stay public as before.
+- `next.config.ts`: the Chromium trace entries for `/flame-tests*`, `/inspections*`, `/repairs/quote`
+  and `/portal/estimate`, the `/portal/catalog/doc/:id` frame header and the `/field-survey` →
+  `/venue-assessments` redirects are removed.
+- Offline sync: see above. `src/app/api/sync/push` lost its assessment / finding / survey branches;
+  the generic whole-document branch stays as the seam but no collection reaches it (booth captures
+  have their own path).
+- Go-live wipe: `surveys`, `site_visits`, `flame_jobs`, `inspections`, `assessments`, `findings`,
+  `venue_profiles`, `portal_carts` joined the keep-list (`CONFIG_COLLECTIONS`). **Stage 1's
+  collections were added too** (`projects`, `repair_jobs`, `assignments`, `tasks`,
+  `task_templates`, `equipment_*`, `reward_ledger`, `triage_*`) — stage 1 had left them wipeable.
+  Every `DOC_TABLES` registration is untouched.
+- Settings type: `intakeCatalog`, `visitReasons`, `surveyInternalTags`, `venueDoctrine` are typed
+  `unknown` (stored values stay, nothing reads them). Rates: `FlametestRates`, `RepairRates`,
+  `InspectionRates`, their defaults, getters and setters, the fly rates and `PORTAL_RATE_IDS` are
+  gone; `TravelRates` is `{ roadFactor, mph }`.
+- `vercel.json`, `.env.example`, `DEPLOY.md`: nothing in them belonged to this stage (checked).
+  npm dependencies: none became unused.
+
+### Judgement calls
+
+1. **`"engine-owned-flow"` stays on `setStatus`.** It was the service builders' approval-gate
+   bypass and no app code passes it now, but 55 places in five kept test scripts move their fixture
+   quotes to sent / won with it. Removing it cut those tests; it was put back and documented as
+   test-only.
+   The portal's `"portal-firm"` bypass is removed.
+2. **Stored portal quotes keep printing as they did** (price on request, Valid until, the two
+   standing lines) rather than being normalised — `portalDocumentExtras` and `isPortalCatalog` stay
+   in the document code. Only the acceptance sentence changed, for every estimate.
+3. **The Scope-only stamp is dead but stored.** `Quote.bidScopeOnly` (the owner's portal showed a
+   bid estimate without prices) is no longer written by `addBidder`, party revives or Move / Copy →
+   New estimate, and the staff "Owner portal: Scope only" chip and note are gone. `update()` still
+   drops it from incoming saves.
+4. **Portal grants are not revoked.** The `portal_grants` rows and their encrypted link secrets stay
+   as stored; with `/portal` gone nothing accepts them. The grant actions were deleted.
+5. **Lead intake and Booth mode still offer "Flame testing" and "Inspections" as interests.** Peak
+   still does that work; only the screens moved out of this app.
+6. **Review limits**: the retired kinds are hidden, not deleted (see Rules).
+7. **The catalog rename engine still rewrites SKUs inside stored `portal_carts`** (the stage-1 /
+   stage-2 precedent for `projects` and `drive_photo_sync`).
+8. **`/quotes/new?replaces=<old flame or inspection draft>`** treats the old quote as a system
+   quote (the type is no longer on the intake); nothing links there for those types any more.
+9. **Venue calendars stay** on the venue page (feed URL, CSV import, manual windows). The
+   "is this time open?" check the schedulers called is gone from the actions; its pure helpers in
+   `src/lib/venue-availability.ts` are unused but tested.
+
+### Tests
+
+Method as in stages 1–2, with the tooling rebuilt (it was not in the repo): a compiler-driven prune
+through the TypeScript language service (imports of deleted modules, then every statement that no
+longer compiles, repeated until clean), a dead-path pass (a string naming a deleted repo file),
+then each script run alone on a throwaway `PGLITE_PATH` and the failures triaged by hand. Every
+change is listed in `docs/removal-stage3-pruned-tests.txt`.
+
+Result on 2026-11-20: `test-review-and-spec.ts` 15,579 PASS / 0 FAIL, `ALL PASSED`, exit 0 (stage 2:
+19,764 — the difference is the removed features' assertions); every other `scripts/test-*.ts`
+exits 0, each run alone. The suite chain at the end of the harness was compared before and after:
+299 → 294 entries, the six removed being `assessmentChecks`, `assessmentDbChecks`, `vaNotesChecks`,
+`vaNotesDbChecks`, `portalBidPureChecks`, `portalBidDbChecks`, the one added being
+`movedHelperChecks`. The harness went from 62,145 to about 57,500 lines; `test-bids.ts` from 2,049
+to 1,184 (the portal bidder rule and the owner's Scope-only BOM).
+
+What was ported rather than cut:
+
+- Imports of the nine moved helpers were re-pointed (`remap`), so the `#217` rounding checks, the
+  `#245` / `#248` / `#250` `clearPricedPor` / `sourceForSave` checks, the `looksLikeCardNumber` and
+  `isInternalCategory` checks all still run.
+- `scripts/test-moved-helpers.ts` (new, 37 checks, in the chain as `movedHelperChecks`): the csv,
+  photo-resize and short-code checks from the deleted `test-assessments.ts`, plus pins for this
+  stage — old service quote types open the hub row and have no PDF, review-limit kinds, the sync
+  lists, the go-live keep-list, the nav and the middleware matcher.
+- Assertions that used a removed type as their example were moved to a kept one: the intake
+  (`flame_test` → `consulting`), the print token "another kind" (`flame` → `cover`),
+  `printPathFor`, `boxSwitchHint`, the nav shape checks, the go-live reset checks, the
+  markup-settings conversion (now on the `pricing_rules` blob, with a new check that the service
+  rate blobs are left as stored).
+
+Stored baselines edited: `docs/superpowers/fixtures/293-quote-document-baseline.json`,
+`364-bom-view-baseline.json`, `p2b-quote-document-no-alternates.json`,
+`p5-quote-document-no-document.json` — in each, only the text
+" — or accept it online through your Peak Systems Group customer portal" was removed from the
+acceptance sentence (28 occurrences in all). The byte-for-byte document checks pass against them.
+
+What this does not prove: the standalone scripts run only their pure halves when run alone; the
+database halves run inside the harness. `scripts/smoke-routes.ts` had 56 routes of removed screens
+taken out and was type-checked, but it needs a running dev server and was not run. No removed
+feature's own behaviour is tested any more.
+
+Lessons for stage 4:
+
+- **Do not remove a "dead" option that tests use as a seam** without grepping `scripts/` first
+  (`engine-owned-flow`). The compile prune turns one removed union member into dozens of silently
+  cut kept-feature tests. After each prune, read the log for cuts whose text does not name a
+  removed feature.
+- The compile prune needs four companions, all used here: a **remap** pass for helpers that moved
+  (before pruning), a **dead-path** pass, a **dead-dir** pass for loops like
+  `for (const svc of ["flame-tests", "inspections"])` whose paths are built from a template (the
+  dead-path pass cannot see them and they crash at the top level), and a **crash cut** for what is
+  left. Top-level statements are not inside `runSuite`, so one bad read kills the run before any
+  suite starts — loop: run, cut the outermost script frame, re-run.
+- Keep "it is gone" checks: the dead-path pass must skip `!has("…")`, `existsSync` and reads inside
+  `try { } catch { gone = true }` (the last one was emptied here and restored by hand).
+- A dead-path string inside an array of live paths should lose only its element.
+- `git stash` is not a safe way to compare against HEAD in this tree (staged deletions come back
+  unstaged, and a failed `&&` chain can run the pop without the push). Use
+  `git show HEAD:<path>` / `git archive HEAD`.
+- An orphan check over the import graph (files unreachable from any route or script) found the
+  second ring of deletions quickly; a word-count check for exports named in only one place found
+  most of the third. Neither sees a pair of dead functions that reference each other.
+
+### Loose ends
+
+- **Before this ships, every phone or tablet must have synced.** After the deploy the push endpoint
+  ignores surveys, inspections, flame jobs, assessments and findings, so anything still waiting in
+  a device's outbox for those is never stored. Rebuild both native apps with the release (the
+  client's `FIELD_COLLECTIONS` changed), as after stages 1 and 2.
+- `public/sw.js` keeps its cache name (`quartzite-shell-v2`); a device that visited a removed
+  screen can still show the cached copy while offline until the cache name is next bumped.
+- Files in Blob stay: `surveys/…`, `assessments/…` photos, portal-era quote PDFs, customer uploads
+  under `documents/…`. Nothing lists or serves the first two any more.
+- `portal_grants` (with encrypted sign-in secrets) and `portal_carts` rows stay, unused.
+- Hollow test suites: some harness suites for portal-era work (#245, #248, #288, #289 and others)
+  keep their fixture setup with most assertions gone. They pass and can be deleted whole.
+- Unused but harmless in kept code: `checkAvailability` / `windowsBetween` in
+  `src/lib/venue-availability.ts` and `refreshIfStale` in the venue-calendar store,
+  `venueAddressState` in `address-verify/state.ts`, the `visit` member of `VerifyKind`, the
+  `flame` / `inspection` / `repair` / `survey` / `visit` kinds in `src/lib/venue-match.ts`,
+  `ONLINE_COPY.portalUnavailable`, `roundToStep`, `revisionAwaitingPdf`, the service-credit helpers
+  in `src/lib/credit-line.ts` (they still net a stored credit on an old service quote), the
+  `flameTest` / `inspection` / `portal*` / `renewalOf` / `findingKeys` fields on the `Quote` type,
+  the `contact-us` and `coming-soon` placeholder images.
+- `src/lib/stores/pricing.ts` keeps the group key `portal` for the Freight group (a saved
+  Estimating Rules view preference names it).
+- `src/middleware.ts` still uses the `middleware` file name, which this Next version's docs mark as
+  renamed to `proxy`. Not touched here.
+- `AGENTS.md` got a short stage-3 note; phases 4, 5 (Field Survey), 6 (the capture editors), 15,
+  19, 20, 22, 23, 28, 30, 59, 61 and the portal slice of 62 still describe removed code.
+  `README.md`, `MASTER-HOWTO.md` and `docs/specs/*` are untouched.

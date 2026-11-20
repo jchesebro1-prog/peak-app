@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import { ShortList } from "@/components/short-list";
-import type { DocumentOption, DocumentRowVM, DocumentVisibility } from "@/lib/document-rules";
+import type { DocumentOption, DocumentRowVM } from "@/lib/document-rules";
 import { checkDocumentName, formatBytes, MAX_DOCUMENT_LABEL } from "@/lib/document-files";
 import { isAlreadySaved, putDocumentFile } from "./upload-client";
 import {
@@ -52,7 +52,6 @@ type Queued = {
   id: string;
   file: File;
   category: string;
-  visibility: DocumentVisibility;
   status: "ready" | "uploading" | "saving" | "failed";
   progress: number;
   error: string | null;
@@ -66,7 +65,6 @@ type Draft = {
   id: string;
   title: string;
   category: string;
-  visibility: DocumentVisibility;
   siteId: string;
   projectId: string;
   notes: string;
@@ -149,7 +147,6 @@ export function DocumentsCardClient({
   const fileInput = useRef<HTMLInputElement>(null);
   const [venueF, setVenueF] = useState<string>("all");
   const [categoryF, setCategoryF] = useState<string>("all");
-  const [visibilityF, setVisibilityF] = useState<"all" | DocumentVisibility>("all");
   const [queue, setQueue] = useState<Queued[]>([]);
   const [uploadSite, setUploadSite] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -165,10 +162,9 @@ export function DocumentsCardClient({
           if (venueF === "none" ? r.siteId !== null : r.siteId !== venueF) return false;
         }
         if (categoryF !== "all" && r.category !== categoryF) return false;
-        if (visibilityF !== "all" && r.visibility !== visibilityF) return false;
         return true;
       }),
-    [rows, scope, venueF, categoryF, visibilityF]
+    [rows, scope, venueF, categoryF]
   );
 
   // The category filter also offers any archived category a row still uses.
@@ -206,7 +202,6 @@ export function DocumentsCardClient({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         file,
         category: defaultCategory,
-        visibility: "internal",
         status: refused ? "failed" : "ready",
         progress: 0,
         error: refused,
@@ -251,7 +246,6 @@ export function DocumentsCardClient({
             fileName: item.file.name,
             mime: item.file.type,
             category: item.category,
-            visibility: item.visibility,
             siteId: uploadSiteId,
             projectId: fixedProjectId,
           });
@@ -289,7 +283,6 @@ export function DocumentsCardClient({
       id: r.id,
       title: r.title,
       category: r.category,
-      visibility: r.visibility,
       siteId: r.siteId ?? "",
       projectId: r.projectId ?? "",
       notes: r.notes,
@@ -370,16 +363,6 @@ export function DocumentsCardClient({
               </option>
             ))}
           </select>
-          <select
-            style={SELECT}
-            aria-label="Filter by visibility"
-            value={visibilityF}
-            onChange={(e) => setVisibilityF(e.target.value as "all" | DocumentVisibility)}
-          >
-            <option value="all">Internal + shared</option>
-            <option value="internal">Internal only</option>
-            <option value="shared">Shared with customer</option>
-          </select>
         </div>
       )}
 
@@ -459,16 +442,6 @@ export function DocumentsCardClient({
                     </option>
                   ))}
                 </select>
-                <select
-                  style={SELECT}
-                  aria-label={`Visibility for ${q.file.name}`}
-                  value={q.visibility}
-                  disabled={locked}
-                  onChange={(e) => setItem(q.id, { visibility: e.target.value as DocumentVisibility })}
-                >
-                  <option value="internal">Internal</option>
-                  <option value="shared">Shared</option>
-                </select>
                 {q.status === "failed" && !checkDocumentName(q.file.name, q.file.size) && (
                   <button type="button" style={LINK_BTN} disabled={busy} onClick={() => retry(q.id)}>
                     Retry
@@ -521,11 +494,6 @@ export function DocumentsCardClient({
                   <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>
                     {r.title}
                   </span>
-                  {r.visibility === "shared" ? (
-                    <span style={chip("#3155a8", "#e9eefb", "#d4ddf3")}>Shared</span>
-                  ) : (
-                    <span style={chip("#5b616e", "#f1f2f5", "#e4e7ec")}>Internal</span>
-                  )}
                   {r.source === "customer" && <span style={chip("#8a6d1f", "#fbf3dd", "#f0e2bd")}>From customer</span>}
                   {r.isNew && <span style={chip("#b4543a", "#f8ece7", "#eccfc4")}>New</span>}
                 </div>
@@ -549,7 +517,7 @@ export function DocumentsCardClient({
                   style={LINK_BTN}
                   aria-label={`Download ${r.title}`}
                   // Downloading a customer upload marks it seen server-side;
-                  // refresh shortly after so the New chip and the bell catch up.
+                  // refresh shortly after so the New chip catches up.
                   onClick={r.isNew ? () => window.setTimeout(() => router.refresh(), 1500) : undefined}
                 >
                   Download
@@ -689,7 +657,6 @@ function EditDocumentDialog({
       const r = await updateDocumentAction(draft.id, {
         title: draft.title,
         category: draft.category,
-        visibility: draft.visibility,
         siteId: draft.siteId || null,
         projectId: draft.projectId || null,
         notes: draft.notes,
@@ -738,13 +705,6 @@ function EditDocumentDialog({
                     {c.label}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label style={LABEL}>
-              Visibility
-              <select style={INPUT} value={draft.visibility} onChange={(e) => setDraft({ ...draft, visibility: e.target.value as DocumentVisibility })}>
-                <option value="internal">Internal — team only</option>
-                <option value="shared">Shared — visible in the customer portal</option>
               </select>
             </label>
             <label style={LABEL}>

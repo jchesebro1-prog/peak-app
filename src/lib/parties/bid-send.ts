@@ -28,6 +28,4 @@ export const BID_SEND_COPY = {
   gone: "That bidder wasn't found.",
   linkCopied: "Link copied.",
   /** #348 follow-up (Jeff 2026-10-15): read-only, sticky — the Bidders card line and the Bid chip's dialog line. */
-  scopeOnlyNote: "The owner sees this estimate as Scope only in the portal — a parts list with no prices, no PDF and no Accept. This stays on even if bidders are removed.",
-  scopeOnlyChip: "Owner portal: Scope only",
 } as const;

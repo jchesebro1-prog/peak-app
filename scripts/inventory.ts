@@ -49,9 +49,6 @@ import { customersSeed } from "../src/db/seeds/customers";
 import { quotesSeed } from "../src/db/seeds/quotes";
 import { catalogSeed } from "../src/db/seeds/catalog";
 import { leadsSeed } from "../src/db/seeds/leads";
-import { surveysSeed } from "../src/db/seeds/surveys";
-import { flameJobsSeed } from "../src/db/seeds/flame-jobs";
-import { inspectionsSeed } from "../src/db/seeds/inspections";
 import { designsSeed } from "../src/db/seeds/designs";
 
 function pad(s: string, n: number) {
