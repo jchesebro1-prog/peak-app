@@ -48,8 +48,10 @@ import {
 import { planOwnerStamps, tombstoneStamps } from "@/lib/comms-owner-stamp";
 import { MAILBOX_OWNER_NOBODY } from "@/lib/stores/comms-visibility";
 import { duplicateNameIds, foldTeamName, teamNameError } from "@/lib/team-names";
+import { PRIVATE_EMAIL_TITLE, redactEmailRows, triageMayActOnThread } from "@/lib/triage/thread-access";
 import type { CommThread } from "@/lib/stores/comms";
 import type { MailboxViewer } from "@/lib/stores/comms-visibility";
+import type { SnapshotRow } from "@/lib/triage/types";
 import type { Ok } from "./test-inbox-org";
 import { sanitizePushedDoc, SERVER_OWNED_FIELDS } from "@/lib/sync/server-owned";
 
@@ -238,13 +240,16 @@ export async function threadVisibilityDbChecks(ok: Ok): Promise<void> {
   const { runReadTool } = await import("@/lib/assist/ask-tools-server");
   const { loadThreadFor, loadThreadReadable } = await import("@/lib/assist/thread-access");
   const { ownThread, ownThreadIds } = await import("@/lib/inbox-thread-guard");
+  const { createTaskFromThread } = await import("@/lib/inbox-task-write");
   const apply = await import("@/lib/inbox-org/apply");
   const { draftReplyForThread } = await import("@/lib/assist/reply-server");
+  const { suggestTasksForThread } = await import("@/lib/assist/tasks-server");
   const { assistSettingsOf } = await import("@/lib/assist/config");
   const { rememberAddress, resweepThreads, linkThread } = await import("@/lib/gmail/linking");
   const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
   const { setEmails, softDeleteContact } = await import("@/lib/identity/contacts");
   const { upsertRenewalDraft } = await import("@/lib/renewal-outreach");
+  const { redactRowsForViewer } = await import("@/lib/triage/redact-server");
   const { fakeProvider } = await import("./test-assist");
   const { seeded } = await import("@/db");
   const { mailboxViewer } = await import("@/lib/mailbox-viewer");
@@ -694,6 +699,19 @@ async function mailboxIdentityDbChecks(
 
 /* ---------------- source pins ---------------- */
 
+/** The thread-taking Inbox server-action files. (`meetings/actions.ts` takes
+ *  meeting ids, which follow canSeeMeeting — not threads.) */
+const ACTION_FILES = [
+  "src/app/(app)/inbox/actions.ts",
+  "src/app/(app)/inbox/link-actions.ts",
+  "src/app/(app)/inbox/link-popup-actions.ts",
+  "src/app/(app)/inbox/organize-actions.ts",
+  "src/app/(app)/inbox/site-visit-actions.ts",
+  "src/app/(app)/inbox/task-actions.ts",
+  "src/app/(app)/inbox/assist-actions.ts",
+  "src/app/(app)/inbox/vendor-file-actions.ts",
+  "src/app/(app)/inbox/attach-actions.ts", // Batch 6 #64
+];
 /** A parameter list that carries a thread id. */
 const THREAD_PARAM = /\b(?:id|threadId|threadIds|ids|list)\??\s*:|\bthreadId\b|\bComposePayload\b|\bCreateSiteVisitInput\b|\bThreadTaskRequest\b/;
 /** What counts as checking the owner before the write (directly, or by the
@@ -768,6 +786,8 @@ export function threadVisibilityPins(ok: Ok): void {
   const ren = read("src/lib/renewal-outreach.ts");
   ok(/opts\.me\?\.id \? await findDraftByLink\(opts\.linkType, opts\.linkId, \{ owner: await mailboxViewer\(opts\.me\) \}\) : null/.test(ren), "renewal outreach (#341, #349): the draft lookup is the acting user's own mailbox, by identity");
 
+  // triage
+  const tri = read("src/app/(app)/triage/actions.ts");
   ok(
     (tri.match(/if \(!triageMayActOnThread\((?:t|thread), await mailboxViewer\(user\)\)\) return \{ ok: false, error: NOT_YOURS \};/g) || []).length === 2 &&
       tri.indexOf("const t = await getThread(plan.id);") < tri.indexOf('setThreadStatus(plan.id, "closed")') &&
@@ -775,6 +795,7 @@ export function threadVisibilityPins(ok: Ok): void {
       /const target = await actorByName\(String\(assignee \|\| ""\)\);/.test(tri),
     "triage (#341): Done and Reassign re-read the thread at action time and act only on my own or still-assigned thread"
   );
+  const triPage = read("src/app/(app)/triage/page.tsx");
   ok(/const rows = viewingSelf \? view\.rows : await redactRowsForViewer\(view\.rows, user\);/.test(triPage) && /<TriageRows rows=\{rows\}/.test(triPage) && !/rows=\{view\.rows\}/.test(triPage), "triage admin view (#341): a teammate's rows are redacted on the server before they reach TriageRows");
 
   // bell
@@ -869,6 +890,11 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
   const { globalSearch } = await import("@/lib/search/global-search");
   const { loadThreadFor, loadThreadReadable } = await import("@/lib/assist/thread-access");
   const { ownThread } = await import("@/lib/inbox-thread-guard");
+  const { createTaskFromThread } = await import("@/lib/inbox-task-write");
+  const { createAskTask } = await import("@/lib/assist/ask-task-write");
+  const { handOff } = await import("@/lib/task-plan/write");
+  const { reshareTaskThread } = await import("@/lib/task-thread-share");
+  const T = await import("@/lib/stores/tasks");
   const { getDb, seeded } = await import("@/db");
   const { users } = await import("@/db/schema");
   const { inArray } = await import("drizzle-orm");
@@ -946,6 +972,10 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
     ok(!(await sees(ME, ids.hand)), "task share db (#351): updateTask back to me by a non-owner (updateTaskAction's path) shares nothing");
     const r2 = await handOff({ kind: "task", id: ht!.id, userId: THIRD.id }, OWNER);
     ok(r2.ok && (await T.getTask(ht!.id))?.threadShare?.to === THIRD.id && (await sees(THIRD, ids.hand)) && !(await sees(ME, ids.hand)), "task share db (#351): the owner's hand-off re-stamps the share for the new assignee");
+    await T.patchTask(ht!.id, (t) => {
+      t.assigneeUserId = ME.id;
+      t.assigneeName = ME.name;
+    });
     ok(!(await sees(ME, ids.hand)) && !(await sees(THIRD, ids.hand)), "task share db (#351): any other re-assign leaves the stamp inert (to ≠ assignee)");
     await T.updateTask(ht!.id, { threadShare: { threadId: ids.hand, by: OWNER.id, to: ME.id, at: NOW } } as never);
     ok(!(await sees(ME, ids.hand)), "task share db (#351): updateTask never takes a stamp from a patch");

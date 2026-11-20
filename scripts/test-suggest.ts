@@ -811,6 +811,10 @@ export async function suggestEntryPins(ok: Ok): Promise<void> {
   const read = (f: string) => readFileSync(f, "utf8");
   const ctl = read("src/components/assist/suggest-estimate.tsx");
   ok(/^"use client";/.test(ctl) && /await startSuggestion\(source, router\)/.test(ctl) && /if \(inFlight\.current\) return;\s*inFlight\.current = true;/.test(ctl) && /if \(r\.ok\) \{\s*\/\/ stay busy/.test(ctl) && /\{busy \? \(compact \? SUGGEST_BUSY_SHORT : SUGGEST_BUSY_LABEL\) : readyHref \? "Suggest again" : "Suggest estimate"\}/.test(ctl) && /Suggestion ready → Open/.test(ctl) && /role="alert"/.test(ctl), "suggest entry control: one shared control — ref double-click guard, busy label, Suggestion ready → Open + Suggest again, inline error");
+  for (const f of ["src/components/assist/suggest-estimate.tsx", "src/lib/assist/suggest-client.ts", "src/app/(app)/inbox/thread-reader.tsx", "src/app/(app)/leads/lead-drawer.tsx", "src/app/(app)/venue-assessments/[id]/controls.tsx", "src/app/(app)/inbox/meetings/meeting-reader.tsx", "src/components/brief/brief-card-view.tsx"]) {
+    const bad = [...read(f).matchAll(/^import (?!type )[^;]*from "([^"]+)";/gm)].map((m) => m[1]).filter((p) => /stores\/estimate-suggestions|@\/db|-server$|\/session$|suggest-entry|meetings\/load$|@\/lib\/settings$|key-store/.test(p));
+    ok(bad.length === 0, `suggest entry purity: ${f} imports no suggestion store / db / server module${bad.length ? ` (${bad.join(", ")})` : ""}`);
+  }
   const clientImports = ["src/components/assist/suggest-estimate.tsx", "src/lib/assist/suggest-client.ts"].flatMap((f) => [...read(f).matchAll(/^import (?!type )[^;]*from "([^"]+)";/gm)].map((m) => m[1]));
   ok(clientImports.every((p) => ["react", "next/link", "next/navigation", "@/lib/assist/suggest-client"].includes(p)), `suggest entry purity: the control and the client helper import only React/Next and the client helper (${clientImports.join(", ")})`);
   const srv = read("src/lib/assist/suggest-entry-server.ts");

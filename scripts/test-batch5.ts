@@ -250,6 +250,7 @@ async function wonVersionDbChecks(ok: Ok) {
     ok(a2.status === "draft" && priceOf(a2) === 2000 && a2.value === 1900, `#59 db: reopening loads the version that won (price ${priceOf(a2)}, value ${a2.value})`);
     ok(auto.reason === "manual" && auto.note === REOPEN_AUTOSAVE_NOTE && priceOf(auto) === 3000 && auto.status === "won", "#59 db: the edits made after the win are kept as a revision first");
     ok(quoteRewardCredit(a2) === 100, `#59 db: the Rewards credit is the locked amount, re-homed on the won version (${quoteRewardCredit(a2)})`);
+    const led = (await L.ledgerForQuote(A)).map((e) => e.id).sort();
     // Re-win from the reopened draft with no edits: wonRev = a fresh snapshot? No — the live quote matches the last SEND, so that send.
     await Q.setStatus(A, "won", "Pat", bypass);
     ok((await Q.get(A))!.wonRev === sentA.rev, "#59 db: re-winning unchanged points at the same send again");

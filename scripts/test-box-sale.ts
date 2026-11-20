@@ -388,6 +388,32 @@ async function finalReviewChecks(ok: Ok) {
     id: "Q-fr", name: "Gym", status: "draft", updatedAt: 77, estNo: 1042,
     pdf: { status: "ready", at: 20, savedAt: 20, blobPath: "quote-pdfs/Q-fr/cur.pdf" }, contentChangedAt: 10, revisions: [], ...extra,
   } as never);
+  const fakes = (quote: Quote) => {
+    const calls: string[] = [];
+    const st = { q: quote, threads: [] as Array<{ attachments: Array<{ name: string }> }>, drafts: [] as Array<{ attachments: Array<{ name: string }> }> };
+    const deps: EstimateEmailDeps = {
+      now: () => NOW,
+      getQuote: async (id) => (id === st.q.id ? st.q : null),
+      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
+      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
+      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
+      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
+      claimSend: async (_id, by, now) => { calls.push("claimSend"); return { ok: true, claim: { by, until: now + 120_000 } }; },
+      releaseSend: async () => { calls.push("releaseSend"); },
+      applySignature: async (body) => { calls.push("applySignature"); return body; },
+      sendQuote: async (_id, actor) => {
+        calls.push("sendQuote");
+        st.q = { ...st.q, status: "sent", revisions: [{ rev: 1, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-fr/rev-1.pdf" }] } as never;
+        return { ok: true };
+      },
+      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/x"; },
+      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec as never); return { threadId: "C-1", delivery: "local" as const }; },
+      createDraftThread: async (spec) => { calls.push("createDraftThread"); st.drafts.push(spec as never); return { threadId: "C-2" }; },
+      recordEmail: async () => { calls.push("recordEmail"); return true; },
+      roster: async () => [{ id: "u1", name: "Sam Mills", status: "active" }],
+    };
+    return { deps, calls, st };
+  };
   const input = (o: Record<string, unknown> = {}) => ({ to: "pat@school.org", cc: "", subject: "S", body: "B {link}", attachEstimate: true, attachCover: false, followUpDays: 0, asOf: 77, ...o });
   const laborSecs = { sections: [sys("s1", "Rigging", [line(1)]), sys("s2", "Install", [line(2, { labor: true })])], mobs: [], document: DOC };
 
