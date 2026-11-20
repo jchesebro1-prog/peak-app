@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { REOPENED_AT_WON_NOTICE, reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
-import { can } from "@/lib/team";
 import {
   get,
   setStatus,

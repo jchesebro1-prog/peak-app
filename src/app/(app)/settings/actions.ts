@@ -38,7 +38,7 @@ import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
 import type { DocumentCategoryInput } from "@/lib/document-categories";
 import type { SurveyTagInput } from "@/lib/survey-tags";
-import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
+import type { QuotePipeline } from "@/lib/pipelines";
 import type { VenueTypeInput } from "@/lib/venue-types";
 import { saveDocumentCategoriesLocked, saveSurveyTagsLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";

@@ -7,7 +7,6 @@ import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
 import { loadBonusRates } from "@/lib/stores/pricing";
 import { settleBonusRemovals, stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, discountsForSections, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
-import { can } from "@/lib/team";
 import {
   create,
   get,
@@ -75,7 +74,6 @@ import { limitToLivePatch, liveSaveRefusal } from "@/lib/estimate-live-save/rule
 import { liveKey } from "@/lib/estimate-live-save/live-key";
 import { pdfAppendixKey } from "@/lib/quote-pdf/appendix-key";
 import { documentRevStamp, type QuotePdfView } from "@/lib/quote-pdf/state";
-import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
@@ -859,10 +857,6 @@ function settleRewardCredit(
   }
   const had = prior && customerId && (prior.customerId || null) === customerId ? quoteRewardCredit(prior) : 0;
   return sanitizeRewardCredit(sections, Math.min(had, Math.max(0, totals(withoutRewardCredit(sections), 0).grand)));
-}
-
-function fmtMoney(n: number): string {
-  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /** The stored change key, re-read after a status move (a Lost move can clear the Rewards credit from the spec). */

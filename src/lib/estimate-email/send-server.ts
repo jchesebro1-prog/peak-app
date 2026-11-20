@@ -1,7 +1,6 @@
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { renderCoverPdf as renderCoverPdfLive } from "@/lib/estimate-output/cover-pdf-server";
 import { coverPdfFileName } from "@/lib/estimate-output/cover";
-import { chicagoDayEnd, leadEstimator } from "@/lib/estimate-output/responses";
 import { pdfStorage } from "@/lib/quote-pdf/storage";
 import { applyOutboundSignature } from "@/lib/email-signature";
 import { gmailEnabled, personalKey } from "@/lib/gmail/config";
@@ -17,7 +16,7 @@ import {
 import { signatureFor } from "@/lib/stores/signatures";
 import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
-import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
+import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, parseRecipients, withoutAddresses } from "./compose";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
@@ -119,7 +118,6 @@ export const RECIPIENTS_MAX = 20;
 export const RECIPIENTS_RAW_MAX = 4_000;
 export const SUBJECT_MAX = 300;
 export const BODY_MAX = 20_000;
-const DAY_MS = 86_400_000;
 
 /** A failure whose message is written for the user (a dep throws it). */
 export class EstimateEmailError extends Error {

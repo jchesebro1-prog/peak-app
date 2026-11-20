@@ -17,7 +17,6 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
     actionError,
     actionNotice,
     applySync,
-    customerId,
     gateRefused,
     live,
     loadedId,

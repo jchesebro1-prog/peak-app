@@ -7,7 +7,6 @@ import {
 } from "@/db/doc-tables";
 import { getDb } from "@/db";
 import { eq, sql } from "drizzle-orm";
-import type { Pipelines } from "@/lib/pipelines";
 import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
 import { pushSurvey } from "@/lib/stores/surveys";

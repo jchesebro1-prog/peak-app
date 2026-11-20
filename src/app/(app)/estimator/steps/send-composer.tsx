@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   composerInitial,
-  FOLLOW_UP_OPTIONS,
   primaryLabel,
   SEND_STEP_IDS,
   SEND_UI_COPY,

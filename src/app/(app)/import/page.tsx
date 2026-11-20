@@ -7,8 +7,6 @@ import { IMPORT_TYPES, getTypeMeta } from "./types";
 import { linksCustomer, type CustomerRef } from "./link";
 import { allCounts, UPDATABLE_TYPES } from "./registry";
 import { PastePreview } from "./controls";
-import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
-import { mergedConsultingPhases } from "@/lib/stores/engagements";
 
 export const metadata = { title: "Import & export — Quartzite-6" };
 
@@ -148,7 +146,6 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
   const resultRaw = one(sp.r);
   const errRaw = tab === "import" ? one(sp.err) : "";
   const counts = await allCounts();
-  const settings = await getSettings();
 
   // #137 — the contacts / venues previews resolve each row's customer
   // client-side against this index, with the same rule the commit uses

@@ -13,7 +13,7 @@ import * as Inspections from "@/lib/stores/inspections";
 import * as Surveys from "@/lib/stores/surveys";
 import * as Quotes from "@/lib/stores/quotes";
 import { loadPipelines } from "@/lib/pipelines-server";
-import { DEFAULT_PIPELINES, projectPipelineFor, resolveProjectStage, type Pipelines } from "@/lib/pipelines";
+import { DEFAULT_PIPELINES, type Pipelines } from "@/lib/pipelines";
 import * as Catalog from "@/lib/stores/catalog";
 import { importResolverFor } from "@/lib/stores/catalog-renames";
 import type { ImportResolver } from "@/lib/catalog-rename/import-resolve";
@@ -21,12 +21,9 @@ import { looksLikeSpecId, resolveArticleRef, resolveSectionRef } from "@/lib/spe
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
 import type { SpecLookup } from "@/lib/displays-api";
-import { allUsers, addUser, setRoles, activeUsers } from "@/lib/users";
-import type { Role } from "@/lib/team";
-import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
-import { mergedConsultingPhases } from "@/lib/stores/engagements";
+import { allUsers, addUser, setRoles } from "@/lib/users";
 import { getTypeMeta, IMPORT_TYPE_KEYS, type ImportTypeMeta } from "./types";
-import { norm, isoToMs, visibleColumns, UNKNOWN_VALUE, type FieldDef, type PreparedRow } from "./parse";
+import { norm, isoToMs, visibleColumns, type FieldDef, type PreparedRow } from "./parse";
 import { baseVenueKind } from "@/lib/identity/venue-defaults";
 import {
   matchContact,
@@ -151,15 +148,6 @@ let seqN = 0;
 function seq(): number {
   return ++seqN;
 }
-
-const EQUIPMENT_CATEGORIES = [
-  "speakers",
-  "monitors",
-  "lighting",
-  "consoles",
-  "control-io",
-  "other",
-] as const;
 
 /**
  * The patch the catalog writer hands `Catalog.mergeUpsert`, shared by its
