@@ -38,10 +38,10 @@ export function parentHref(
       return `/inspections/${id}`;
     case "flame_job":
       return `/flame-tests/results?job=${id}`;
+    // Repairs and Projects were removed: an old recording filed on one opens the recordings list.
     case "repair_job":
-      return `/repairs/results?job=${id}`;
     case "project":
-      return `/projects/${id}`;
+      return "/recordings";
     case "engagement":
       return `/design/engagements/${id}`;
     case "site_visit":

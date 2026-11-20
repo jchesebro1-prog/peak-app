@@ -16,10 +16,8 @@ export const ASK_PAGE_MAX = 500;
 const QUOTE_BUILDER_PATHS: ReadonlySet<string> = new Set([
   "/estimator",
   "/flame-tests/quote",
-  "/repairs/quote",
   "/inspections/quote",
   "/design/engagements/quote",
-  "/rentals/quote",
 ]);
 
 /** `/<base>/<id>` record pages (one segment after the base, nothing deeper). */

@@ -56,8 +56,7 @@ export async function quoteFromFindings(rawKeys: unknown, kind: QuoteKind, user:
   const keys = list.map((f) => f.key);
 
   if (kind === "repair") {
-    const qs = new URLSearchParams({ customer: customerId, findings: keys.join(",") });
-    return { ok: true, href: `/repairs/quote?${qs.toString()}` };
+    return { ok: false, error: "Repair quotes were removed — choose an Estimator quote." };
   }
   if (kind !== "estimator") return { ok: false, error: "Choose a repair quote or an Estimator quote." };
 

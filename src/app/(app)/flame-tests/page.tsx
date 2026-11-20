@@ -394,23 +394,6 @@ export default async function FlameTestsPage({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
           <Link
-            href="/field-work"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 7,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#fff",
-              background: "#1f7a52",
-              borderRadius: 10,
-              padding: "10px 15px",
-              textDecoration: "none",
-            }}
-          >
-            Log results{dueTodayCount ? " · " + dueTodayCount : ""}
-          </Link>
-          <Link
             href="/flame-tests/scheduling"
             style={{
               display: "inline-flex",

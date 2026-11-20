@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
  * existing Peak login.
  */
 async function startCalendarConnect(req: NextRequest, origin: string): Promise<NextResponse> {
-  const calendarPage = new URL("/calendar", origin);
+  const calendarPage = new URL("/account", origin);
   if (!googleConfigured()) {
     calendarPage.searchParams.set("calconnect", "disabled");
     return NextResponse.redirect(calendarPage);

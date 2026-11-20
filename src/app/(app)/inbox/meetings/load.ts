@@ -214,7 +214,7 @@ function workHref(type: WorkType, id: string): string {
     case "lead": return `/leads?lead=${e}`;
     case "quote": return `/quotes?id=${e}`;
     case "survey": return `/venue-assessments/${e}`;
-    case "project": return `/projects/${e}`;
+    case "project": return `/inbox?view=meetings`;
     case "engagement": return `/design/engagements/${e}`;
     case "site_visit": return `/venue-assessments`;
   }
@@ -226,7 +226,7 @@ function noteHref(kind: string, id: string): string | null {
     case "customer": return `/companies/${e}`;
     case "site": return `/venues/${e}`;
     case "lead": return `/leads?lead=${e}`;
-    case "project": return `/projects/${e}`;
+    case "project": return null;
     case "engagement": return `/design/engagements/${e}`;
     case "quote": return `/quotes?id=${e}`;
     default: return null;

@@ -102,7 +102,7 @@ async function finishCalendarConnect(
   origin: string,
   calState: { userId: string }
 ): Promise<NextResponse> {
-  const dest = new URL("/calendar", origin);
+  const dest = new URL("/account", origin);
 
   const session = await auth();
   const uid = session?.user?.id;

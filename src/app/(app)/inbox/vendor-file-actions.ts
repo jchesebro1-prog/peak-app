@@ -96,6 +96,5 @@ export async function fileThreadAction(
   if (!r.ok) return r;
   revalidatePath("/inbox");
   revalidatePath("/estimator");
-  revalidatePath("/projects", "layout");
   return { ok: true, label: r.label };
 }

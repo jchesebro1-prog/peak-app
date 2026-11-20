@@ -124,7 +124,7 @@ export function hrefFor(kind: RefKind, id: string, hint: RefHrefHint = {}): stri
     case "lead":
       return `/leads?lead=${e}`;
     case "project":
-      return `/projects/${e}`;
+      return "/companies"; // Projects were removed
     case "thread":
       return `/inbox?thread=${e}`;
     case "meeting":
@@ -136,6 +136,6 @@ export function hrefFor(kind: RefKind, id: string, hint: RefHrefHint = {}): stri
     case "part":
       return `/catalog?q=${e}`;
     case "task":
-      return "/queue";
+      return "/"; // Tasks were removed
   }
 }
