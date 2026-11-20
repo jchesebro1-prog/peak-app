@@ -284,7 +284,6 @@ async function cmdEnrich(hosted: boolean) {
     const city = get(r, cols.city);
     const state = get(r, cols.state);
     const zip = get(r, cols.zip);
-    const [co] = await db.select().from(companies).where(eq(companies.id, coId)).limit(1);
     if (!co) {
       missingCo++;
       if (unmatched.length < 40) unmatched.push(name);
@@ -296,14 +295,8 @@ async function cmdEnrich(hosted: boolean) {
     const coHasAddress = !!(co.address || "").trim();
     if (coHasAddress && !OVERWRITE) coSkipped++;
     else {
-      if (COMMIT)
-        await db
-          .update(companies)
-          .set({ address: street, city, state, zip, updatedAt: Date.now() })
-          .where(eq(companies.id, coId));
       coUpdated++;
     }
-    const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
     if (!site) {
       venueAbsent++;
       continue;
@@ -311,13 +304,6 @@ async function cmdEnrich(hosted: boolean) {
     const siteHasAddress = !!(site.address || "").trim();
     if (siteHasAddress && !OVERWRITE) venueSkipped++;
     else {
-      if (COMMIT)
-        await db
-          .update(sites)
-          // lat/lng deliberately untouched — `geocode` stamps those next, off
-          // the street address this pass just wrote.
-          .set({ address: street, city, state, zip, updatedAt: Date.now() })
-          .where(eq(sites.id, siteId));
       venueUpdated++;
     }
   }

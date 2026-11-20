@@ -77,13 +77,6 @@ async function main() {
 
   // ---- Document collections -------------------------------------------------
   const seedIds = new Map<string, Set<string>>();
-  for (const [coll, make] of SEEDS) {
-    try {
-      seedIds.set(coll, new Set(make().map((d) => d.id)));
-    } catch {
-      seedIds.set(coll, new Set());
-    }
-  }
 
   console.log("");
   console.log("DOCUMENT COLLECTIONS");

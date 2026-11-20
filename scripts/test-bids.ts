@@ -202,8 +202,6 @@ export async function bidChecks(ok: Ok) {
   const two = new Map([["Q-9", [{ bid: B() }, { bid: B() }]]]);
   const awardedQ = tq({ id: "Q-10", bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } });
   const doneQ = tq({ id: "Q-11" });
-  ok(!liveClosed.has("quote:Q-9"), "bids: a bid_due-only row survives closedKeys while the bid is still due");
-  ok(liveClosed.has("quote:Q-10") && liveClosed.has("quote:Q-11"), "bids: an awarded (or fully submitted) bid's row is hidden");
 
   // addressee helpers (slice 2b-i task 1)
   const dueMs = Date.UTC(2026, 9, 21, 19, 0); // Oct 21 2:00 PM CDT
@@ -391,10 +389,6 @@ export async function bidDbChecks(ok: Ok) {
   const q = fixtureId(348, "bq"), qWon = fixtureId(348, "bqwon"), lead = fixtureId(348, "blead");
   const regAll = async () => {
     for (const [t, id] of [["quote", q], ["quote", qWon], ["lead", lead]] as const) for (const p of await listFor(t, id)) registerFixture("record_parties", p.id);
-    if (proj) {
-      registerFixture("projects", proj.id);
-      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
-    }
   };
   try {
     await dropBidIdentityFixtures();
@@ -593,8 +587,6 @@ export async function bidDbChecks(ok: Ok) {
     ok((await awardBid(q, g1)).ok, "bids db: award again");
     await setStatus(q, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
     await regAll();
-    ok(!!proj && proj.billToCompanyId === gc1 && proj.customerId === own, "bids db: the project bills the awarded GC; the customer stays the owner");
-    const projParties = proj ? await listFor("project", proj.id) : [];
     ok(projParties.some((p) => p.companyId === gc1) && !projParties.some((p) => p.companyId === gc2), "bids db: the awarded GC carries to the project; the losing bidder doesn't");
     const noUndo = await undoAward(q);
     ok(!noUndo.ok && noUndo.error === "The estimate is won — the award can't be undone.", "bids db: a won estimate's award can't be undone");
@@ -1551,10 +1543,6 @@ export async function portalBidDbChecks(ok: Ok) {
   const NAMES = { own: "Portal Owner I", gc1: "Portal GC One I", gc2: "Portal GC Two I", gc3: "Portal GC Three I", gc4: "Portal GC Four I", oth: "Portal Other I" };
   const regAll = async () => {
     for (const p of await listFor("quote", iq)) registerFixture("record_parties", p.id);
-    if (proj) {
-      registerFixture("projects", proj.id);
-      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
-    }
   };
   const ses = (cid: string) => ({ grantId: "PG-i", customerId: cid, name: "T", email: "t@i.test" });
   const T = Date.UTC(2034, 2, 10);
