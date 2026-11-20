@@ -62,7 +62,6 @@ export default function NextAssessmentEdit({ siteId, at, canEdit }: { siteId: st
               void commit();
             }
           }}
-          title="The account rep gets a reminder 30 days before"
           style={{ fontSize: 12, padding: "3px 6px", width: "auto" }}
         />
       ) : (

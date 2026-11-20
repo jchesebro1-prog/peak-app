@@ -40164,7 +40164,7 @@ import {
   sanitizeRewardCredit as r282bSanitize,
   withRewardCredit as r282bWith,
   withoutRewardCredit as r282bWithout,
-} from "@/lib/rewards/credit-line";
+} from "@/lib/credit-line";
 import {
   customerLines as r282bCustomerLines,
   reconcileEstimatorValue as r282bReconcile,
@@ -40438,7 +40438,7 @@ import {
   grossQuoteValue as r282cGross,
   quoteRewardCredit as r282cQuoteCredit,
   withRewardCredit as r282cWith,
-} from "@/lib/rewards/credit-line";
+} from "@/lib/credit-line";
 import {
   finishFlame as r282cFinishFlame,
   finishInspection as r282cFinishInspection,
@@ -47784,7 +47784,7 @@ import {
 import { DEFAULT_PDF_OPTIONS as n293DefPdf, PDF_TOGGLE_KEYS as n293ToggleKeys, normalizePdfOptions as n293NormPdf } from "@/lib/quote-pdf/pdf-options";
 import { copySectionForTarget as n293Copy } from "@/app/(app)/estimator/copy-system";
 import { repriceForTier as n293Reprice } from "@/app/(app)/estimator/tier-reprice";
-import { withRewardCredit as n293WithCredit } from "@/lib/rewards/credit-line";
+import { withRewardCredit as n293WithCredit } from "@/lib/credit-line";
 import { sanitizeSystemSell as n293SanSell } from "@/app/(app)/estimator/pricing";
 import {
   applyIntroOp as n293Apply, newIntroId as n293NewId, sanitizeIntro as n293SanIntro, sanitizeIntroList as n293SanList,
@@ -51973,7 +51973,7 @@ import {
   outputScopes as e301sScopes, addOptions as e301sOptions, coverTotals as e301sTotals, notIncludedItems as e301sNotItems,
   notIncludedLine as e301sNotLine, coverSummaryText as e301sSummary, scopePriceLabel as e301sPriceLabel,
 } from "@/lib/estimate-output/scopes";
-import { withRewardCredit as e301sCredit } from "@/lib/rewards/credit-line";
+import { withRewardCredit as e301sCredit } from "@/lib/credit-line";
 import { round2 as e301sRound } from "@/app/(app)/estimator/pricing";
 import { rewardPointsAppliedLabel as e301sPtsLabel } from "@/lib/rewards/points";
 import type { SpecSection as E301sSec } from "@/app/(app)/estimator/types";
@@ -52617,7 +52617,7 @@ import { packageBomRows as e301bbRows, packageBomSkus as e301bbSkus, LABOR_BOM_D
 import { packageFrozenFields as e301bmFrozen, packagePhotoSections as e301bmPhotoSecs, packageViewModel as e301bmModel } from "@/lib/estimate-output/package-model";
 import { outputScopes as e301bbScopes } from "@/lib/estimate-output/scopes";
 import { narrativeBlocks as e301bbBlocks } from "@/app/(app)/estimator/narrative";
-import { withRewardCredit as e301bbCredit } from "@/lib/rewards/credit-line";
+import { withRewardCredit as e301bbCredit } from "@/lib/credit-line";
 import { fmt as e301bbFmt } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
 {
@@ -55405,7 +55405,7 @@ import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-
 /* #P2b core — Estimator Phase 2b: the derived alternate stamp, totals.alt, the Rewards credit pin and the approval fingerprint. */
 import * as p2bGroups from "@/lib/estimate-groups/groups";
 import { totals as p2bTotals, systemSellTotal as p2bSell } from "@/app/(app)/estimator/pricing";
-import { withRewardCredit as p2bWithCredit, sanitizeRewardCredit as p2bSanitizeCredit, isRewardCreditItem as p2bIsCredit } from "@/lib/rewards/credit-line";
+import { withRewardCredit as p2bWithCredit, sanitizeRewardCredit as p2bSanitizeCredit, isRewardCreditItem as p2bIsCredit } from "@/lib/credit-line";
 import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
 {
   type P2bSys = { id: string; groupId?: string; alternate?: true; built?: true; name?: string };
@@ -55841,7 +55841,7 @@ import {
   responseNoteText as p2boNote, responseTaskTitle as p2boTask, alternateScopeLabel as p2boLabel, CLIENT_ACTION_COPY as p2boCopy,
 } from "@/lib/estimate-output/responses";
 import { revisionGroupedSections as p2boRevSecs } from "@/lib/quote-share/photo-response";
-import { withRewardCredit as p2boCredit } from "@/lib/rewards/credit-line";
+import { withRewardCredit as p2boCredit } from "@/lib/credit-line";
 import { normalizeSystemOrder as p2boNorm } from "@/lib/estimate-groups/groups";
 import { systemSellTotal as p2boSell, fmt as p2boFmt } from "@/app/(app)/estimator/pricing";
 import { outputsP2bCase as p2boCase } from "./outputs-p2b-baseline";
@@ -71490,7 +71490,7 @@ async function etc368ApplyDbChecks(check: typeof ok): Promise<void> {
   const Cat = await import("@/lib/stores/catalog");
   const C = await import("@/lib/dealer-api/connections");
   const A = await import("@/lib/dealer-api/etc/apply");
-  const { chicagoDayKey, chicagoDayStart } = await import("@/lib/drive-plan/day");
+  const { chicagoDayKey, chicagoDayStart } = await import("@/lib/chicago-day");
   const env = {} as Record<string, string | undefined>;
   const apiKey = "etc-apply-secret-368";
   const today = chicagoDayKey(Date.now());

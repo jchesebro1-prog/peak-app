@@ -12,7 +12,7 @@
  * auto_limit approvals are deliberately NOT snapshot-checked here — #242's
  * own rule (autoSnapshotUnchanged / still fits the owner's limit) governs them.
  */
-import { grossQuoteValue, isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { grossQuoteValue, isRewardCreditItem } from "@/lib/credit-line";
 
 export type ApprovalSnapshot = { sell: number; linesKey: string };
 

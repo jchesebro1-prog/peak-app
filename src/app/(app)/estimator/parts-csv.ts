@@ -1,4 +1,4 @@
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { lineModel, partModel } from "@/lib/catalog-rename/sku";
 import { computeMob, hasSellOverride, isSystemLine, lineExtSellOf, systemFreight, systemItemsRev, systemSellAdjustment, systemSellTotal } from "./pricing";
 import { laborGroupRecord } from "./labor-group";

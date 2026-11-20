@@ -1,6 +1,6 @@
 /* #348 slice 2a — the pure bid rules. Browser-safe: client components read labels and status text from here.
    The stores (src/lib/stores/bids.ts, parties.ts, quotes.ts) are the only writers and call these. */
-import { chicagoShortDate, chicagoTime, dayDiff, dayKey } from "@/lib/triage/clock";
+import { chicagoShortDate, chicagoTime, dayDiff, dayKey } from "@/lib/chicago-day";
 import type { BidderState } from "./rules";
 
 export const BID_RESULTS = ["pending", "awarded", "lost", "withdrew", "no_bid"] as const;

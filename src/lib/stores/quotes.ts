@@ -16,19 +16,17 @@ import type { AssistNudge } from "@/lib/brief/types";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
 import { isBoxSaleQuoteType, isBoxSaleSource } from "@/lib/estimate-box-sale/rules";
-import { grossQuoteValue, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
-import { serviceCreditSubdocKey } from "@/lib/rewards/service-credit";
+import { grossQuoteValue, quoteRewardCredit, withRewardCredit } from "@/lib/credit-line";
+import { serviceCreditSubdocKey } from "@/lib/credit-line";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { numberNewDoc } from "@/lib/stores/estimate-numbers";
 import { canSetPoReceived } from "@/lib/opportunities";
-import { createAssignment } from "@/lib/stores/assignments";
 import { getDb, withTransaction } from "@/db";
 import { liveKey } from "@/lib/estimate-live-save/live-key";
 import { liveSaveRefusal } from "@/lib/estimate-live-save/rules";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
-import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { canHavePdf, latestSentRevision, nextSendRevNo, pdfIsCurrent, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { isReopen, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "@/lib/quote-won-version";
@@ -1754,22 +1752,15 @@ async function copySentPdfSafely(id: string): Promise<void> {
  * becomes the newest revision. The recall itself is then recorded as another
  * revision, so the history reads as a continuous line rather than a jump.
  *
- * Refuses on `lost` quotes (#282 follow-up: a lost quote is out of the Rewards
- * program — it carries no credit, and a recall could put one back) and on `won`
- * quotes. A won quote has already spawned a project, and the
- * project copies `value`/`margin` (and derives every procurement line cost from
- * `value`) once at conversion and never re-reads the quote — so rewriting the
- * numbers afterwards would silently desync the two with no way to repair it
- * (`projects.ts` bails early when a project already exists).
+ * Refuses on `lost` and `won` quotes: a closed quote's numbers stay as they closed.
  */
 export async function restoreQuoteRevision(
   id: string,
   rev: number,
-  by?: string | null,
-  opts: { mayApplyCredit?: boolean } = {}
+  by?: string | null
 ): Promise<
   | { ok: false; reason: "not-found" | "no-such-rev" | "won" | "lost" }
-  | { ok: true; quote: Quote; creditNotice?: string }
+  | { ok: true; quote: Quote }
 > {
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return { ok: false, reason: "not-found" };
@@ -1777,11 +1768,8 @@ export async function restoreQuoteRevision(
   if (q.status === "lost") return { ok: false, reason: "lost" };
   const target = (q.revisions || []).find((r) => r.rev === rev);
   if (!target) return { ok: false, reason: "no-such-rev" };
-  // #282 phase 3: the snapshot's Rewards credit is re-clamped like a save
-  // (available now, the restored pre-credit total, $0; dropped for a portal
-  // quote / no customer / another customer's revision) before it goes back.
-  const { restoredCreditFor } = await import("./reward-ledger");
-  const credit = await restoredCreditFor(q, target, opts.mayApplyCredit ?? true);
+  // A stored credit on the snapshot goes back only up to what the quote carries now.
+  const credit = restoredCreditFor(q, target);
   // #304: the snapshot keeps the SKUs it was cut with; the spec it puts back
   // is LIVE, so a part renamed since moves to its live SKU (and model). The
   // revision itself is never written — the rewrite copies what it changes.
@@ -1816,32 +1804,18 @@ export async function restoreQuoteRevision(
     doc.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
-  return credit.notice ? { ok: true, quote: updated, creditNotice: credit.notice } : { ok: true, quote: updated };
+  return { ok: true, quote: updated };
 }
 
 /**
- * #282 follow-up (Jeff, 2026-09-30: "lost quotes shouldn't place into the
- * rewards program"): strip every Rewards credit from a quote going Lost — the
- * Estimator's credit line(s) and the service section's `rewardCredit` — and
- * set `value` back to the gross (pre-credit) price. A no-op when the quote
- * carries no credit. Copies what it rewrites (revisions share the payloads).
+ * The stored credit a recalled revision may put back, and its pre-credit
+ * price: never more than the quote carries now (nothing applies new credit)
+ * or the restored price itself.
  */
-function clearRewardCredit(doc: Quote): void {
-  const credit = quoteRewardCredit(doc);
-  if (!(credit > 0)) return;
-  const gross = grossQuoteValue(doc);
-  const key = serviceCreditSubdocKey(doc.quoteType);
-  const sub = key ? doc[key] : null;
-  if (key && sub && typeof sub === "object" && "rewardCredit" in sub) {
-    const next = { ...(sub as Record<string, unknown>) };
-    delete next.rewardCredit;
-    doc[key] = next;
-  }
-  const spec = doc.spec as { sections?: unknown } | null | undefined;
-  if (spec && typeof spec === "object" && Array.isArray(spec.sections)) {
-    doc.spec = { ...spec, sections: withoutRewardCredit(spec.sections as SpecSection[]) };
-  }
-  doc.value = gross;
+function restoredCreditFor(q: Quote, target: QuoteRevision): { credit: number; gross: number } {
+  const snap = { ...target, quoteType: target.quoteType ?? q.quoteType };
+  const gross = grossQuoteValue(snap);
+  return { credit: Math.max(0, Math.min(quoteRewardCredit(snap), quoteRewardCredit(q), gross)), gross };
 }
 
 /**
@@ -1893,8 +1867,7 @@ export async function reopenPlanFor(q: Quote, status: QuoteStatus, opts: Pick<Se
   const rewrite = renameRewriter(await liveRenameRefs());
   const target = reopenTarget(q, status, rewrite);
   if (!target) return null;
-  const { restoredCreditFor } = await import("./reward-ledger");
-  const c = await restoredCreditFor(q, target, true);
+  const c = restoredCreditFor(q, target);
   return { target, credit: c.credit, gross: c.gross, rewrite };
 }
 
@@ -2279,24 +2252,7 @@ export async function setStatus(
   // #287: Approve & send → moves only the version the sender was shown — before any write, the replay included.
   if (typeof opts.expectUpdatedAt === "number" && q.updatedAt !== opts.expectUpdatedAt) throw new QuoteVersionChanged();
   if (q.status === status) {
-    // #170: nothing to transition, but the downstream record may still be
-    // MISSING. This early return is the layer that actually gated the bug —
-    // `spawnFromQuote` was never reached at all. The four service builder
-    // screens persist their quote, call setStatus(id, "won") and then act;
-    // cfc00ad deleted the `createFromQuote`/`syncFromQuotes` calls they used
-    // to make for themselves, so re-approving an ALREADY-won quote created
-    // nothing anywhere. Replaying the spawn repairs that. No write, no
-    // history entry, no revision and no #16 assignment happen here — those
-    // belong to a real transition, and a no-op re-save must stay a no-op
-    // everywhere except this one idempotent repair. The approval gate is
-    // deliberately not consulted either: no status is being advanced, and
-    // every creator the replay reaches dedupes on the quote id, so the cost
-    // when the record already exists is one read. That "nothing else happens"
-    // claim is load-bearing and is pinned by test: the #170 `system-replay`
-    // fixture (a type that DOES fire the #16 assignment) asserts history,
-    // updatedAt, revisions and the assignments table are all untouched.
-    const { spawnFromQuote } = await import("./quote-spawn");
-    await spawnFromQuote(q, q.status, { replayUnchanged: true });
+    // Nothing to transition: a no-op re-save writes nothing.
     return q;
   }
   // #242: the owner's review limits are read only when this transition is
@@ -2393,13 +2349,6 @@ export async function setStatus(
     } else if (doc.bonusRecord) {
       doc.bonusRecord = null;
     }
-    // #282 follow-up: a lost quote is out of the Rewards program — drop any
-    // credit it carried and put `value` back to the pre-credit price, so
-    // nothing stays parked on it. The ledger reconcile below keys on the
-    // entries already posted (an open redeem returns the credit), never on
-    // the quote's current credit line, so clearing it first cannot skip the
-    // unredeem.
-    if (status === "lost") clearRewardCredit(doc);
     if (pipes && carriesPipeline(doc.quoteType)) {
       const pl = quotePipelineFor(pipes, doc);
       doc.pipelineId = pl.id;
@@ -2422,33 +2371,6 @@ export async function setStatus(
     doc.updatedAt = t;
   });
 
-  // Punch #16 (D14x): an install sale notifies the company as a Home Queue
-  // task, not email — see PUNCHLIST.md #16 for the five findings against an
-  // automated send. The unchanged-status branch above returns before reaching
-  // here, so this only runs the moment a quote actually transitions INTO
-  // "won", never on a no-op re-save of an already-won quote (#170's spawn
-  // replay is deliberately the only thing that branch does). Scoped to the
-  // quote types that actually become an Installs project — the SAME shared
-  // list projects.ts's three exclusion checks use (PROJECT_EXCLUDED_QUOTE_TYPES,
-  // review round-3: rental was missing here too, independently of the same
-  // gap in projects.ts) — flame-test/repair/inspection/consulting/rental
-  // wins run their own service workflows and dashboards, so an "install
-  // sold" task for those would be noise. There is no separate PM role
-  // (D87) — `owner` is the only reliably-present assignee at this hook point.
-  if (result && status === "won" && !isProjectExcludedQuoteType(q.quoteType)) {
-    await createAssignment({
-      title: `Install sold — reach out: ${result.name || result.customer || id}`,
-      assignee: result.owner || DEFAULT_ACTOR,
-      createdBy: by || DEFAULT_ACTOR,
-      link: { kind: "quote", id, label: result.name || result.customer || id },
-      source: "auto: quote won (#16)",
-    });
-  }
-
-  if (result) {
-    const { spawnFromQuote } = await import("./quote-spawn");
-    await spawnFromQuote(result, q.status);
-  }
   return result;
   });
   // #222: Blob I/O stays out of the status transaction. A same-status no-op
@@ -2479,18 +2401,6 @@ export async function setStatus(
   // #355 review I2: a reopen that put the won version back changed the document — on won → sent too, where the
   // copy above found no current file — so it re-renders and the generator settles the new sent revision's PDF.
   if (out && (revised.value || reopened.value)) await scheduleRevisePdfSafely(id);
-  // #282 phase 2: the Rewards ledger follows every real transition — earn +
-  // redeem on won, reverse + unredeem on leaving won. Never for an imported
-  // row (historical-import records history, it is not a sale made here), and
-  // never able to block the status change: a failure is logged, not thrown.
-  if (out && moved.value && opts.bypassApprovalGate !== "historical-import") await reconcileRewardsSafely(out, by);
-  // Estimator bonuses: a re-win keeps the project the first win spawned —
-  // bring its 5% pool to this record's package cost (no-op write skipped).
-  // After the transaction: a swallowed DB error here must not abort the
-  // status change's own Postgres transaction and roll the Won back.
-  if (out && moved.value && status === "won" && isBonusEligibleQuote(out)) {
-    await syncProjectBonusPool(id, out.bonusRecord?.packageBonusCost ?? 0);
-  }
   // #293 slice 2: same outer-transaction caveat as the copy above — inside
   // setQuoteStage's transaction this invalidation fires BEFORE commit, so a
   // rebuild that runs concurrently can cache the pre-transition state for up
@@ -2522,41 +2432,17 @@ async function bonusUserList(): Promise<{ id: string; name: string }[]> {
   }
 }
 
-/** Estimator bonuses: keep the linked install project's 5% pool equal to the record's package cost. */
-async function syncProjectBonusPool(quoteId: string, cost: number): Promise<void> {
-  try {
-    const { getProjectByQuote, updateProject } = await import("@/lib/stores/projects");
-    const proj = await getProjectByQuote(quoteId);
-    if (!proj) return;
-    const next = cost > 0 ? cost : undefined;
-    if (proj.performanceBonusPool === next) return;
-    await updateProject(proj.id, { performanceBonusPool: next });
-  } catch (e) {
-    console.error("[bonus] project pool sync failed for", quoteId, e);
-  }
-}
-
 /**
  * Estimator bonuses — the ONLY writer of `Quote.estimatorBonusSplit`. Never
- * content, so `updatedAt` is not bumped; a won quote's record is rebuilt (and
- * the install project's pool follows if the package cost moved). Null = not found.
+ * content, so `updatedAt` is not bumped; a won quote's record is rebuilt.
+ * Null = not found.
  */
 export async function setEstimatorBonusSplit(id: string, split: BonusSplit): Promise<Quote | null> {
   const users = await bonusUserList();
-  const cost = { after: 0, rebuilt: false };
-  const out = await patchQuote(id, (doc) => {
+  return patchQuote(id, (doc) => {
     doc.estimatorBonusSplit = normalizeSplit(split);
-    if (doc.status === "won" && doc.bonusRecord) {
-      const before = doc.bonusRecord.packageBonusCost;
-      rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
-      cost.after = doc.bonusRecord?.packageBonusCost ?? before;
-      cost.rebuilt = true;
-    }
+    if (doc.status === "won" && doc.bonusRecord) rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
   });
-  // Every rebuild syncs (the sync skips a no-op write), so a pool a failed
-  // earlier sync left stale is repaired here too.
-  if (out && cost.rebuilt) await syncProjectBonusPool(id, cost.after);
-  return out;
 }
 
 /**
@@ -2566,11 +2452,11 @@ export async function setEstimatorBonusSplit(id: string, split: BonusSplit): Pro
  * write failed) gets one built here — `wonAt` = its last move into Won. Returns
  * null when the quote doesn't exist, "not-won" when it isn't won and
  * "no-bonus-lines" when it is won but has nothing to record (nothing written
- * either way). Every rebuild syncs the install project's pool (no-op skipped).
+ * either way).
  */
 export async function setBonusAlternatesTaken(id: string, ids: string[]): Promise<Quote | null | "not-won" | "no-bonus-lines"> {
   const users = await bonusUserList();
-  const st: { refused: "not-won" | "no-bonus-lines" | null; after: number; rebuilt: boolean } = { refused: null, after: 0, rebuilt: false };
+  const st: { refused: "not-won" | "no-bonus-lines" | null } = { refused: null };
   const out = await patchQuote(id, (doc) => {
     if (doc.status !== "won") {
       st.refused = "not-won";
@@ -2584,29 +2470,14 @@ export async function setBonusAlternatesTaken(id: string, ids: string[]): Promis
     const alts = new Set(secs.filter((x) => x.alternate === true).map((x) => x.id));
     const taken = (Array.isArray(ids) ? ids : []).filter((aid) => alts.has(aid));
     if (doc.bonusRecord) {
-      const before = doc.bonusRecord.packageBonusCost;
       rebuildBonusRecord(doc, taken, users);
-      st.after = doc.bonusRecord?.packageBonusCost ?? before;
     } else {
       const intoWon = (doc.history || []).filter((h) => h.to === "won").pop();
       doc.bonusRecord = buildBonusRecord({ sections: secs, owner: doc.owner, preparedBy: doc.preparedBy, split: doc.estimatorBonusSplit, alternatesTaken: taken, users, wonAt: intoWon?.at ?? Date.now() });
-      st.after = doc.bonusRecord.packageBonusCost;
     }
-    st.rebuilt = true;
   });
   if (out && st.refused) return st.refused;
-  if (out && st.rebuilt) await syncProjectBonusPool(id, st.after);
   return out;
-}
-
-/** #282 phase 2: post the quote's Rewards ledger entries; log, never throw. */
-async function reconcileRewardsSafely(q: Quote, by?: string | null, opts: { deleted?: boolean } = {}): Promise<void> {
-  try {
-    const { reconcileQuoteLedger } = await import("./reward-ledger");
-    await reconcileQuoteLedger(q, by || DEFAULT_ACTOR, opts);
-  } catch (e) {
-    console.error("[rewards] ledger post failed for quote", q.id, e);
-  }
 }
 
 /** #293 slice 2: the system library indexes sent/won quotes — a real status
@@ -2778,7 +2649,6 @@ export async function setQuotePeople(
 export async function remove(id: string, by?: string | null): Promise<void> {
   const q = await getDoc<Quote>("quotes", id);
   await softDeleteDoc("quotes", id);
-  if (q) await reconcileRewardsSafely(q, by, { deleted: true });
   await invalidateSystemLibrarySafely();
 }
 

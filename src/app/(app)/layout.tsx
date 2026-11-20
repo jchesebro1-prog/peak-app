@@ -9,10 +9,7 @@ import { SyncProvider } from "@/lib/sync/SyncProvider";
 import PopHeader from "@/components/popout/pop-header";
 import LiveSync from "@/components/popout/live-sync";
 import PopBlockedNotice from "@/components/popout/pop-blocked-notice";
-import NativeBriefReminders from "@/components/brief/native-brief-reminders";
 import { assistSettingsOf } from "@/lib/assist/config";
-import { briefOnFor } from "@/lib/brief/reminders";
-import { briefRemindersOn } from "@/lib/stores/notif-prefs";
 import { askGateFor } from "@/lib/assist/gate-server";
 
 export default async function AppLayout({
@@ -32,11 +29,6 @@ export default async function AppLayout({
       }))
     : [];
   const { counts, bell } = await navData(user.name, can("approve", user.roles), user.id);
-  // AI daily brief §5 — phone reminders: pilot + Daily brief + the Account
-  // pref (default on). The pref is read only for a brief user; an unreadable
-  // one keeps the default rather than cancelling the reminders.
-  const remindersOn =
-    briefOnFor(user.id, assistSettingsOf(settings)) && (await briefRemindersOn(user.name).catch(() => true));
 
   // Ask AI (spec 2026-10-13 §1): the ⌘K "Ask AI" row shows only when the
   // ask gate (pilot + switch + a Claude key) lets this user in. A failed
@@ -73,7 +65,6 @@ export default async function AppLayout({
         <main className="pk-main">{children}</main>
       </div>
       <LiveSync />
-      <NativeBriefReminders enabled={remindersOn} />
       <PopBlockedNotice />
     </SyncProvider>
   );

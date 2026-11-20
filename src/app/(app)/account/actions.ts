@@ -5,8 +5,6 @@ import { requireUser } from "@/lib/session";
 import {
   KEYS,
   setAll,
-  setInvitesOn,
-  setBriefRemindersOn,
   setPref,
   type NotifCategoryKey,
 } from "@/lib/stores/notif-prefs";
@@ -40,22 +38,6 @@ export async function setNotifPrefAction(key: string, on: boolean) {
 export async function setAllNotifAction(on: boolean) {
   const me = await requireUser();
   await setAll(on, me.name);
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** D76-A: per-user opt-out of site-visit .ics invite emails. */
-export async function setInvitePrefAction(on: boolean) {
-  const me = await requireUser();
-  await setInvitesOn(on, me.name);
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** AI daily brief §5: "Brief reminders on this phone" (default on). */
-export async function setBriefRemindersPrefAction(on: boolean) {
-  const me = await requireUser();
-  await setBriefRemindersOn(on === true, me.name);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
@@ -161,25 +143,3 @@ export async function disconnectKrispAction() {
   return { ok: true as const };
 }
 
-/** Spec 2026-10-09 "Buffer" — the signed-in rep's own drive buffer (null =
- *  use the company default). A buffer change moves every leg, so the rep's
- *  drive events are marked stale and re-sync on the next calendar view. */
-export async function saveMyDriveBufferAction(minutes: number | null) {
-  const me = await requireUser();
-  const { saveUserSchedulePrefs, markDriveStale } = await import("@/lib/stores/schedule-prefs");
-  const prefs = await saveUserSchedulePrefs(me.id, { driveBufferMin: minutes });
-  await markDriveStale([me.id]);
-  revalidatePath("/", "layout");
-  return { ok: true as const, driveBufferMin: prefs.driveBufferMin };
-}
-
-/** Spec 2026-10-09 site-visit scheduling — the signed-in person's own work
- *  hours (null = company default). Only feeds conflict flags. */
-export async function saveMyWorkHoursAction(input: unknown) {
-  const me = await requireUser();
-  const { saveUserWorkHours } = await import("@/lib/stores/schedule-prefs");
-  const r = await saveUserWorkHours(me.id, input);
-  if (!r.ok) return { ok: false as const, error: r.error };
-  revalidatePath("/", "layout");
-  return { ok: true as const, workHours: r.workHours };
-}

@@ -8,14 +8,10 @@
  *
  * Vocab mirrors (drift-guarded by exact-literal specs, see the #21 section
  * of the harness): QUOTE_VERB mirrors quotes.STAGE_LABEL's stage set;
- * SURVEY_STAGE_LABEL mirrors surveys.STAGES labels. Project stage labels are
- * admin-editable (Settings → Pipelines) and resolved via stageLabelFor,
- * which also renders legacy stageHistory keys — the Pipelines the server
- * loader loaded once are passed IN here.
+ * SURVEY_STAGE_LABEL mirrors surveys.STAGES labels.
  */
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { stageLabelFor, type Pipelines } from "@/lib/pipelines";
 // Type-only — erased at build time, so the zero-store-import / client-bundle
 // rule still holds at runtime (no store code is ever pulled in here).
 import type { QuoteStatus } from "@/lib/stores/quotes";
@@ -27,11 +23,9 @@ export type FeedKind =
   | "comm"
   | "visit"
   | "flame"
-  | "repair"
   | "inspection"
   | "survey"
-  | "project-stage"
-  | "project-note";
+  ;
 
 export type FeedRow = {
   /** Unique across the whole feed — "<kind>:<recordId>:<n>" shapes. */
@@ -59,11 +53,8 @@ export const FEED_META: Record<FeedKind, { letter: string; ink: string; soft: st
   comm: { letter: "C", ink: "#7b3f8a", soft: "#f3eaf5" },
   visit: { letter: "V", ink: "#1f7a52", soft: "#eaf6ef" },
   flame: { letter: "F", ink: "#b4543a", soft: "#f8ece7" },
-  repair: { letter: "R", ink: "#b4543a", soft: "#f8ece7" },
   inspection: { letter: "I", ink: "#b4543a", soft: "#f8ece7" },
   survey: { letter: "S", ink: "#3155a8", soft: "#e9eefb" },
-  "project-stage": { letter: "P", ink: "#3155a8", soft: "#e9eefb" },
-  "project-note": { letter: "P", ink: "#8a6d1f", soft: "#fbf3dd" },
 };
 
 function row(
@@ -201,9 +192,9 @@ export function visitFeedRows(v: {
   ];
 }
 
-const JOB_NOUN = { flame: "Flame test", repair: "Repair", inspection: "Inspection" } as const;
-const JOB_OPEN_VERB = { flame: "approved", repair: "approved", inspection: "requested" } as const;
-const JOB_HREF = { flame: "/flame-tests", repair: "/repairs", inspection: "/inspections" } as const;
+const JOB_NOUN = { flame: "Flame test", inspection: "Inspection" } as const;
+const JOB_OPEN_VERB = { flame: "approved", inspection: "requested" } as const;
+const JOB_HREF = { flame: "/flame-tests", inspection: "/inspections" } as const;
 
 /**
  * Flame / repair / inspection point stamps. openedAt is approvedAt (flame,
@@ -215,7 +206,7 @@ const JOB_HREF = { flame: "/flame-tests", repair: "/repairs", inspection: "/insp
  * anywhere (scheduledDate is a bare ISO day) — deliberately skipped.
  */
 export function jobFeedRows(
-  kind: "flame" | "repair" | "inspection",
+  kind: "flame" | "inspection",
   job: {
     id: string;
     venue: string;
@@ -258,37 +249,6 @@ export function surveyFeedRows(s: { id: string; stage: string; venue: string; up
       ""
     ),
   ];
-}
-
-/**
- * Project stage history (D83 — normalized to [] on read; anchored with an
- * opening from:null entry on post-D83 records, legitimately empty on legacy
- * ones) + embedded ProjectNotes. REMEMBER: notes[] is NEWEST-FIRST (addNote
- * unshifts) — order is NOT assumed here; the loader sorts the merged feed.
- * Each history entry's `to` is labeled via stageLabelFor against the record's
- * own pipeline — current stage ids resolve to their live label, pre-pipeline
- * legacy keys (e.g. "training", "procurement") still render their frozen
- * historical label (LEGACY_STAGE_LABELS), never the raw key.
- */
-export function projectFeedRows(
-  p: {
-    id: string;
-    name: string;
-    kind?: string | null;
-    pipelineId?: string | null;
-    stageHistory: Array<{ at: number; to: string; by: string }>;
-    notes: Array<{ id: string; at: number; by: string; text: string; deleted?: boolean }>;
-  },
-  pipes: Pipelines
-): FeedRow[] {
-  const href = "/projects?id=" + encodeURIComponent(p.id);
-  const rows = (p.stageHistory || []).map((h, i) =>
-    row("project-stage", `project:${p.id}:stage:${i}`, h.at, `Project ${p.id} → ${stageLabelFor(pipes, p, h.to)}`, p.name, href, h.by || "")
-  );
-  for (const n of p.notes || [])
-    if (!n.deleted)
-      rows.push(row("project-note", `project:${p.id}:note:${n.id}`, n.at, n.text.slice(0, 80), p.name, href, n.by || ""));
-  return rows;
 }
 
 /** Real NoteRecord rows — full text as title (the UI clamps display). A

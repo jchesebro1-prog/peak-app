@@ -6,10 +6,9 @@ import WidgetHost from "../_dashboard/host";
 export const metadata = { title: "Reports — Quartzite-6" };
 
 /**
- * Reports (#43) — a widget surface. The former Sales and Installs views are
- * registry widgets (see _dashboard/widgets/sales.tsx, installs.tsx); the
- * user's saved layout decides which render and in what order. History
- * widgets follow ?range; installs widgets always look 12 months ahead.
+ * Reports (#43) — a widget surface. The former Sales view is registry
+ * widgets (see _dashboard/widgets/sales.tsx); the user's saved layout
+ * decides which render and in what order. History widgets follow ?range.
  * ?view= and ?ir= are no longer read (D144).
  */
 export default async function ReportsPage({

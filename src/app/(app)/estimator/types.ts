@@ -4,7 +4,6 @@ import type { BonusRecord, BonusSplit } from "@/lib/estimate-bonus/record";
 import type { RackPartFacts } from "@/lib/rack/types";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
-import type { TaskRecord } from "@/lib/stores/tasks";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
@@ -765,12 +764,6 @@ export type EstimatorProps = {
   aiSource: AiSource | null;
   /** Active roster for the quote Tasks card's assignee picker (PUNCHLIST #17 remainder). */
   people: { id: string; name: string }[];
-  /** This quote's rows from the shared tasks collection, keyed by loadedId —
-   *  empty for a quote that's never been saved (no id to attach tasks to yet). */
-  quoteTasks: TaskRecord[];
-  /** Reusable task-template sets applicable to quotes (D149, #118), for the
-   *  "Apply template" control next to the Tasks card. */
-  templateSets: { id: string; name: string }[];
   /** #245: the freight-by-distance rule (Estimating Rules), loaded server-side
    *  via loadFreightRule() — plain numbers, client-safe. */
   freightRule: FreightRule;

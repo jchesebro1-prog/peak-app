@@ -1,7 +1,7 @@
 import { deleteBlob, getBlobHead } from "@/lib/blob";
 import { getCompany } from "@/lib/identity/companies";
 import { docLocId, sitesForCompany } from "@/lib/identity/sites";
-import { getProject } from "@/lib/stores/projects";
+import { getDoc } from "@/db/doc-store";
 import { createDocument, documentCategories, documentsUnderUploadKey, removeDocument } from "@/lib/stores/documents";
 import { uploadCategory, type DocumentCategory } from "@/lib/document-categories";
 import {
@@ -77,12 +77,13 @@ export async function documentScopeFacts(customerId: string, projectId: string |
   const [co, sites, project] = await Promise.all([
     getCompany(customerId),
     sitesForCompany(customerId),
-    projectId ? getProject(projectId) : Promise.resolve(null),
+    // Projects were removed from the app; a document filed on one before then keeps its link (the table stays).
+    projectId ? getDoc<{ id: string; customerId?: string | null; locationId?: string | null }>("projects", projectId) : Promise.resolve(null),
   ]);
   return {
     customerExists: !!co,
     siteIds: sites.map(docLocId),
-    project: project ? { id: project.id, customerId: project.customerId, locationId: project.locationId } : null,
+    project: project ? { id: project.id, customerId: project.customerId ?? null, locationId: project.locationId ?? null } : null,
   };
 }
 

@@ -285,7 +285,6 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
           <span>{m.totals.totalLabel}</span>
           <span>{m.totals.total}</span>
         </div>
-        {m.totals.rewardsLine && <div className="pkg-muted">{m.totals.rewardsLine}</div>}
         {m.totals.standingLines.map((l, i) => (
           <div key={i} className="pkg-muted">
             {l}

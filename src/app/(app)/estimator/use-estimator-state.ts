@@ -14,14 +14,13 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { NextStepSync } from "@/app/(app)/quotes/review-actions";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import { currentLiveKeyAction, saveBonusAlternatesAction, saveBonusSplitAction, draftQuoteScopeAction, copySystemToEstimateAction, moveSystemToEstimateAction, resolveCatalogSkusAction, resolveTierAction, saveQuoteAction, searchQuotesAction, setQuotePipelineAction, setQuoteStageAction, setQuotePeopleAction, setStatusAction, travelForSelectionAction, updateQuoteMetaAction, type CopySystemTarget, type MoveSystemTarget, type ReviewSync, type StageSync } from "./actions";
-import { rewardCreditInfoAction, type RewardCreditInfo } from "@/app/(app)/rewards/actions";
 import { isBonusItem, type BonusKind } from "@/lib/estimate-bonus/flags";
 import { defaultAlternatesTaken, normalizeSplit, type BonusRecord, type BonusSplit } from "@/lib/estimate-bonus/record";
 import { useRouter, useSearchParams } from "next/navigation";
 import { parseStep } from "@/lib/estimate-steps/steps";
 import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines, withBonusRemoved } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, parseDiscountPct, projectDiscountsKey, PROJECT_DISCOUNT_NOTE_MAX, type ProjectDiscounts } from "@/lib/project-discounts/rules";
-import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
@@ -245,7 +244,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, pipeTypes, linesetTypes, riggingParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, aiSource, people,
-    quoteTasks, templateSets, assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
+    assumptionLibrary, freightRule, portalStatusError, assistDraft, specKeys, canApplyCredit,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
     suggestion = null, suggestionParts, repricedOnRevise = null,
   } = props;
@@ -999,35 +998,6 @@ export function useEstimatorState(props: EstimatorProps) {
   void fixtureRates;
   const t = useMemo(() => totals(sections, TAX_RATE_PCT), [sections]);
 
-  /* #282 phase 2 — Rewards credit: the customer's balance / available
-     (re-read on customer, quote, status or a save), and what this quote
-     carries. The save clamps it again on the server. */
-  const [creditInfo, setCreditInfo] = useState<RewardCreditInfo | null>(null);
-  const [creditSeq, setCreditSeq] = useState(0);
-  useEffect(() => {
-    let live = true;
-    if (!customerId) {
-      setCreditInfo(null);
-      return;
-    }
-    rewardCreditInfoAction(customerId, loadedId || null)
-      .then((info) => {
-        if (live) setCreditInfo(info);
-      })
-      .catch(() => {
-        if (live) setCreditInfo(null);
-      });
-    return () => {
-      live = false;
-    };
-  }, [customerId, loadedId, status, creditSeq]);
-  /** #333: the customer-document perks line for the live BOM quote — only an answer for THIS customer. */
-  const purchasePerksDocLine = creditInfo && customerId && creditInfo.customerId === customerId ? creditInfo.purchasePerksDocLine || "" : "";
-  const appliedCredit = rewardCreditOf(sections);
-  const applyCredit = (amount: number) =>
-    setSections((ss) => withRewardCredit(ss, amount, nextId()));
-  const removeCredit = () => setSections((ss) => withoutRewardCredit(ss));
-
   const isInternal = true; // build mode is the internal view (prototype view: 'internal')
   /* One shared line-item grid template — header, item rows and the freight
      row all render off this SAME `cols` (section-card.tsx), so a column can
@@ -1650,7 +1620,6 @@ export function useEstimatorState(props: EstimatorProps) {
               const write = auto ? setSectionsState : setSections;
               write((ss) => withRewardCredit(ss, stored, nextId()));
             }
-            setCreditSeq((n) => n + 1);
           }
           // Server-confirmed either way (ok or refused/stale) — this IS the
           // resync: whether the requested status applied, was refused, or
@@ -1908,9 +1877,6 @@ export function useEstimatorState(props: EstimatorProps) {
             window.location.reload();
             return;
           }
-          // #282 follow-up: the server cleared the credit when the quote went
-          // Lost — take the line off the open document too.
-          if (v === "lost") setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
           // Estimator bonuses: Won writes the record server-side — re-read it;
           // leaving Won clears it (applySync above already handled both when the
           // server echoed a status; this covers a reply without one).
@@ -3932,9 +3898,7 @@ export function useEstimatorState(props: EstimatorProps) {
     aiScopeInserted,
     aiSource,
     aiTargetSection,
-    appliedCredit,
     applyAutoMiles,
-    applyCredit,
     applySync,
     applyTravelTrip,
     assumptionLibrary,
@@ -3971,7 +3935,6 @@ export function useEstimatorState(props: EstimatorProps) {
     moveSystemToAction,
     openCutSheets,
     coverSummary,
-    creditInfo,
     currentContact,
     curtainDraft,
     curtainEdit,
@@ -4085,9 +4048,7 @@ export function useEstimatorState(props: EstimatorProps) {
     qdPanelRef,
     quoteId,
     quoteNote,
-    quoteTasks,
     rate,
-    removeCredit,
     removeGroupAction,
     removeItem,
     removeMob,
@@ -4171,7 +4132,6 @@ export function useEstimatorState(props: EstimatorProps) {
     status,
     statusChanging,
     t,
-    templateSets,
     tierMargin,
     tierReprice,
     tierResolving,
@@ -4251,7 +4211,6 @@ export function useEstimatorState(props: EstimatorProps) {
     selectionError,
     selectionSettled,
     retrySelection,
-    purchasePerksDocLine,
     trackSummary,
     setTrackSummary,
     packageDoc,

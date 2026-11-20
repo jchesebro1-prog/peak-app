@@ -1,7 +1,7 @@
 /**
  * Venue history aggregator (D101) — SERVER ONLY.
  *
- * Reads the eight PGlite-backed stores that carry venue references and builds a
+ * Reads the PGlite-backed stores that carry venue references and builds a
  * unified reverse-chronological history for a venue, matching via the pure
  * helpers in ./venue-match (which resolve through docLocId, so migrated venues
  * are not silently empty). Leads carry no venue and are excluded.
@@ -10,11 +10,9 @@ import type { SiteRow } from "@/db/schema";
 import { getAllSites } from "@/lib/identity/sites";
 import { getCompanies } from "@/lib/identity/companies";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAllProjects } from "@/lib/stores/projects";
 import { allEngagements } from "@/lib/stores/engagements";
 import { getAll as getAllFlame } from "@/lib/stores/flame-jobs";
 import { getAll as getAllInspections } from "@/lib/stores/inspections";
-import { getAll as getAllRepairs } from "@/lib/stores/repair-jobs";
 import { getAll as getAllSurveys } from "@/lib/stores/surveys";
 import { allVisits } from "@/lib/stores/site-visits";
 import { notesForSite } from "@/lib/stores/notes";
@@ -24,7 +22,6 @@ import {
   engagementMatchesVenue,
   quoteDeepLink,
   isOpenStage,
-  isOpenProject,
   sortHistoryDesc,
   type VenueHistoryRow,
 } from "./venue-match";
@@ -40,7 +37,7 @@ export type VenueDirRow = {
 };
 
 /** Jeff 2026-10-15 #11 — the directory reads only these fields of each record (a SQL projection), never whole
- *  quotes / projects / jobs; the same eight stores the history below reads in full. */
+ *  quotes / jobs; the same stores the history below reads in full. */
 type ActivityRow = { id: string; customerId?: string | null; locationId?: string | null; companyId?: string | null; siteIds?: string[]; updatedAt?: number; startAt?: number | null };
 function activityRows(coll: CollectionName, fields: readonly string[]): Promise<ActivityRow[]> {
   return listDocsFiltered<ActivityRow>(coll, { fields });
@@ -53,15 +50,13 @@ const AT = ["customerId", "locationId", "updatedAt"] as const;
  * so the directory is a single pass over the data.
  */
 export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
-  const [sites, quotes, projects, engagements, flame, inspections, repairs, surveys, visits] =
+  const [sites, quotes, engagements, flame, inspections, surveys, visits] =
     await Promise.all([
       getAllSites(),
       activityRows("quotes", AT),
-      activityRows("projects", AT),
       activityRows("consulting_engagements", ["companyId", "siteIds", "updatedAt"]),
       activityRows("flame_jobs", AT),
       activityRows("inspections", AT),
-      activityRows("repair_jobs", AT),
       activityRows("surveys", AT),
       activityRows("site_visits", ["customerId", "locationId", "startAt"]),
     ]);
@@ -75,7 +70,7 @@ export async function loadVenueDirectory(): Promise<VenueDirRow[]> {
     const cur = latest.get(k) ?? 0;
     if (ts > cur) latest.set(k, ts);
   };
-  for (const list of [quotes, projects, flame, inspections, repairs, surveys])
+  for (const list of [quotes, flame, inspections, surveys])
     for (const r of list) bump(r.customerId, r.locationId, Number(r.updatedAt) || 0);
   // Site visits can be scheduled in the future; clamp to now so a scheduled
   // visit doesn't sort the venue to the top of "most recently active" (and
@@ -117,14 +112,12 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
   const companyId = site.companyId;
   const locId = venueDocLocId(site);
 
-  const [quotes, projects, engagements, flame, inspections, repairs, surveys, visits, notes] =
+  const [quotes, engagements, flame, inspections, surveys, visits, notes] =
     await Promise.all([
       getAllQuotes(),
-      getAllProjects(),
       allEngagements(),
       getAllFlame(),
       getAllInspections(),
-      getAllRepairs(),
       getAllSurveys(),
       allVisits(),
       // #323 — notes filed on this venue (sites.id), e.g. a meeting to-do decided "note"
@@ -141,13 +134,6 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
       id: q.id, kind: "quote", title: q.name || displayQuoteNumber(q), subtitle: "Quote",
       ts: q.updatedAt, status: q.status, open: isOpenStage("quote", q.status),
       href: quoteDeepLink(q.quoteType ?? "", q.id), // quoteType is optional; "" → Estimator
-    });
-  }
-  for (const p of projects.filter((r) => docMatchesVenue(r, companyId, locId))) {
-    rows.push({
-      id: p.id, kind: "project", title: p.name || p.id, subtitle: "Project",
-      ts: p.updatedAt, status: p.stageMeta?.label ?? p.stage, open: isOpenProject(p),
-      href: "/projects?id=" + encodeURIComponent(p.id),
     });
   }
   for (const e of engagements.filter((r) => engagementMatchesVenue(r, companyId, locId))) {
@@ -171,13 +157,6 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
       href: "/inspections/" + encodeURIComponent(r.id),
     });
   }
-  for (const j of repairs.filter((r) => docMatchesVenue(r, companyId, locId))) {
-    rows.push({
-      id: j.id, kind: "repair", title: j.title || j.venue || j.id, subtitle: "Repair",
-      ts: j.updatedAt, status: j.stage, open: isOpenStage("repair", j.stage),
-      href: "/repairs/results?job=" + encodeURIComponent(j.id),
-    });
-  }
   for (const s of surveys.filter((r) => docMatchesVenue(r, companyId, locId))) {
     rows.push({
       id: s.id, kind: "survey", title: s.venue || s.venueType || s.id, subtitle: "Venue assessment",
@@ -193,7 +172,7 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
       ts: v.startAt ?? v.createdAt,
       status: v.startAt == null ? v.stage : v.startAt >= now ? "upcoming" : "past",
       open: v.startAt == null ? v.stage !== "done" : v.startAt >= now,
-      href: v.engagementId ? "/design/engagements/" + encodeURIComponent(v.engagementId) : "/calendar",
+      href: v.engagementId ? "/design/engagements/" + encodeURIComponent(v.engagementId) : "/companies/" + encodeURIComponent(companyId),
     });
   }
 

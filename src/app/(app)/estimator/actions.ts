@@ -7,7 +7,6 @@ import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
 import { loadBonusRates } from "@/lib/stores/pricing";
 import { settleBonusRemovals, stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, discountsForSections, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
-import { readTierSize } from "@/lib/task-plan/fields";
 import { can } from "@/lib/team";
 import {
   create,
@@ -64,14 +63,12 @@ import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { reconcileEstimatorValue, sanitizeSystemSell, totals } from "./pricing";
 import {
-  maxApplicableCredit,
   quoteRewardCredit,
   rewardCreditOf,
   sanitizeRewardCredit,
   withoutRewardCredit,
   withRewardCredit,
-} from "@/lib/rewards/credit-line";
-import { companyCredit } from "@/lib/stores/reward-ledger";
+} from "@/lib/credit-line";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { markQuotePdfStale, scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { limitToLivePatch, liveSaveRefusal } from "@/lib/estimate-live-save/rules";
@@ -134,15 +131,6 @@ export async function saveEstimatorCustomPartAction(input: {
   revalidatePath("/catalog");
   return { ok: true, sku };
 }
-import {
-  createTask,
-  setTaskStatus as setTaskStatusStore,
-  updateTask as updateTaskStore,
-  removeTask as removeTaskStore,
-  STATUSES as TASK_STATUSES,
-  type TaskStatus,
-} from "@/lib/stores/tasks";
-import { applyTaskTemplate } from "@/lib/stores/task-templates";
 
 /**
  * Estimator server actions — thin, session-gated wrappers over the quotes
@@ -549,10 +537,9 @@ export async function saveQuoteAction(
   const sellSanitized = Array.isArray(sellNormalizedRaw)
     ? deriveEstimatorSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalizedRaw, discounts, await loadBonusRates())
     : sellNormalizedRaw;
-  // #282 phase 2: a negative price only on the Rewards credit line, and that
-  // line clamped to what the customer can spend here — refused, not stored,
-  // when any other line carries one.
-  const credit = await settleRewardCredit(sellSanitized, prior, live && prior ? prior.customerId || null : payload.customerId || null, loadedId, can("create", user.roles));
+  // A negative price only on a stored credit line, never more than the quote
+  // already carried — refused, not stored, when any other line carries one.
+  const credit = settleRewardCredit(sellSanitized, prior, live && prior ? prior.customerId || null : payload.customerId || null);
   if (!credit.ok) {
     return {
       ok: false,
@@ -640,7 +627,7 @@ export async function saveQuoteAction(
   let reopenedAtWon = false;
   // #368: set when this save's status move was a revise that re-priced lines.
   let repriced = false;
-  let statusNotice: string | undefined = credit.notice;
+  let statusNotice: string | undefined;
   let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
      system, or moving one to another estimate, would otherwise strand its
@@ -838,8 +825,7 @@ export async function saveQuoteAction(
     // Read back from the store: the key must match what the next check will read.
     liveKey: liveKeyOut ?? (q?.id ? liveKey((await get(q.id)) ?? q) : undefined),
     next: q ? await quoteNextStepFor(q, user) : null,
-    // #282 follow-up: a save that moved the quote to Lost cleared its credit.
-    rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
+    rewardCredit: credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
     ...(suggestionLinked ? { suggestionLinked: true } : {}),
@@ -849,58 +835,30 @@ export async function saveQuoteAction(
 }
 
 /**
- * #282 phase 2 — the Rewards credit a save may store (spec §5):
- * - a negative price/qty on any line but the credit line refuses the save;
- * - a won quote keeps the credit it had (its redeem is on the ledger — the
- *   builder can't move it; the credit follows the status);
- * - a lost quote carries none (#282 follow-up: going Lost clears the credit
- *   and a save can't put one back — the locked branch re-homes the stored
- *   amount, which is 0);
- * - no customer drops it (the builder also drops it when the customer
- *   changes; the clamp below is always against the customer being saved);
- * - otherwise it is clamped to that company's available credit (balance −
- *   credit on its OTHER open quotes) and the quote's pre-credit total, in
- *   whole dollars rounded down (#282 points follow-up — 1 point = $1);
- * - without `create` the credit can't grow past what the quote already had.
+ * The credit a save may store. The Rewards program is gone, so nothing applies
+ * a new credit; a quote saved while it existed keeps the one it has:
+ * - a negative price/qty on any line but a stored credit line refuses the save;
+ * - a won or lost quote keeps exactly the credit it had;
+ * - otherwise the credit can't grow past what this quote already carried for
+ *   the same customer, or past the quote's pre-credit total.
  */
-async function settleRewardCredit(
+function settleRewardCredit(
   sections: SpecSection[],
   prior: Quote | null,
-  customerId: string | null,
-  loadedId: string | null,
-  mayApply: boolean
-): Promise<{ ok: true; sections: SpecSection[]; credit: number; notice?: string } | { ok: false; error: string }> {
+  customerId: string | null
+): { ok: true; sections: SpecSection[]; credit: number } | { ok: false; error: string } {
   if (!Array.isArray(sections)) return { ok: true, sections, credit: 0 };
-  const posted = rewardCreditOf(sections);
-  let max: number;
   if (prior && (prior.status === "won" || prior.status === "lost")) {
     // Locked: re-home the stored amount (the negative-line check still runs).
     const locked = quoteRewardCredit(prior);
-    const check = sanitizeRewardCredit(sections, Number.POSITIVE_INFINITY);
+    const check = sanitizeRewardCredit(sections, 0);
     if (!check.ok) return check;
     const maxId = sections.reduce((m, s) => Math.max(m, ...(s?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const out = withRewardCredit(check.sections, locked, maxId + 1);
     return { ok: true, sections: out, credit: rewardCreditOf(out) };
   }
-  if (!customerId || !(posted > 0)) max = 0;
-  else {
-    const { available } = await companyCredit(customerId, loadedId);
-    max = maxApplicableCredit(available, totals(withoutRewardCredit(sections), 0).grand);
-    if (!mayApply) max = Math.min(max, prior && (prior.customerId || null) === customerId ? quoteRewardCredit(prior) : 0);
-  }
-  const res = sanitizeRewardCredit(sections, max);
-  if (!res.ok) return res;
-  // #282 points follow-up: the credit is whole dollars (points); a legacy
-  // cents credit is rounded down on its next save and says so.
-  const notice =
-    res.rounded && res.credit > 0
-      ? `Rewards credit rounded down to whole dollars (${fmtMoney(res.credit)}) — credit applies as whole points.`
-      : res.clamped && res.credit > 0
-      ? `Rewards credit reduced to ${fmtMoney(res.credit)} — that's what this customer has available.`
-      : res.clamped
-      ? "Rewards credit removed — this customer has no credit available for this quote."
-      : undefined;
-  return { ok: true, sections: res.sections, credit: res.credit, ...(notice ? { notice } : {}) };
+  const had = prior && customerId && (prior.customerId || null) === customerId ? quoteRewardCredit(prior) : 0;
+  return sanitizeRewardCredit(sections, Math.min(had, Math.max(0, totals(withoutRewardCredit(sections), 0).grand)));
 }
 
 function fmtMoney(n: number): string {
@@ -1923,99 +1881,3 @@ export async function travelForSelectionAction(
   };
 }
 
-/* ---------------- quote tasks (PUNCHLIST #17 remainder) ----------------
-   Thin wrappers over the shared tasks store, mirroring projects/actions.ts's
-   addTaskAction/setTaskStatusAction/updateTaskAction — same store, same
-   shape, kept as separate action functions per-route (each route owns its
-   own "use server" file in this app) rather than importing across routes.
-   setTaskStatusAction/updateTaskAction there are already parent-agnostic
-   (they only ever touch taskId), so only "add" needs a quote-specific
-   version — it writes quoteId instead of projectId. */
-
-export async function addQuoteTaskAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
-  const me = await requireUser();
-  const quoteId = String(formData.get("quoteId") || "");
-  const title = String(formData.get("title") || "").trim();
-  const section = String(formData.get("section") || "Review");
-  const assigneeUserId = String(formData.get("assigneeUserId") || "") || null;
-  const due = String(formData.get("dueAt") || "");
-  if (!quoteId || !title) return;
-  const assigneeName = assigneeUserId
-    ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
-    : "";
-  try {
-    await createTask(
-      {
-        title,
-        section,
-        quoteId,
-        assigneeUserId,
-        assigneeName,
-        dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
-        ...readTierSize(formData),
-      },
-      me
-    );
-  } catch (error) {
-    console.error("addQuoteTaskAction: task mint failed", error);
-    return { ok: false, error: "Couldn’t add that task — please try again." };
-  }
-  revalidatePath("/", "layout");
-}
-
-export async function setQuoteTaskStatusAction(formData: FormData) {
-  await requireUser();
-  const taskId = String(formData.get("taskId") || "");
-  const status = String(formData.get("status") || "");
-  if (!taskId || !(TASK_STATUSES as readonly string[]).includes(status)) return;
-  await setTaskStatusStore(taskId, status as TaskStatus);
-  revalidatePath("/", "layout");
-}
-
-export async function updateQuoteTaskAction(formData: FormData) {
-  await requireUser();
-  const taskId = String(formData.get("taskId") || "");
-  if (!taskId) return;
-  const patch: Record<string, unknown> = {};
-  if (formData.has("assigneeUserId")) {
-    const uid = String(formData.get("assigneeUserId") || "") || null;
-    patch.assigneeUserId = uid;
-    patch.assigneeName = uid ? (await activeUsers()).find((u) => u.id === uid)?.name || "" : "";
-  }
-  if (formData.has("dueAt")) {
-    const d = String(formData.get("dueAt") || "");
-    patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
-  }
-  if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
-  Object.assign(patch, readTierSize(formData));
-  await updateTaskStore(taskId, patch);
-  revalidatePath("/", "layout");
-}
-
-/** Delete a quote task (soft delete). Parent-agnostic like set-status/update
- *  above — only ever touches taskId — but kept as its own per-route wrapper
- *  for the same "use server" convention as the rest of this file. */
-export async function removeQuoteTaskAction(formData: FormData) {
-  await requireUser();
-  const taskId = String(formData.get("taskId") || "");
-  if (!taskId) return;
-  await removeTaskStore(taskId);
-  revalidatePath("/", "layout");
-}
-
-/** Apply a reusable task-template set (D149, #118) to this quote — thin
- *  FormData wrapper over task-templates.ts's applyTaskTemplate(), same
- *  no-op-on-bad-input convention as addQuoteTaskAction above. */
-export async function applyQuoteTemplateAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
-  const me = await requireUser();
-  const quoteId = String(formData.get("quoteId") || "");
-  const setId = String(formData.get("setId") || "");
-  if (!quoteId || !setId) return;
-  try {
-    await applyTaskTemplate(setId, { kind: "quote", id: quoteId }, me);
-  } catch (error) {
-    console.error("applyQuoteTemplateAction: task template failed", error);
-    return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
-  }
-  revalidatePath("/", "layout");
-}

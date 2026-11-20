@@ -22,7 +22,6 @@ function linkedRecordHref(link: { type: string; id: string }): string {
   if (link.type === "lead") return `/leads?lead=${id}`;
   if (link.type === "survey") return `/venue-assessments?id=${id}`;
   if (link.type === "inspection") return `/inspections?id=${id}`;
-  if (link.type === "project") return `/projects`;
   if (link.type === "flame_job") return `/flame-tests/results?job=${id}`;
   return "#";
 }

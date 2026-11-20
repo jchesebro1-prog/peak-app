@@ -8,7 +8,7 @@ import { withDatasheetAliases, type DatasheetLinkView, type PackagePlanView } fr
 import { partModel } from "@/lib/catalog-rename/sku";
 import { expandLine, type FixtureLookup, type MemberLine } from "@/lib/quote-line-members";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 
 /**
  * Estimator Phase 4 (spec §11.1) — the staff preview of what the client gets:

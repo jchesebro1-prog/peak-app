@@ -5,7 +5,6 @@ import { getContact } from "@/lib/identity/contacts";
 import { getMany as getQuotes, markBidScopeOnly, withQuoteRowLock } from "@/lib/stores/quotes";
 import type { Quote } from "@/lib/stores/quotes";
 import type { LeadRecord } from "@/lib/stores/leads";
-import type { ProjectRecord } from "@/lib/stores/projects";
 import {
   carriesTo, normalizePartyInput, ownerConflict, partyInputProblem, sortParties,
   type BidderState, type Party, type PartyInput, type PartyRecordType, type PartyRole,
@@ -67,12 +66,11 @@ export async function listForCompany(companyId: string): Promise<Party[]> {
 /** A party group plus the loaded record behind it — a discriminated union so a caller needs no casts. */
 export type LiveRecordGroup =
   | { recordType: "quote"; recordId: string; parties: Party[]; record: Quote }
-  | { recordType: "lead"; recordId: string; parties: Party[]; record: LeadRecord }
-  | { recordType: "project"; recordId: string; parties: Party[]; record: ProjectRecord };
+  | { recordType: "lead"; recordId: string; parties: Party[]; record: LeadRecord };
 
 /**
  * The records a company is on, one entry per record with all that record's party rows and the loaded record. A
- * party row can outlive its record (a quote, lead or project deleted later keeps its rows), so only groups whose
+ * party row can outlive its record (a quote or lead deleted later keeps its rows), so only groups whose
  * record still exists are returned — the company page card and the company delete guard both read this, never
  * `listForCompany` directly. Each record type loads in ONE batched call (not one read per record).
  */
@@ -86,12 +84,12 @@ export async function liveRecordsForCompany(companyId: string): Promise<LiveReco
   }
   const all = [...groups.values()];
   const idsOf = (t: PartyRecordType) => [...new Set(all.filter((g) => g.recordType === t).map((g) => g.recordId))];
-  const liveDocs = async <T extends Doc>(coll: "leads" | "projects", ids: string[]) =>
+  const liveDocs = async <T extends Doc>(coll: "leads", ids: string[]) =>
     new Map((await getDocRows<T>(coll, ids)).filter((r) => !r.deleted).map((r) => [r.id, r.doc]));
-  const [quotes, leads, projects] = await Promise.all([
+  // Rows on a project (record type "project") are history: Projects were removed, so they are not listed.
+  const [quotes, leads] = await Promise.all([
     getQuotes(idsOf("quote")),
     liveDocs<LeadRecord>("leads", idsOf("lead")),
-    liveDocs<ProjectRecord>("projects", idsOf("project")),
   ]);
   const out: LiveRecordGroup[] = [];
   for (const g of all) {
@@ -101,9 +99,6 @@ export async function liveRecordsForCompany(companyId: string): Promise<LiveReco
     } else if (g.recordType === "lead") {
       const record = leads.get(g.recordId);
       if (record) out.push({ ...g, recordType: "lead", record });
-    } else {
-      const record = projects.get(g.recordId);
-      if (record) out.push({ ...g, recordType: "project", record });
     }
   }
   return out;

@@ -66,17 +66,11 @@ export const NAV: NavEntry[] = [
   {
     kind: "group",
     key: "pm",
-    label: "Projects",
-    mobileLabel: "PM",
+    label: "Service",
+    mobileLabel: "SVC",
     children: [
-      { key: "projects", label: "Projects", href: "/projects" },
-      { key: "myprojects", label: "My Projects", href: "/projects?who=mine" }, // #22 — see the EST note
-      { key: "schedule", label: "Schedule", href: "/schedule" },
-      { key: "fieldwork", label: "Field Work", href: "/field-work" },
       { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
       { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
-      { key: "repairs", label: "Repairs", href: "/repairs" },
-      { key: "rentals", label: "Rentals", href: "/rentals" },
     ],
   },
   {
@@ -89,7 +83,6 @@ export const NAV: NavEntry[] = [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "myleads", label: "My Leads", href: "/leads?who=mine" }, // #22 — see the EST note
       { key: "companies", label: "Companies", href: "/companies" },
-      { key: "rewards", label: "Rewards", href: "/rewards" }, // #282 — customer rewards (levels, tier suggestions)
       { key: "vendors", label: "Vendors", href: "/vendors" }, // #122 — vendor companies + price-list ledger
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
@@ -157,9 +150,6 @@ export function activeKeyFor(pathname: string): string {
   if (pathname === "/quotes/portal" || pathname.startsWith("/quotes/portal/")) return "portal-quotes";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
-    "/queue": "queue",
-    "/triage": "dashboard", // Morning triage — "See more" from Home's Start here card
-    "/calendar": "calendar",
     "/inbox": "inbox",
     "/leads": "leads",
     "/opportunities": "opportunities",
@@ -168,15 +158,9 @@ export function activeKeyFor(pathname: string): string {
     "/design": "designoverview",
     "/knowledge": "knowledgeoverview", // #136 — every /knowledge/* route lights the KNOWLEDGE pill
     "/reviews": "reviews",
-    "/projects": "projects",
-    "/schedule": "schedule",
-    "/field-work": "fieldwork",
     "/flame-tests": "flametests",
     "/inspections": "inspections",
-    "/repairs": "repairs",
-    "/rentals": "rentals",
     "/companies": "companies",
-    "/rewards": "rewards", // #282
     "/vendors": "vendors",
     "/people": "people",
     "/venues": "venues",
@@ -187,7 +171,6 @@ export function activeKeyFor(pathname: string): string {
     "/reports": "reports",
     "/templates": "settings",
     "/estimating-rules": "settings",
-    "/task-templates": "settings",
     "/import": "settings",
     "/settings": "settings",
     "/account": "account",

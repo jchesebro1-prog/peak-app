@@ -27,7 +27,7 @@ import { driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 import { deriveSeededMarker, normalizeLift, normalizePriceOverride, savedLift } from "@/lib/service-pricing";
 import { settleServiceCreditFor } from "@/lib/stores/reward-ledger";
-import { grossQuoteValue } from "@/lib/rewards/credit-line";
+import { grossQuoteValue } from "@/lib/credit-line";
 import { netServiceTotal } from "@/lib/rewards/service-credit";
 import { getLiftRate, inspectionVenueInputsFrom, resolveQuoteOffice } from "@/lib/service-quote-inputs";
 import { approveKeepsAcceptedPrice, sourceForSave } from "@/lib/portal-quote-mode";

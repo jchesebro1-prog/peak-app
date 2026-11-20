@@ -9,7 +9,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { companies, sites } from "@/db/schema";
-import { chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
+import { chicagoDayKey, chicagoDayStart } from "@/lib/chicago-day";
 import { open as openLeads } from "@/lib/stores/leads";
 import { allVisits } from "@/lib/stores/site-visits";
 import { addressKey } from "./keys";

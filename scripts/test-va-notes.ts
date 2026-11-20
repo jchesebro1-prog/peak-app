@@ -2583,7 +2583,7 @@ export async function vaNotesDbChecks(ok: Ok): Promise<void> {
   const { fixtureId, registerFixture } = await import("./test-fixtures");
   const { requestVisitForLead } = await import("../src/lib/stores/site-visits");
   const S = await import("../src/lib/stores/surveys");
-  const { chicagoDayKey } = await import("../src/lib/drive-plan/day");
+  const { chicagoDayKey } = await import("../src/lib/chicago-day");
   const lead = (n: string) => ({ id: fixtureId(342, n), org: "VA fixture", contact: "Pat", email: "p@x.org", phone: "", address: "", city: "", state: "", customerId: null });
 
   const r1 = await requestVisitForLead(lead("lead-a"), { reason: "walk", timing: "", assignee: "Sam Surveyor" }, "Office Person");

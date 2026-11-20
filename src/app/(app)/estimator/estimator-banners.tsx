@@ -1,7 +1,6 @@
 "use client";
 
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
-import { PurchasePerksBanner } from "@/components/rewards/purchase-perks-banner";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import type { EstimatorState } from "./use-estimator-state";
 import { LiveConflictBanner } from "./live-save-chip";
@@ -18,7 +17,6 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
     actionError,
     actionNotice,
     applySync,
-    creditInfo,
     customerId,
     gateRefused,
     live,
@@ -150,10 +148,6 @@ export function EstimatorBanners({ s, onActed }: { s: EstimatorState; onActed: (
           </button>
         </div>
       )}
-
-      {/* #282 perks+points — the customer's standing purchase perks
-          (informational; only the answer for the customer picked now). */}
-      {customerId && creditInfo?.customerId === customerId && <PurchasePerksBanner text={creditInfo.purchasePerks} />}
 
       {/* "Move system" result banner — success links to the target
           estimate without auto-navigating (this estimate may have

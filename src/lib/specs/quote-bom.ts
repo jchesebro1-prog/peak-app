@@ -5,7 +5,7 @@ import { fixtureSkus } from "@/lib/fixture-assemblies";
 import { getMany } from "@/lib/stores/catalog";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { curtainSpecKey } from "@/lib/specs/record-keys";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { expandLine, needsFixtureLookup } from "@/lib/quote-line-members";
 

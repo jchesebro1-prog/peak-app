@@ -78,7 +78,7 @@ export type PackageViewProps = {
   narrativeHref: string;
   bomHref: string;
   scopes: PackageScopeView[];
-  totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
+  totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; standingLines: string[] };
   options: Array<{ label: string; desc: string; reason: string; price: string }>;
   /** Estimator Phase 2b — the Alternates card (mirrors the cover's list);
    *  present only when the revision has printed alternates. */
@@ -174,7 +174,6 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
       creditAmount: t.credit > 0 ? "−" + fmt(t.credit) : null,
       totalLabel: t.totalLabel,
       total: fmt(t.total),
-      rewardsLine: t.rewardsLine,
       standingLines: t.standingLines,
     },
     options: addOptions(d).map((o) => ({ label: o.label, desc: o.desc, reason: o.reason, price: fmt(o.price) })),

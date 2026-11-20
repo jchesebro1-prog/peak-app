@@ -14,7 +14,7 @@ function one(v: string | string[] | undefined): string {
 
 const CSS = `
   .vn-row:hover { background: #fafbff; }
-  .vn-grid { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(0,1.4fr) 52px 108px 150px 132px minmax(0,1fr); gap: 10px; align-items: center; }
+  .vn-grid { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(0,1.4fr) 52px 108px 150px 132px; gap: 10px; align-items: center; }
   @media (max-width: 900px) {
     .vn-grid { grid-template-columns: minmax(0,1.3fr) 108px 132px; }
     .vn-wide { display: none !important; }
@@ -81,7 +81,6 @@ export default async function VendorsPage({
           <span style={th}>Catalog priced</span>
           <span className="vn-wide" style={th}>Last list rec’d / eff.</span>
           <span style={th}>Status</span>
-          <span className="vn-wide" style={th}>Owner task</span>
         </div>
         {rows.map((r) => {
           const sm = VENDOR_STATUS_META[r.status];
@@ -110,19 +109,6 @@ export default async function VendorsPage({
                 <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap" }}>
                   {sm.label}
                 </span>
-              </span>
-              <span className="vn-wide" style={{ minWidth: 0 }}>
-                {r.openTask ? (
-                  <Link
-                    href={`/queue?who=${encodeURIComponent(r.openTask.assignee)}`}
-                    title={`${r.openTask.title} — ${r.openTask.assignee}`}
-                    style={{ ...cell, display: "block", color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}
-                  >
-                    {r.openTask.title}
-                  </Link>
-                ) : (
-                  <span style={{ fontSize: 12, color: "#aab0bb" }}>—</span>
-                )}
               </span>
             </div>
           );

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { create, get, update, type SurveyStage } from "@/lib/stores/surveys";
 import { create as createQuote } from "@/lib/stores/quotes";
-import { chicagoDayKey } from "@/lib/drive-plan/day";
+import { chicagoDayKey } from "@/lib/chicago-day";
 
 /**
  * Field-survey inbox mutation. `createSurvey` mirrors the prototype's

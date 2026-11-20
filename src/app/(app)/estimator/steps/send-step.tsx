@@ -5,9 +5,6 @@ import type { NextStepAction } from "@/lib/quote-next-step";
 import { SEND_STEP_IDS, sendStepLayout, type SendCard } from "@/lib/estimate-email/send-ui";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
-import { TasksCard } from "@/components/tasks-card";
-import { ApplyTemplateControl } from "@/components/apply-template-control";
-import { addQuoteTaskAction, removeQuoteTaskAction, applyQuoteTemplateAction, setQuoteTaskStatusAction, updateQuoteTaskAction } from "../actions";
 import { ClientLinkPanel } from "../client-link-panel";
 import { PackageStaffPanel } from "../package-staff-panel";
 import { CHEVRON_CLIP, DARK_SELECT, STATUS_DOT } from "../estimator-styles";
@@ -26,7 +23,7 @@ const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpac
 
 /**
  * #305 — Send & track: status and the next step, the Daylite pipeline, the
- * client link (+ revisions) and the client's responses, and the quote's tasks.
+ * client link (+ revisions) and the client's responses.
  * Phase 3 (spec §10): the email composer leads before the first send; once
  * sent, the Activity card leads with a collapsed "Send another email"
  * composer (none once won/lost). The cards render as one keyed list, so a
@@ -54,7 +51,6 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     pdfDirty,
     people,
     pipelines,
-    quoteTasks,
     saveNow,
     selectionSettled,
     setActionError,
@@ -66,7 +62,6 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     stageBarPipeline,
     status,
     statusChanging,
-    templateSets,
     tierResolving,
     next,
     setPdf,
@@ -290,45 +285,6 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
           </>
         )}
         {loadedId && <PackageStaffPanel quoteId={loadedId} section="responses" onPdf={setPdf} />}
-      </section>
-    ),
-    tasks: (
-      <section key="tasks" aria-label="Tasks" style={CARD}>
-        {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
-              attach to; a brand-new unsaved draft has nowhere for
-              quoteId to point yet. */}
-        <div>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: "#9aa0ab",
-              letterSpacing: ".05em",
-              textTransform: "uppercase",
-              marginBottom: 8,
-            }}
-          >
-            Tasks
-          </div>
-          {loadedId ? (
-            <>
-              <ApplyTemplateControl parentField="quoteId" parentId={loadedId} templateSets={templateSets} action={applyQuoteTemplateAction} />
-              <TasksCard
-                parentField="quoteId"
-                parentId={loadedId}
-                tasks={quoteTasks}
-                people={people}
-                addAction={addQuoteTaskAction}
-                setStatusAction={setQuoteTaskStatusAction}
-                updateAction={updateQuoteTaskAction}
-                removeAction={removeQuoteTaskAction}
-                defaultSection="Review"
-              />
-            </>
-          ) : (
-            <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the quote to add tasks.</div>
-          )}
-        </div>
       </section>
     ),
   };

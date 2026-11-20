@@ -10,23 +10,20 @@
  *  - site visit: I lead it (`assignedTo`) or attend it and it starts today,
  *    whatever its stage. A visit has no page of its own: its survey editor when it has
  *    one, else the company record (recordings/data.ts uses the same rule);
- *  - venue assessment (survey), inspection, flame test, repair: assigned to
- *    me (a repair's crew counts), scheduled today, not completed;
+ *  - venue assessment (survey), inspection, flame test: assigned to
+ *    me, scheduled today, not completed;
  *  - assessment (#340): I'm the assessor, its visit date is today, not
- *    completed;
- *  - install project: a crew booking of mine covers today and it isn't done.
+ *    completed.
  * Names are the app convention for `assignedTo` / crew (team-member NAME); an
  * assessment's assessor is a user id.
  */
 import type { SurveyRecord } from "@/lib/stores/surveys";
 import type { InspectionRecord } from "@/lib/stores/inspections";
 import type { FlameJob } from "@/lib/stores/flame-jobs";
-import type { RepairJobRecord } from "@/lib/stores/repair-jobs";
 import type { SiteVisit } from "@/lib/stores/site-visits";
 import type { Assessment } from "@/lib/stores/assessments";
-import type { ProjectRecord } from "@/lib/stores/projects";
 
-export type TodayJobKind = "site_visit" | "survey" | "inspection" | "flame_job" | "repair_job" | "assessment" | "project";
+export type TodayJobKind = "site_visit" | "survey" | "inspection" | "flame_job" | "assessment";
 
 export type TodayJob = {
   kind: TodayJobKind;
@@ -34,7 +31,7 @@ export type TodayJob = {
   title: string;
   href: string;
   /** The offline field collection the record mirrors from, or null (a site visit is not mirrored — its page is). */
-  collection: "surveys" | "inspections" | "flame_jobs" | "repair_jobs" | "assessments" | "projects" | null;
+  collection: "surveys" | "inspections" | "flame_jobs" | "assessments" | null;
 };
 
 export const TODAY_KIND_LABEL: Record<TodayJobKind, string> = {
@@ -42,9 +39,7 @@ export const TODAY_KIND_LABEL: Record<TodayJobKind, string> = {
   survey: "Venue assessment",
   inspection: "Inspection",
   flame_job: "Flame test",
-  repair_job: "Repair",
   assessment: "Assessment",
-  project: "Install",
 };
 
 export type TodayInput = {
@@ -52,9 +47,7 @@ export type TodayInput = {
   surveys?: readonly Pick<SurveyRecord, "id" | "stage" | "assignedTo" | "scheduledDate" | "customer" | "venue">[];
   inspections?: readonly Pick<InspectionRecord, "id" | "stage" | "assignedTo" | "scheduledDate" | "customer" | "venue">[];
   flame?: readonly Pick<FlameJob, "id" | "stage" | "assignedTo" | "scheduledDate" | "customer" | "venue">[];
-  repairs?: readonly Pick<RepairJobRecord, "id" | "stage" | "assignedTo" | "crew" | "scheduledDate" | "customer" | "venue">[];
   assessments?: readonly Pick<Assessment, "id" | "status" | "assessorId" | "visitDate">[];
-  projects?: readonly Pick<ProjectRecord, "id" | "kind" | "name" | "customer" | "crew">[];
 };
 
 /** "YYYY-MM-DD" from an ISO date string ('' / malformed → ""). */
@@ -69,16 +62,13 @@ const titleOf = (customer: string | null | undefined, venue: string | null | und
 const enc = encodeURIComponent;
 
 /**
- * Today's jobs for `me`. `dayKeyOf` maps epoch-ms to a Chicago "YYYY-MM-DD";
- * `projectDone` says whether an install is finished (pipelines); a project
- * booking covers today when its span [start, end] meets [dayStart, dayEnd].
+ * Today's jobs for `me`. `dayKeyOf` maps epoch-ms to a Chicago "YYYY-MM-DD".
  */
 export function todaysJobs(
   input: TodayInput,
   me: { id: string; name: string },
   today: { key: string; start: number; end: number },
   dayKeyOf: (ms: number) => string,
-  projectDone: (id: string) => boolean = () => false,
 ): TodayJob[] {
   const out: TodayJob[] = [];
   const seen = new Set<string>();
@@ -106,24 +96,17 @@ export function todaysJobs(
   service(input.surveys, "survey", "surveys", (id) => `/venue-assessments/${enc(id)}`);
   service(input.inspections, "inspection", "inspections", (id) => `/inspections/${enc(id)}`);
   service(input.flame, "flame_job", "flame_jobs", (id) => `/flame-tests/results?job=${enc(id)}`);
-  service(input.repairs, "repair_job", "repair_jobs", (id) => `/repairs/results?job=${enc(id)}`);
   for (const a of input.assessments || []) {
     if (a.status === "completed" || !me.id || a.assessorId !== me.id) continue;
     if (typeof a.visitDate !== "number" || dayKeyOf(a.visitDate) !== today.key) continue;
     push({ kind: "assessment", id: a.id, title: a.id, href: `/assessments/${enc(a.id)}`, collection: "assessments" });
   }
-  for (const p of input.projects || []) {
-    if (p.kind !== "project" || projectDone(p.id)) continue;
-    const mine = (p.crew || []).some((c) => same(c.person, me.name) && c.start <= today.end && c.end >= today.start);
-    if (!mine) continue;
-    push({ kind: "project", id: p.id, title: titleOf(p.name, p.customer), href: `/field-work?id=${enc(p.id)}`, collection: "projects" });
-  }
   return out;
 }
 
-/** The pages to keep for offline: the Field Work day list first, then each job's page once. */
+/** The pages to keep for offline: each job's page once. */
 export function pagesToCache(jobs: readonly TodayJob[]): string[] {
-  return [...new Set(["/field-work", ...jobs.map((j) => j.href)])];
+  return [...new Set(jobs.map((j) => j.href))];
 }
 
 /** "Ready offline: N jobs" — the result line. */

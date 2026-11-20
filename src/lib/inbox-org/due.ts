@@ -24,7 +24,7 @@
  * 10. anything else → 2 business days (Mon–Fri) after the anchor
  * Pure.
  */
-import { addDays } from "@/lib/drive-plan/day";
+import { addDays } from "@/lib/chicago-day";
 import { dayKey } from "@/lib/triage/clock";
 import { dueStampForDay, workDaysAfter } from "@/lib/task-plan/due";
 import { weekdayOf } from "@/lib/visit-plan/hours";

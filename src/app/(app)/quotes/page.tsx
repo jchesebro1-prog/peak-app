@@ -74,10 +74,8 @@ function editHrefFor(q: Quote): { href: string; label: string } {
   const href = quoteBuilderHref(q);
   const label =
     q.quoteType === "flame_test" ? "Open flame test quote →"
-    : q.quoteType === "repair" ? "Open repair quote →"
     : q.quoteType === "inspection" ? "Open inspection quote →"
     : q.quoteType === "consulting" ? "Open consulting quote →"
-    : q.quoteType === "rental" ? "Open rental quote →"
     : "Open in Estimator →";
   return { href, label };
 }
@@ -475,10 +473,8 @@ export default async function QuotesPage({
             ["all", "All types", null],
             ["system", "System", null],
             ["flame_test", "Flame test", TYPE_BADGE.flame_test],
-            ["repair", "Repair", TYPE_BADGE.repair],
             ["inspection", "Inspection", TYPE_BADGE.inspection],
             ["consulting", "Consulting", TYPE_BADGE.consulting],
-            ["rental", "Rental", TYPE_BADGE.rental],
           ] as Array<[string, string, { ink: string } | null]>
         ).map(([key, label, badge]) => {
           const active = typeFilter === key;
@@ -1115,22 +1111,25 @@ function SelectedPanel({
               );
             })}
           </form>
-          <PopLink
-            href={editHrefFor(q).href}
-            popKind="estimate"
-            popId={q.id}
-            style={{
-              fontSize: 12.5,
-              fontWeight: 600,
-              color: "#fff",
-              background: "var(--accent)",
-              borderRadius: 8,
-              padding: "9px 14px",
-              textDecoration: "none",
-            }}
-          >
-            {editHrefFor(q).label}
-          </PopLink>
+          {/* The repair and rental builders are gone: an old quote of either type has no builder to open. */}
+          {q.quoteType !== "repair" && q.quoteType !== "rental" && (
+            <PopLink
+              href={editHrefFor(q).href}
+              popKind="estimate"
+              popId={q.id}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "#fff",
+                background: "var(--accent)",
+                borderRadius: 8,
+                padding: "9px 14px",
+                textDecoration: "none",
+              }}
+            >
+              {editHrefFor(q).label}
+            </PopLink>
+          )}
           <DeleteQuoteButton id={q.id} won={q.status === "won"} />
         </div>
       </div>

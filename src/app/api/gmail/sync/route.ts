@@ -1,21 +1,17 @@
 import { NextResponse } from "next/server";
 import { AUTO_SYNC_MIN_AGE_MS } from "@/lib/gmail/config";
 import { checkMailIfStale } from "@/lib/stores/comms";
-import { syncAllGoogleTasks } from "@/lib/google/tasks-sync";
 import { reconcileRecordings } from "@/lib/krisp/reconcile";
 import { archiveRecordings } from "@/lib/krisp/archive";
 import { syncAllMeetings } from "@/lib/meetings/sync";
-import { ensureVendorAssignments } from "@/lib/vendor-tasks";
 import { getSettings } from "@/lib/settings";
 import { syncDrivePhotos } from "@/lib/part-docs/drive-photo-sync";
 import { cronPhotoBudgetMs } from "@/lib/part-docs/drive-photo-view";
-import { buildSlotForAll } from "@/lib/triage/service";
-import { buildBriefsForAll, runDraftsForAll } from "@/lib/brief/build";
 
 // #97 — the Gmail import/poll can take longer than the platform default
 export const maxDuration = 60;
 
-/** The meetings, morning brief and draft riders end by here, so the photo rider keeps its 10 s minimum before its 45 s cutoff. */
+/** The meetings rider ends by here, so the photo rider keeps its 10 s minimum before its 45 s cutoff. */
 const BRIEF_CRON_CUTOFF_MS = 35_000;
 
 /**
@@ -28,14 +24,6 @@ const BRIEF_CRON_CUTOFF_MS = 35_000;
  * CRON_SECRET is configured. The sync itself is throttled by atomic
  * per-mailbox claims, so an aggressive schedule is safe.
  *
- * D146 rides this same trigger for the Google Tasks Home Queue sync: rather
- * than add a second vercel.json cron entry (a second scheduling mechanism
- * for what's conceptually the same "poll Google on a timer" job this route
- * already exists for), syncAllGoogleTasks() runs as an extra step here. It's
- * wrapped in its own try/catch so a Tasks-side failure can never fail the
- * Gmail sync this route was built for; a hiccup is reported in the response
- * body, not thrown.
- *
  * The Recordings feature (spec §3.2 + §5.2) adds two more steps on the same
  * pattern: `reconcileRecordings()` polls Krisp for transcripts that are
  * still processing (≤ 5 per Krisp account per pass), and
@@ -43,16 +31,9 @@ const BRIEF_CRON_CUTOFF_MS = 35_000;
  * (≤ 5 per run). Both are own-try/catch and never throw; on Hobby this
  * makes them daily, and the Vercel upgrade only shortens the cadence.
  *
- * #122 adds ensureVendorAssignments() the same way — the vendor spec's
- * "daily cron" is this route.
- *
  * #283 adds the Peak Product Photos sync the same way.
  *
- * Morning triage adds the morning snapshot build the same way (its midday
- * build is /api/triage/build, the second daily cron).
  * #323 adds the Krisp meeting sync (syncAllMeetings) the same way.
- * The AI daily brief adds the morning briefs and the pre-made draft queue
- * after the meeting sync, the same way, capped at 35 s (D920).
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const started = Date.now();
@@ -69,13 +50,6 @@ export async function GET(req: Request): Promise<NextResponse> {
   // server timer instead; pending threads simply wait for one of those.
   const r = await checkMailIfStale(AUTO_SYNC_MIN_AGE_MS, { aiPass: false });
 
-  let googleTasks: Awaited<ReturnType<typeof syncAllGoogleTasks>> | { error: string };
-  try {
-    googleTasks = await syncAllGoogleTasks();
-  } catch (err) {
-    googleTasks = { error: (err as Error).message };
-  }
-
   let recordings: Awaited<ReturnType<typeof reconcileRecordings>> | { error: string };
   try {
     recordings = await reconcileRecordings();
@@ -90,29 +64,6 @@ export async function GET(req: Request): Promise<NextResponse> {
     recordingsArchive = { error: (err as Error).message };
   }
 
-  // #122 — vendor price-list freshness (spec §4): one catalog read, one
-  // profiles read, at most one new Home Queue task per (vendor, status,
-  // date) key. Own try/catch like the other riders on this daily trigger.
-  let vendors: Awaited<ReturnType<typeof ensureVendorAssignments>> | { error: string };
-  try {
-    vendors = await ensureVendorAssignments(undefined, "Quartzite (daily check)");
-  } catch (err) {
-    vendors = { error: (err as Error).message };
-  }
-
-  // Morning triage (spec 2026-10-09-morning-triage-design.md) — today's
-  // morning list for every active user. 11:45 UTC is 6:45 CDT (5:45 CST) —
-  // the morning brief's time; either way it builds today's Chicago "morning" slot. Before the photo
-  // sync so the photo budget below absorbs whatever this used. Own
-  // try/catch like the other riders.
-  let triage: Awaited<ReturnType<typeof buildSlotForAll>> | { error: string };
-  try {
-    // Stop starting users 30 s in so the photo sync below keeps its window; whoever is skipped builds lazily on first view.
-    triage = await buildSlotForAll("morning", Date.now(), { deadlineMs: started + 30_000 });
-  } catch (err) {
-    triage = { error: (err as Error).message };
-  }
-
   // #323 — Krisp meeting sync for every connected rep (rolling 14-day window). AHEAD of the brief and
   // draft riders (D920) so it keeps its window: whatever is left before the 35 s rider cutoff, at most
   // 20 s, every rep skipped when under 5 s is left. A Krisp call already in flight can run its own 20 s
@@ -124,26 +75,6 @@ export async function GET(req: Request): Promise<NextResponse> {
     meetings = await syncAllMeetings(Math.max(0, Math.min(20_000, BRIEF_CRON_CUTOFF_MS - (Date.now() - started))));
   } catch (err) {
     meetings = { error: (err as Error).message };
-  }
-
-  // AI daily brief (spec §1, §2) — the morning brief for every Assist pilot
-  // user with Daily brief on, after their list and the meeting sync, then
-  // the pre-made draft queue for them. Both end by BRIEF_CRON_CUTOFF_MS
-  // (35 s; Assist calls end 5 s before it), so the photo sync below still
-  // gets its 10 s minimum before its 45 s cutoff. A brief starts only with ≥ 12 s left, a
-  // draft queue with ≥ 20 s; whoever doesn't fit builds lazily on Home (and
-  // Home's after() drafts). Each in its own try/catch like the other riders.
-  let briefs: Awaited<ReturnType<typeof buildBriefsForAll>> | { error: string };
-  try {
-    briefs = await buildBriefsForAll("morning", Date.now(), { deadlineMs: started + BRIEF_CRON_CUTOFF_MS });
-  } catch (err) {
-    briefs = { error: (err as Error).message };
-  }
-  let drafts: Awaited<ReturnType<typeof runDraftsForAll>> | { error: string } | null = null;
-  try {
-    if ("userIds" in briefs) drafts = await runDraftsForAll(briefs.userIds, started + BRIEF_CRON_CUTOFF_MS);
-  } catch (err) {
-    drafts = { error: (err as Error).message };
   }
 
   // #283 — Peak Product Photos: one budgeted pass on this daily trigger,
@@ -162,5 +93,5 @@ export async function GET(req: Request): Promise<NextResponse> {
     drivePhotos = { error: (err as Error).message };
   }
 
-  return NextResponse.json({ ...r, googleTasks, recordings, recordingsArchive, meetings, vendors, triage, briefs, drivePhotos, drafts });
+  return NextResponse.json({ ...r, recordings, recordingsArchive, meetings, drivePhotos });
 }

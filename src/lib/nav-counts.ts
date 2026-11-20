@@ -1,33 +1,22 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
-import { isDone } from "@/lib/pipelines";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { listDesignRecords } from "@/lib/stores/designs";
-import { getAllProjects, riskFlags } from "@/lib/stores/projects";
 import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
 import { getAll as allInspections } from "@/lib/stores/inspections";
-import {
-  getAll as allRepairs,
-  flaggedFromInspections,
-  priorityMeta,
-} from "@/lib/stores/repair-jobs";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { allVisits } from "@/lib/stores/site-visits";
 import { getAll as allComms, isAssignedTo, waitHours, unreadCountFrom } from "@/lib/stores/comms";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { getPrefs } from "@/lib/stores/notif-prefs";
-import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
 import { countOpenImmediateFindings } from "@/lib/stores/findings";
 import { unseenCustomerDocuments } from "@/lib/stores/documents";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import { customerUploadBell } from "@/lib/document-rules";
-import { shortDate } from "@/lib/format";
 import { displayLeadNumber } from "@/lib/estimate-number";
 import { portalBellGroups } from "@/lib/portal-bell";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { quoteAwaitsApprovalBy, quoteBackFromReview, sameName } from "@/lib/quote-approval-rules";
 import { firstName } from "@/lib/team";
-import { perksToFulfil } from "@/lib/stores/reward-perks";
-import { perkBellItems } from "@/lib/rewards/perk-bell";
 import type {
   NavCounts,
   BellGroup,
@@ -90,18 +79,14 @@ export async function navData(me: string, canApprove = false, meId: string | nul
   const [
     quotes,
     designs,
-    projects,
     inspections,
-    repairs,
     surveys,
     comms,
     visits,
     leadFollowUps,
     renewalRows,
-    taskRows,
     prefs,
     unseenDocs,
-    perkRedemptions,
     immediateFindingCount,
     viewer,
   ] = await Promise.all([
@@ -110,20 +95,15 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     // read, never live Grid pricing (a catalog load per Grid design) on
     // every page navigation.
     listDesignRecords(),
-    getAllProjects(),
     allInspections(),
-    allRepairs(),
     allSurveys(),
     allComms(),
     allVisits(),
     followUps({ unownedOrMine: true, me }),
     renewals({ dueOnly: true }),
-    allTasks(),
     getPrefs(me),
     // #218 — one SQL-filtered read (source = customer AND seenByTeamAt IS NULL), usually empty.
     unseenCustomerDocuments(),
-    // #282 perks+points — one SQL-filtered read of perk ledger entries (usually few).
-    perksToFulfil(),
     // #340 — open Immediate-attention findings: one SQL count, no documents read.
     countOpenImmediateFindings().catch((error) => {
       console.error("[assessments] nav badge: findings count failed", error);
@@ -137,7 +117,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
   // (flagged), leads (leadCount), and comms (unread) a second time, plus a
   // serial round-trip for unread after the parallel batch. navData runs on
   // every app page, so this is per-navigation overhead removed.
-  const flagged = await flaggedFromInspections({ jobs: repairs, inspections });
   const leadCount = leadFollowUps.length;
   const inboxUnread = unreadCountFrom(comms, viewer);
 
@@ -148,13 +127,9 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       d.review?.reviewer === me &&
       d.owner !== me
   );
-  const riskProjects = projects.filter(
-    (p) => !isDone(p) && riskFlags(p).length > 0
-  );
   const requestedInspections = inspections.filter(
     (r) => (r.stage || "requested") === "requested"
   );
-  const approvedRepairs = repairs.filter((r) => r.stage === "approved");
   const requestedSurveys = surveys.filter(
     (s) => (s.stage || "requested") === "requested"
   );
@@ -176,10 +151,8 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     inbox: inboxUnread,
     leads: leadCount,
     reviews: approvalBell.needs.length + reviewDesigns.length,
-    projects: riskProjects.length,
     flametests: renewalRows.length,
     inspections: requestedInspections.length,
-    repairs: approvedRepairs.length + flagged.length,
     field: requestedSurveys.length,
     assessments: immediateFindingCount,
   };
@@ -256,18 +229,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     }))
   );
   push(
-    "projects",
-    "Projects need attention",
-    riskProjects.map((p) => ({
-      id: p.id,
-      title: p.name,
-      sub: riskFlags(p)[0]?.label || "",
-      href: "/projects",
-      letter: "P",
-      color: "#b4543a",
-    }))
-  );
-  push(
     "flame",
     "Flame tests due for renewal",
     renewalRows.map((r) => ({
@@ -277,18 +238,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       href: "/flame-tests",
       letter: "F",
       color: "#b4543a",
-    }))
-  );
-  push(
-    "repairs",
-    "Repairs awaiting scheduling",
-    approvedRepairs.map((r) => ({
-      id: r.id,
-      title: (r.customer as string) || r.id,
-      sub: `${priorityMeta(r.priority).label} · awaiting scheduling`,
-      href: "/repairs",
-      letter: "R",
-      color: r.priority === "emergency" ? "#8a2f22" : "#b4543a",
     }))
   );
   // #245 (spec §8.2) — derived groups over the same quotes already fetched
@@ -317,18 +266,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       };
     })
   );
-  const nowMs = Date.now();
-  const taskItems = taskBellItems(taskRows, meId, me, nowMs);
-  push("tasks", "Tasks needing attention", taskItems.map((t) => ({
-    id: t.id,
-    title: t.title,
-    sub: t.dueAt
-      ? (isOverdue(t, nowMs) ? "Overdue" : "Due " + shortDate(t.dueAt))
-      : (t.assigneeName || "Unassigned"),
-    href: t.projectId ? `/projects/${t.projectId}` : "/field-work",
-    letter: "T",
-    color: "#b45309",
-  })));
 
   // #218 — one item per company with customer uploads nobody has opened;
   // downloading one (or "Mark seen" on the card) clears it.
@@ -344,11 +281,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     letter: "D",
     color: "#3155a8",
   }] : [])));
-
-  // #282 perks+points — redemptions (portal or staff Redeem) nobody has marked
-  // fulfilled yet; Mark fulfilled (or an admin Undo) on the company card clears one.
-  const perkNames = await Promise.all(perkRedemptions.map((r) => customerNameFor(r.companyId)));
-  push("perks", "Perks to fulfil", perkBellItems(perkRedemptions, perkNames));
 
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
   return { counts, bell: groups, bellCount };

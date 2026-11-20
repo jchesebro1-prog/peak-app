@@ -1,8 +1,5 @@
 import { requireUser } from "@/lib/session";
-import { CATEGORIES, briefRemindersOn, getPrefs, invitesOn } from "@/lib/stores/notif-prefs";
-import { assistSettingsOf } from "@/lib/assist/config";
-import { briefOnFor } from "@/lib/brief/reminders";
-import BriefRemindersToggle from "./brief-reminders-toggle";
+import { CATEGORIES, getPrefs } from "@/lib/stores/notif-prefs";
 import {
   gmailEnabled,
   hasCalendarScope,
@@ -15,11 +12,7 @@ import { getSyncState } from "@/lib/meetings/sync-state";
 import { getSettings } from "@/lib/settings";
 import { getUser } from "@/lib/users";
 import NotifControls from "./notif-controls";
-import InviteToggle from "./invite-toggle";
 import OfficePicker from "./office-picker";
-import DriveBufferCard from "./drive-buffer-card";
-import WorkHoursCard from "./work-hours-card";
-import { getScheduleDefaults, getSchedulingSettings, getUserSchedulePrefs, getUserWorkHours } from "@/lib/stores/schedule-prefs";
 import KrispCard, { type KrispCardInfo } from "./krisp-card";
 import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import { getDashboardOverride } from "@/lib/stores/notif-prefs";
@@ -34,24 +27,17 @@ export const metadata = { title: "Account settings — Quartzite-6" };
 export default async function AccountPage() {
   const user = await requireUser();
   const prefs = await getPrefs(user.name);
-  const invites = await invitesOn(user.name);
   // #335 — archive-on-reply opt-out + my own sender rules
   const [keepInbox, mySenderRules] = await Promise.all([keepInInbox(user.name), loadSenderRuleRows({ scope: "mine", userId: user.id })]);
 
   // D144 — "Based out of" (self-service; Settings -> Team's admin form
   // edits the same users.officeId field but needs manage_users).
-  const [settings, myRow, dashboardOverride, signature, scheduleDefaults, schedulePrefs, scheduling, myWorkHours] = await Promise.all([
+  const [settings, myRow, dashboardOverride, signature] = await Promise.all([
     getSettings(),
     getUser(user.id),
     getDashboardOverride(user.name),
     signatureFor(user.name),
-    getScheduleDefaults(),
-    getUserSchedulePrefs(user.id),
-    getSchedulingSettings(),
-    getUserWorkHours(user.id),
   ]);
-  // null hides the toggle: only an Assist pilot user with Daily brief on has a brief to be reminded of
-  const briefReminders = briefOnFor(user.id, assistSettingsOf(settings)) ? await briefRemindersOn(user.name) : null;
   const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
   const myOfficeId = myRow?.officeId || "";
 
@@ -179,10 +165,8 @@ export default async function AccountPage() {
         </span>
       </div>
 
-      {/* ---- based out of (D144 — feeds Calendar's auto travel-time block) ---- */}
+      {/* ---- based out of (D144) ---- */}
       <OfficePicker offices={officeOptions} initialOfficeId={myOfficeId} />
-      <DriveBufferCard initial={schedulePrefs.driveBufferMin} companyDefault={scheduleDefaults.driveBufferMin} />
-      <WorkHoursCard initial={myWorkHours} companyDefault={scheduling.workHours} />
 
       <DashboardLayoutEditor
         mode="personal"
@@ -278,11 +262,6 @@ export default async function AccountPage() {
       {/* ---- my Krisp key (Recordings spec §1.2 / §6) ---- */}
       <KrispCard info={krisp} />
 
-      {/* ---- site-visit calendar invites (D76) ---- */}
-      <InviteToggle initialOn={invites} />
-
-      {/* ---- AI daily brief phone reminders (Assist pilot + Daily brief only) ---- */}
-      {briefReminders !== null && <BriefRemindersToggle initialOn={briefReminders} />}
     </div>
   );
 }

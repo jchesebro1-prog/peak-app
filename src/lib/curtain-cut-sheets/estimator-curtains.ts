@@ -9,7 +9,7 @@
 import { ensureOptions, hasOption, optionSlice, type GridOption } from "@/lib/design/grid-options";
 import type { GridCurtain, GridCurtainType } from "@/lib/design/grid-bom";
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import type { TrackOperation, TrackSeries } from "@/lib/track-series";
 import { pathSignature } from "@/lib/track-path";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";

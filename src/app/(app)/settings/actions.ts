@@ -874,7 +874,6 @@ export async function testAssistKeyAction(): Promise<{ ok: true; message: string
  *  default quote pipeline. Thin wrapper — savePipelines() validates (pure
  *  validators) and refuses removing a stage still holding records. */
 export async function savePipelinesAction(input: {
-  project?: ProjectPipeline[];
   quote?: QuotePipeline[];
   defaultQuotePipelineId?: string;
 }) {
@@ -890,7 +889,7 @@ export async function savePipelinesAction(input: {
  *  wrapper over moveStageRecords(); see its doc comment for the project vs.
  *  quote rules. */
 export async function moveStageRecordsAction(
-  kind: "project" | "quote",
+  kind: "quote",
   pipelineId: string,
   fromStage: string,
   toStage: string
@@ -948,7 +947,7 @@ export async function saveReviewLimitsAction(
   return { ok: true };
 }
 
-/** #301 — Settings → Sales & Rewards → Estimate output. Admin-only; the
+/** #301 — Settings → Sales → Estimate output. Admin-only; the
  *  stored blob is the cleaned input (lines trimmed, blanks dropped). */
 export async function saveEstimateOutputDefaultsAction(input: {
   notIncluded: string;
@@ -961,27 +960,3 @@ export async function saveEstimateOutputDefaultsAction(input: {
   return { ok: true, defaults };
 }
 
-/** Spec 2026-10-09 "Buffer" — the company default drive buffer. Every rep
- *  without their own buffer moves, so all reps re-sync on next view. */
-export async function saveDriveDefaultsAction(input: { driveBufferMin: unknown }) {
-  await requirePerm("manage_users");
-  const { saveScheduleDefaults, markDriveStale } = await import("@/lib/stores/schedule-prefs");
-  const { activeUsers } = await import("@/lib/users");
-  const saved = await saveScheduleDefaults({ driveBufferMin: input?.driveBufferMin });
-  if (!saved.ok) return { ok: false as const, error: saved.error };
-  await markDriveStale((await activeUsers()).map((u) => u.id));
-  revalidatePath("/", "layout");
-  return { ok: true as const, driveBufferMin: saved.driveBufferMin };
-}
-
-/** Spec 2026-10-09 site-visit scheduling — company work hours, same-area
- *  drive time, daily drive limit and Nearby-days look-ahead. Read live by the
- *  booking check; nothing to re-sync. */
-export async function saveSchedulingSettingsAction(input: unknown) {
-  await requirePerm("manage_users");
-  const { saveSchedulingSettings } = await import("@/lib/stores/schedule-prefs");
-  const r = await saveSchedulingSettings(input);
-  if (!r.ok) return { ok: false as const, error: r.error };
-  revalidatePath("/", "layout");
-  return { ok: true as const, settings: r.settings };
-}

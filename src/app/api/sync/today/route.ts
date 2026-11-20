@@ -2,16 +2,12 @@ import { NextResponse } from "next/server";
 import { getOptionalUser } from "@/lib/session";
 import { mayPullFieldData } from "@/lib/sync/pull-collections";
 import { todaysJobs, pagesToCache } from "@/lib/sync/today-jobs";
-import { chicagoDayKey, chicagoDayStart, addDays } from "@/lib/drive-plan/day";
+import { chicagoDayKey, chicagoDayStart, addDays } from "@/lib/chicago-day";
 import { allVisits } from "@/lib/stores/site-visits";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAll as allFlame } from "@/lib/stores/flame-jobs";
-import { getAll as allRepairs } from "@/lib/stores/repair-jobs";
 import { listAssessments } from "@/lib/stores/assessments";
-import { getAllProjects } from "@/lib/stores/projects";
-import { loadPipelines } from "@/lib/pipelines-server";
-import { isDone } from "@/lib/pipelines";
 
 /**
  * Batch 6 / #65 — GET /api/sync/today: the signed-in tech's jobs for today
@@ -32,16 +28,14 @@ export async function GET() {
   const key = chicagoDayKey(now);
   const start = chicagoDayStart(key);
   const end = chicagoDayStart(addDays(key, 1)) - 1;
-  const [visits, surveys, inspections, flame, repairs, assessments, projects, pipes] = await Promise.all([
-    allVisits(), allSurveys(), allInspections(), allFlame(), allRepairs(), listAssessments(), getAllProjects(), loadPipelines(),
+  const [visits, surveys, inspections, flame, assessments] = await Promise.all([
+    allVisits(), allSurveys(), allInspections(), allFlame(), listAssessments(),
   ]);
-  const done = new Set(projects.filter((p) => isDone(p, pipes)).map((p) => p.id));
   const jobs = todaysJobs(
-    { visits, surveys, inspections, flame, repairs, assessments, projects },
+    { visits, surveys, inspections, flame, assessments },
     { id: me.id, name: me.name },
     { key, start, end },
     chicagoDayKey,
-    (id) => done.has(id),
   );
   return NextResponse.json({ day: key, jobs, pages: pagesToCache(jobs) }, { headers: { "cache-control": "no-store" } });
 }

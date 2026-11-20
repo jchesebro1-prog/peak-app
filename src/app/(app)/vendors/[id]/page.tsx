@@ -122,15 +122,6 @@ export default async function VendorDetailPage({
               <span>Last list {row.lastList ? `received ${dateYear(row.lastList.receivedAt)}, effective ${dateYear(row.lastList.effectiveAt)}` : "—"}</span>
               <span>{row.partCount} part{row.partCount === 1 ? "" : "s"}</span>
             </div>
-            {row.openTask && (
-              <div style={{ marginTop: 8, fontSize: 12.5 }}>
-                <span style={{ color: "#8c919c" }}>Owner task · </span>
-                <Link href={`/queue?who=${encodeURIComponent(row.openTask.assignee)}`} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
-                  {row.openTask.title}
-                </Link>
-                <span style={{ color: "#8c919c" }}> — {row.openTask.assignee}</span>
-              </div>
-            )}
           </div>
           <div style={{ display: "flex", gap: 9, flexShrink: 0 }}>
             <Link href={`/companies/${encodeURIComponent(row.id)}?edit=1`} style={{ fontSize: 12.5, fontWeight: 600, color: "#3a3f4a", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 8, padding: "9px 14px", textDecoration: "none" }}>

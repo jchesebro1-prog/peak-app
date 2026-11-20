@@ -7,8 +7,6 @@ import {
 } from "@/db/doc-tables";
 import { getDb } from "@/db";
 import { eq, sql } from "drizzle-orm";
-import { loadPipelines } from "@/lib/pipelines-server";
-import { normalizeProject, type ProjectRecord } from "@/lib/stores/projects";
 import type { Pipelines } from "@/lib/pipelines";
 import { pushAssessment } from "@/lib/stores/assessments";
 import { pushFinding } from "@/lib/stores/findings";
@@ -17,8 +15,6 @@ import { pushBoothCapture } from "@/lib/booth/capture-server";
 import { sanitizePushedDoc } from "@/lib/sync/server-owned";
 import { hydrateDoc } from "@/lib/markup/doc-basis";
 import { mayPullFieldData } from "@/lib/sync/pull-collections";
-import { taskPushDecision, TASK_PUSH_REFUSED } from "@/lib/sync/task-push";
-import { getProject } from "@/lib/stores/projects";
 
 /** Abuse guards for the open sync endpoint. */
 const MAX_RECORDS_PER_COLLECTION = 1000;
@@ -48,11 +44,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "read-only" }, { status: 403 });
   }
   const pusher = { id: String(session.user.id ?? ""), name: String(session.user.name ?? "") };
-  const projectSeen = new Map<string, boolean>();
-  const projectExists = async (id: string): Promise<boolean> => {
-    if (!projectSeen.has(id)) projectSeen.set(id, !!(await getProject(id)));
-    return projectSeen.get(id)!;
-  };
   const body = (await req.json()) as {
     collections?: Record<
       string,
@@ -61,9 +52,6 @@ export async function POST(req: Request) {
   };
   const collections = body.collections || {};
   const db = await getDb();
-  // Loaded once, only if a projects batch arrives — an offline device may still
-  // hold a pre-pipeline stage key; it's converted before it's stored.
-  let pipes: Pipelines | null = null;
   const results: Record<
     string,
     Array<{
@@ -133,31 +121,8 @@ export async function POST(req: Request) {
           .where(eq(t.id, rec.id))
           .limit(1);
         const now = Date.now();
-        // #356 review — a task push may insert only a new Field Work task and update only a field task on its own
-        // project, or a task the pusher is assigned to / created (lib/sync/task-push)
-        let pushDoc: Record<string, unknown> = rec.doc;
-        if (coll === "tasks") {
-          // A stored row counts even when deleted: reviving one is an update, not a fresh insert.
-          const stored = existing.length ? ((existing[0].doc as Record<string, unknown>) ?? {}) : null;
-          const inc = rec.doc as Record<string, unknown>;
-          const known = new Map<string, boolean>();
-          for (const pid of [stored?.projectId, inc.projectId]) if (typeof pid === "string" && pid && !known.has(pid)) known.set(pid, await projectExists(pid));
-          const decision = taskPushDecision(rec.id, stored, inc, pusher, (x) => known.get(x) === true, { storedDeleted: !!existing[0]?.deleted });
-          if (!decision.ok) {
-            results[coll].push({ id: rec.id, status: "error", error: TASK_PUSH_REFUSED });
-            continue;
-          }
-          // a tick (re-review): the stored copy with only status / doneAt / updatedAt from the device
-          if (decision.doc) pushDoc = decision.doc;
-        }
-        // #367: a device's pre-switch cached project stores margins — it lands converted and stamped.
-        if (coll === "projects") pushDoc = hydrateDoc(coll, { ...pushDoc, id: rec.id });
-        // #351 review — server-owned fields (a task's share stamp and thread link) never come from a push
-        let doc: Record<string, unknown> = sanitizePushedDoc(coll, { ...pushDoc, id: rec.id }, existing.length ? { doc: existing[0].doc, deleted: !!existing[0].deleted } : null);
-        if (coll === "projects") {
-          pipes ||= await loadPipelines();
-          doc = normalizeProject(doc as unknown as ProjectRecord, pipes) as unknown as Record<string, unknown>;
-        }
+        // #351 review — server-owned fields never come from a push
+        const doc: Record<string, unknown> = sanitizePushedDoc(coll, { ...rec.doc, id: rec.id }, existing.length ? { doc: existing[0].doc, deleted: !!existing[0].deleted } : null);
         if (!existing.length) {
           await db.insert(t).values({
             id: rec.id,

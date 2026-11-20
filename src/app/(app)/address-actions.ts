@@ -1,6 +1,5 @@
 "use server";
 
-import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
 import type { FixAddressResult } from "@/lib/address-verify/fix";
@@ -25,13 +24,6 @@ export async function fixAddressAction(raw: unknown): Promise<FixAddressResult> 
   if (!input) return { ok: false, reason: "invalid" };
   const r = await fixAddress(input, me.id);
   if (r.ok) {
-    // Spec trigger "address verified → re-sync upcoming legs touching it":
-    // after the response, never blocking the save.
-    const pointKey = r.pointKey;
-    after(async () => {
-      const { resyncForAddress } = await import("@/lib/drive-sync/sync");
-      await resyncForAddress(pointKey).catch((err) => console.error("[drive-sync] address re-sync failed:", err));
-    });
     revalidatePath("/", "layout");
   }
   return r;

@@ -24,7 +24,7 @@ import { RecordingCountBadge } from "@/components/recordings/record-control-link
 import { recordingCountByParent } from "../recordings/data";
 import ActionError from "@/components/action-error";
 import { addressStatesForVisits } from "@/lib/address-verify/targets";
-import { FLAG_TEXT } from "@/lib/drive-plan/plan";
+import { ADDRESS_UNVERIFIED_TEXT } from "@/lib/address-verify/types";
 import { getSettings } from "@/lib/settings";
 import { resolveSurveyTags, activeSurveyTags } from "@/lib/survey-tags";
 
@@ -162,7 +162,7 @@ export default async function FieldSurveyPage({
       canAssess: can("create", user.roles),
       addressFlag: (() => {
         const st = visitAddr.get(v.id);
-        return st && st.status !== "verified" ? { text: FLAG_TEXT.unverified, fix: st.fix } : null;
+        return st && st.status !== "verified" ? { text: ADDRESS_UNVERIFIED_TEXT, fix: st.fix } : null;
       })(),
     };
   });

@@ -64,3 +64,6 @@ export type VerifyRow = {
   checked: boolean;
 };
 export type VerifyList = { rows: VerifyRow[]; total: number; counts: Record<VerifyKind, number>; noAddress: number };
+
+/** The one line shown beside an address that hasn't been verified. */
+export const ADDRESS_UNVERIFIED_TEXT = "Address not verified";

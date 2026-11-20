@@ -1,7 +1,7 @@
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { isPlaceholderSku } from "@/lib/specs/record-keys";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { partModel } from "@/lib/catalog-rename/sku";
 
 /**

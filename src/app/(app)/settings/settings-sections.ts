@@ -16,7 +16,7 @@ export type SettingsPerm = "manage_users";
 
 export const SETTINGS_SECTIONS = [
   { key: "company", label: "Company", desc: "Branding, locations, holidays and dashboard defaults.", perm: "manage_users" },
-  { key: "sales", label: "Sales & Rewards", desc: "Rewards, review limits, pipelines and customer fields.", perm: "manage_users" },
+  { key: "sales", label: "Sales", desc: "Review limits, pipelines and customer fields.", perm: "manage_users" },
   { key: "field", label: "Field & Venues", desc: "Venue types, site intake, site-visit reasons and internal tags.", perm: "manage_users" },
   { key: "consulting", label: "Consulting", desc: "Phases, disciplines and the assumptions library.", perm: "manage_users" },
   { key: "integrations", label: "Integrations", desc: "Gmail mailboxes, Drive photos and recordings.", perm: "manage_users" },
@@ -39,29 +39,27 @@ export type SettingsScreen = { label: string; href: string; desc: string; mark?:
 
 /**
  * Every screen Settings links to, once. These were ADMIN_SCREENS (Templates,
- * Estimating Rules, Task Templates, Import / Export, Grid Settings, Rewards)
+ * Estimating Rules, Import / Export, Grid Settings)
  * and COMPANY_SCREENS (Catalog); GROUP_LINKS hands them out per group.
  */
 export const SETTINGS_SCREENS = {
-  rewards: { label: "Rewards", mark: "★", href: "/settings/rewards", desc: "Customer reward levels, tier suggestions, and credit rates." },
   catalog: { label: "Catalog", href: "/catalog", desc: "Company price books, parts, and manufacturers." },
   estimatingRules: { label: "Estimating Rules", href: "/estimating-rules", desc: "Rates and formulas the estimator uses." },
   templates: { label: "Templates", href: "/templates", desc: "Document and message wording." },
   importExport: { label: "Import / Export", href: "/import", desc: "Move records in and out of Peak." },
-  taskTemplates: { label: "Task Templates", href: "/task-templates", desc: "Reusable checklists for projects, quotes, and designs." },
   gridSettings: { label: "Grid Settings", href: "/design/grid/settings", desc: "Symbol shapes, port rules, wire types, and install labor for The Grid." },
 } as const satisfies Record<string, SettingsScreen>;
 
-/** The link-tile row at the top of each group (empty = no row). Rewards and
- *  Catalog sit on both Company and Sales & Rewards (Jeff, Oct 1). */
+/** The link-tile row at the top of each group (empty = no row). Catalog sits
+ *  on both Company and Sales (Jeff, Oct 1). */
 export const GROUP_LINKS: Readonly<Record<SettingsSection, readonly SettingsScreen[]>> = {
-  company: [SETTINGS_SCREENS.rewards, SETTINGS_SCREENS.catalog],
-  sales: [SETTINGS_SCREENS.rewards, SETTINGS_SCREENS.catalog, SETTINGS_SCREENS.estimatingRules, SETTINGS_SCREENS.templates],
+  company: [SETTINGS_SCREENS.catalog],
+  sales: [SETTINGS_SCREENS.catalog, SETTINGS_SCREENS.estimatingRules, SETTINGS_SCREENS.templates],
   field: [],
   consulting: [],
   integrations: [],
   team: [],
-  data: [SETTINGS_SCREENS.importExport, SETTINGS_SCREENS.taskTemplates, SETTINGS_SCREENS.gridSettings],
+  data: [SETTINGS_SCREENS.importExport, SETTINGS_SCREENS.gridSettings],
 };
 
 /**

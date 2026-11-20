@@ -4,10 +4,8 @@ import { Fragment, useMemo, useRef, useState, type CSSProperties, type DragEvent
 import { withDiscipline } from "@/lib/estimate-output/fields";
 import { GROUPS_MAX } from "@/lib/estimate-groups/groups";
 import { canResolve, commentsBySection, numberComments, type NumberedComment } from "@/lib/estimate-review/comments";
-import { pointsLabel } from "@/lib/rewards/points";
 import { SIDE_TOGGLE } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
-import { RewardCreditPanel } from "../reward-credit-panel";
 import { linesForSku, ProjectDiscountsCard } from "../project-discounts-card";
 import { fmt, short, systemSellTotal } from "../pricing";
 import { vendorAttachmentLoad } from "../types";
@@ -102,9 +100,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     aiScopeInserted,
     aiSource,
     aiTargetSection,
-    appliedCredit,
     applyAutoMiles,
-    applyCredit,
     applyTravelTrip,
     blobUploads,
     canApplyCredit,
@@ -114,7 +110,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     cols,
     commitVendorQuote,
     copySystem,
-    creditInfo,
     curtainDraft,
     curtainEdit,
     curtainFor,
@@ -168,7 +163,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     repricedOnRevise,
     projectDiscounts,
     rate,
-    removeCredit,
     removeProjectDiscount,
     setProjectDiscount,
     removeItem,
@@ -441,7 +435,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               )}
               {(t.credit || 0) > 0 && (
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#1f8a5b", fontWeight: 600 }}>
-                  <span>Rewards credit · {pointsLabel(t.credit || 0)}</span>
+                  <span>Credit applied</span>
                   <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(t.credit || 0)}</span>
                 </div>
               )}
@@ -452,15 +446,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               <ProjectDiscountsCard sections={sections} discounts={projectDiscounts} onSet={setProjectDiscount} onRemove={removeProjectDiscount} />
             )}
 
-            <RewardCreditPanel
-              info={creditInfo}
-              applied={appliedCredit}
-              preCreditTotal={t.grand + (t.credit || 0)}
-              editable={canApplyCredit && (status === "draft" || status === "sent")}
-              hasSystems={sections.length > 0}
-              onApply={applyCredit}
-              onRemove={removeCredit}
-            />
           </div>
         ) : (
           <div

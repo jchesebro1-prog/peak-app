@@ -9,7 +9,6 @@ import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
 import { MeetingsCard } from "@/components/meetings/meetings-card";
-import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
 import { AssessmentsCard, FindingsCard } from "@/components/assessments/assessment-cards";
 import { CompanyRolesCard } from "@/components/parties/company-roles-card";
@@ -18,9 +17,6 @@ import { RecordingCountBadge } from "@/components/recordings/record-control-link
 import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAllProjects, riskFlags } from "@/lib/stores/projects";
-import { isDone } from "@/lib/pipelines";
-import { formatJobValue } from "@/lib/job-value";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
 import { snippet as commSnippet, statusMeta as commStatusMeta, visibleByCustomer } from "@/lib/stores/comms";
 import {
@@ -55,15 +51,9 @@ import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import { CompanyLogoCard } from "./logo-card";
 import { getCompanyLogo } from "@/lib/stores/company-logos";
-import { RewardsCard } from "./rewards-card";
-import { companyRewards, getRewardsProgram } from "@/lib/stores/rewards";
-import { companyCredit } from "@/lib/stores/reward-ledger";
-import { companyPerkPanel } from "@/lib/stores/reward-perks";
 import EditCustomerModal from "../edit-modal";
 import VenueDialog from "../venue-dialog";
 import { DeleteVisitButton } from "../delete-visit-button";
-import { EditVisitButton } from "@/components/visit-booking/visit-edit-button";
-import { VisitConflictChip, VisitConflictProvider } from "@/components/visit-booking/visit-conflict-chips";
 import {
   ACCENT_INK,
   ACCENT_SOFT,
@@ -82,12 +72,10 @@ import type { SaveCustomerInput } from "../types";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { addressStatesForVisits } from "@/lib/address-verify/targets";
 import type { AddressState } from "@/lib/address-verify/types";
-import { FLAG_TEXT } from "@/lib/drive-plan/plan";
+import { ADDRESS_UNVERIFIED_TEXT } from "@/lib/address-verify/types";
 import AddressFlagBadge from "@/components/address-fix/address-flag";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
 
-// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
-export const maxDuration = 60;
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -140,9 +128,8 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, projects, surveys, threads, offices, users, feedRows, settings, rewardsProgram, companyLogo, everyone] = await Promise.all([
+  const [quotes, surveys, threads, offices, users, feedRows, settings, companyLogo, everyone] = await Promise.all([
     getAllQuotes(),
-    getAllProjects(),
     getAllSurveys(),
     // #341 — threads on this company are linked (customerId), so every
     // teammate sees them, read-only when not their own; one in Deleted (or
@@ -152,17 +139,11 @@ export default async function CustomerDetailPage({
     activeUsers(),
     loadCustomerFeed({ id: cust.id, name: cust.name }, me.id, me),
     getSettings(),
-    getRewardsProgram(),
     // Grid notes #8 — the customer logo on the datasheet book's cover.
     getCompanyLogo(cust.id),
     // Jeff 2026-10-15 #35 — the whole roster (any status) for the visit lead's unique-name check (#353 review M8: in parallel).
     allUsers(),
   ]);
-  // #282 — the Rewards card shows only while the program is on.
-  const [rewards, rewardCredit] = rewardsProgram.enabled
-    ? await Promise.all([companyRewards(cust.id, rewardsProgram), companyCredit(cust.id)])
-    : [null, null];
-
   const edit = one(sp.edit);
   const venueTypes = venueTypesFrom(settings.venueTypes);
   const addVenue = one(sp.addVenue);
@@ -204,13 +185,11 @@ export default async function CustomerDetailPage({
   const decided = custQuotes.filter((qt) => qt.status === "won" || qt.status === "lost").length;
   const winRate = decided > 0 ? Math.round((wonCount / decided) * 100) + "%" : "—";
 
-  const custProjects = projects.filter((p) => p.customerId === cust.id);
   const custSurveys = surveys.filter((s) => s.customerId === cust.id);
 
-  /* ---- derived account owner (newest quote/project owner) ---- */
+  /* ---- derived account owner (newest quote owner) ---- */
   const ownerActs = [
     ...custQuotes.map((qt) => ({ at: qt.updatedAt || 0, owner: qt.owner || "" })),
-    ...custProjects.map((p) => ({ at: p.updatedAt || 0, owner: p.owner || "" })),
   ].filter((r) => r.owner);
   ownerActs.sort((a, b) => b.at - a.at);
   const owner = ownerActs[0]?.owner || "";
@@ -268,18 +247,8 @@ export default async function CustomerDetailPage({
   }
   // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
   const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
-  // Spec 2026-10-09 site-visit scheduling — Edit + conflict badges. A stored
-  // "scheduled" visit past its end already reads "done" (deriveVisitStage).
-  const teamNames = users.map((u) => u.name);
-  // Jeff 2026-10-15 #35 — a scheduled visit's Edit / Delete are live only for its lead or an approver.
+  // Jeff 2026-10-15 #35 — a scheduled visit's Delete is live only for its lead or an approver.
   const visitRoster = everyone.map((u) => ({ id: u.id, name: u.name }));
-  const conflictVisits = visits
-    .filter((v) => v.stage === "scheduled" && v.startAt != null)
-    .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0))
-    .slice(0, 10);
-  const conflictIds = conflictVisits.map((v) => v.id);
-  // Changes when an edit lands, so the badges are asked for again.
-  const conflictVersion = conflictVisits.map((v) => `${v.id}:${v.updatedAt}`).join("|");
 
   /* ---- portal access grants (IDEAS #47) ---- */
   const portalGrants = (await grantsFor(cust.id)).map((g) => ({
@@ -436,31 +405,6 @@ export default async function CustomerDetailPage({
           ))}
         </div>
 
-        {rewards && (
-          <RewardsCard
-            view={rewards}
-            canApprove={can("approve", me.roles)}
-            credit={rewardCredit}
-            canAdjust={can("manage_users", me.roles)}
-            quoteRefs={Object.fromEntries(quotes.filter((q) => q.customerId === cust.id).map((q) => [q.id, displayQuoteNumber(q)]))}
-            perks={
-              rewardCredit
-                ? {
-                    // #282 phase 4 — availability at render time; Mark used re-checks on the server.
-                    // #282 perks+points: points to spend = pointsFor(available credit).
-                    ...companyPerkPanel(rewardsProgram.perks, rewards.earned, rewardCredit.entries, undefined, rewardCredit.available),
-                    allPerks: rewardsProgram.perks,
-                    quotes: quotes
-                      .filter((q) => q.customerId === cust.id)
-                      .slice(0, 60)
-                      .map((q) => ({ id: q.id, label: `${displayQuoteNumber(q)} · ${q.name || "Quote"}`.slice(0, 80) })),
-                    canMark: can("create", me.roles),
-                    canUndo: can("manage_users", me.roles),
-                  }
-                : null
-            }
-          />
-        )}
 
         {/* locations & venues */}
         <div style={card}>
@@ -655,55 +599,6 @@ export default async function CustomerDetailPage({
         {/* documents (#218) — company files; customer uploads show as New */}
         <DocumentsCard customerId={cust.id} />
 
-        {/* projects & orders */}
-        <div style={card}>
-          <div style={cardHead}>
-            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Projects &amp; orders</div>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{custProjects.length}</span>
-          </div>
-          {custProjects.length > 0 && (
-            <ShortList
-              searchPlaceholder="Search projects & orders…"
-              items={custProjects.map((p) => {
-                const label = p.stageMeta?.label ?? p.stage;
-                const done = isDone(p);
-                const risk = !done && riskFlags(p).length > 0;
-                const m = done
-                  ? { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", l: label }
-                  : risk
-                    ? { ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4", l: label }
-                    : { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", l: label };
-                return (
-                  <Link
-                    key={p.id}
-                    href={`/projects?id=${encodeURIComponent(p.id)}`}
-                    className="cu-d-row"
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                  >
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: "block", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {p.name || p.id}
-                      </span>
-                      <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
-                        {p.id} · {p.kind === "order" ? "Sales order" : "Project"} · {formatJobValue(p, money)}
-                      </span>
-                    </span>
-                    <span style={{ fontSize: 9.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
-                      {m.l}
-                    </span>
-                  </Link>
-                );
-              })}
-              searchText={custProjects.map((p) => [p.name, p.id, p.stageMeta?.label ?? p.stage].filter(Boolean).join(" "))}
-            />
-          )}
-          {custProjects.length === 0 && (
-            <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-              No active projects for this company.
-            </div>
-          )}
-        </div>
-
         <div className="cu-detail-grid">
           {/* quotes */}
           <div style={{ ...card, marginBottom: 0 }}>
@@ -888,7 +783,6 @@ export default async function CustomerDetailPage({
                 <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>
                   Site visits
                 </div>
-                <VisitConflictProvider ids={conflictIds} version={conflictVersion}>
                 <ShortList
                   searchPlaceholder="Search site visits…"
                   items={visits.map((v) => {
@@ -917,25 +811,7 @@ export default async function CustomerDetailPage({
                             {sm.label}
                           </span>
                           <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
-                          <VisitConflictChip id={v.id} />
                           <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
-                            {v.stage === "scheduled" && v.startAt != null && v.endAt != null ? (
-                              <EditVisitButton
-                                visit={{
-                                  id: v.id,
-                                  customerId: v.customerId,
-                                  locationId: v.locationId,
-                                  address: v.address,
-                                  title: [v.reason, v.venue].filter(Boolean).join(" · "),
-                                  startAt: v.startAt,
-                                  endAt: v.endAt,
-                                  assignedTo: v.assignedTo,
-                                  attendees: v.attendees,
-                                }}
-                                team={teamNames}
-                                canEdit={canChangeVisit(v, me, visitRoster)}
-                              />
-                            ) : null}
                             {can("create", me.roles) && (
                               <Link
                                 href={`/assessments/new?visit=${encodeURIComponent(v.id)}`}
@@ -957,7 +833,7 @@ export default async function CustomerDetailPage({
                         </div>
                         {v.stage !== "done" && va && va.status !== "verified" && (
                           <div style={{ marginTop: 3 }}>
-                            <AddressFlagBadge flag={{ text: FLAG_TEXT.unverified, fix: va.fix }} />
+                            <AddressFlagBadge flag={{ text: ADDRESS_UNVERIFIED_TEXT, fix: va.fix }} />
                           </div>
                         )}
                       </div>
@@ -965,7 +841,6 @@ export default async function CustomerDetailPage({
                   })}
                   searchText={visits.map((v) => [v.reason, v.venue, VISIT_STAGE_META[v.stage]?.label, v.assignedTo].filter(Boolean).join(" "))}
                 />
-                </VisitConflictProvider>
               </div>
             )}
 
@@ -974,7 +849,6 @@ export default async function CustomerDetailPage({
 
             {/* ---- #323 Krisp meetings linked here + what the customer owes us ---- */}
             <MeetingsCard kind="company" id={cust.id} viewerId={me.id} />
-            <WaitingOnCustomerCard by="customerId" ids={[cust.id]} />
 
 
           </div>

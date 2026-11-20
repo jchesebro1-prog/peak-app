@@ -15,7 +15,6 @@ import {
   type EstimateEmailClaim, type EstimateEmailEntry, type Quote, type QuoteRevision, type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { signatureFor } from "@/lib/stores/signatures";
-import { createTask } from "@/lib/stores/tasks";
 import { can } from "@/lib/team";
 import { activeUsers, getUser } from "@/lib/users";
 import { attachmentsFit, bodyWithLink, coverPdfHref, estimateDraftIsCurrent, FOLLOW_UP_CHOICES, parseRecipients, withoutAddresses } from "./compose";
@@ -146,7 +145,7 @@ export type EstimateEmailInput = {
   body: string;
   attachEstimate: boolean;
   attachCover: boolean;
-  /** 0 = Off; one of FOLLOW_UP_CHOICES. Ignored by Open in Inbox. */
+  /** No longer used (follow-up tasks were removed with Tasks); still accepted from an older open page. */
   followUpDays?: number;
   /** The quote's updatedAt the sender was shown — a version they didn't see is refused (first send and re-send). */
   asOf?: number;
@@ -172,19 +171,6 @@ export type ThreadSpec = {
   body: string;
   link: CommLink;
   attachments: CommAttachment[];
-};
-
-export type FollowUpSpec = {
-  title: string;
-  section: string;
-  quoteId: string;
-  assigneeUserId: string | null;
-  assigneeName: string;
-  dueAt: number;
-  notes: string;
-  threadId: string;
-  customerId?: string;
-  leadId?: string;
 };
 
 /** How the email left: through the sender's Gmail, locally only (no Gmail
@@ -218,7 +204,6 @@ export type EstimateEmailDeps = {
   createAndSendThread: (spec: ThreadSpec) => Promise<{ threadId: string; delivery: EmailDelivery }>;
   createDraftThread: (spec: ThreadSpec) => Promise<{ threadId: string }>;
   recordEmail: (id: string, entry: EstimateEmailEntry) => Promise<boolean>;
-  addFollowUpTask: (spec: FollowUpSpec, actor: SendActor) => Promise<unknown>;
   /** Active team members — the Lead estimator lookup. */
   roster: () => Promise<RosterUser[]>;
 };
@@ -266,11 +251,6 @@ export function estimatePdfPath(q: Pick<Quote, "status" | "pdf" | "revisions">):
     if (rev) return rev.pdfBlobPath || null;
   }
   return teamPdfPath(q, null);
-}
-
-/** Follow-up due: 11:59 PM Chicago on the day `days` days from `now`. */
-export function followUpDueAt(now: number, days: number): number {
-  return chicagoDayEnd(now + days * DAY_MS);
 }
 
 /** Step 1's output: the quote as read plus the cleaned fields. */
@@ -344,9 +324,6 @@ async function preflight(
   if (!body.trim()) return { ok: false, error: SEND_COPY.noBody };
   if (subject.length > SUBJECT_MAX) return { ok: false, error: SEND_COPY.subjectTooLong };
   if (body.length > BODY_MAX) return { ok: false, error: SEND_COPY.bodyTooLong };
-  if (mode === "send" && !(FOLLOW_UP_CHOICES as readonly number[]).includes(Number(input?.followUpDays))) {
-    return { ok: false, error: SEND_COPY.badFollowUp };
-  }
   // A re-send whose sent revision has no PDF copy yet: never the current file.
   if (wantsEstimatePdf(q, input) && !estimatePdfPath(q)) return { ok: false, error: SEND_COPY.pdfPreparing };
   return { q, to: to.list.join(", "), cc: cc.join(", "), subject, body };
@@ -624,33 +601,6 @@ async function sendClaimed(deps: EstimateEmailDeps, actor: SendActor, p: Prepare
   } catch (e) {
     console.error("[estimate-email] record failed", e);
     warnings.push(SEND_COPY.recordFailed);
-  }
-  const days = Number(input.followUpDays);
-  if (days > 0) {
-    try {
-      const users = await deps.roster();
-      const lead = leadEstimator(q.owner, q.preparedBy, users.filter((u) => (u.status ?? "active") === "active"));
-      const assignee = lead ? { id: lead.id, name: lead.name } : { id: actor.id || null, name: actor.name };
-      const number = displayQuoteNumber(q);
-      await deps.addFollowUpTask(
-        {
-          title: `Follow up on ${estimateLinkLabel(q)}`,
-          section: "Review",
-          quoteId: q.id,
-          assigneeUserId: assignee.id,
-          assigneeName: assignee.name,
-          dueAt: followUpDueAt(at, days),
-          notes: `${number} was emailed to ${p.to} by ${actor.name}.`,
-          threadId: sent.threadId,
-          ...(q.customerId ? { customerId: q.customerId } : {}),
-          ...(q.leadId ? { leadId: q.leadId } : {}),
-        },
-        actor
-      );
-    } catch (e) {
-      console.error("[estimate-email] follow-up task failed", e);
-      warnings.push(SEND_COPY.taskFailed);
-    }
   }
   return {
     ok: true,
@@ -1001,7 +951,6 @@ export function liveEstimateEmailDeps(opts: { origin: string; host: string | nul
     },
     createDraftThread: async (spec) => ({ threadId: (await saveDraft(draftInput(spec))).id }),
     recordEmail: recordEstimateEmail,
-    addFollowUpTask: (spec, actor) => createTask(spec, { id: actor.id, name: actor.name }),
     roster: async () => (await activeUsers()).map((u) => ({ id: u.id, name: u.name, status: u.status })),
   };
 }

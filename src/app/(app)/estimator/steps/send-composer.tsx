@@ -251,22 +251,6 @@ export function SendComposer({ s, collapsible, onSent }: { s: EstimatorState; co
               {SEND_UI_COPY.attachCover}
             </label>
             )}
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-              {SEND_UI_COPY.followUp}
-              <select
-                value={fields.followUpDays}
-                disabled={disabled}
-                onChange={(e) => set("followUpDays", Number(e.target.value))}
-                aria-label={SEND_UI_COPY.followUp}
-                style={{ ...INPUT, width: "auto", padding: "6px 8px" }}
-              >
-                {FOLLOW_UP_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
           {gmail && <div style={SMALL}>{gmail.connected ? SEND_UI_COPY.from(gmail.from) : SEND_UI_COPY.gmailOff}</div>}
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>

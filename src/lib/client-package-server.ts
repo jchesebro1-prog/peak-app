@@ -20,7 +20,7 @@ import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, plan
 import { BOOK_SKIPPED_REASON, buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import type { BookCover } from "@/lib/part-docs/datasheet-book-cover";
 import { gridBookCover, quoteBookCover } from "@/lib/part-docs/datasheet-book-cover-server";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { addCutSheets, CUT_SHEET_DEADLINE_MS, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import { GRID_SET_STEP_MS } from "@/lib/design/grid-set-print";
 import { renderGridSetPdf, type GridSetRenderCause, type GridSetRenderFn } from "@/lib/design/grid-set-render";

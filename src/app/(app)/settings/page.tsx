@@ -14,8 +14,6 @@ import { reviewLimitsFrom } from "@/lib/review-limits";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import { sanitizeEstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import { allUsers } from "@/lib/users";
-import { getScheduleDefaults, getSchedulingSettings, DEFAULT_DRIVE_BUFFER_MIN } from "@/lib/stores/schedule-prefs";
-import { DEFAULT_SCHEDULING } from "@/lib/visit-plan/settings";
 import {
   callbackUrl,
   GMAIL_MODIFY_SCOPE,
@@ -77,8 +75,6 @@ export default async function SettingsPage({
   const pipelines = isAdmin ? await loadPipelines() : null;
   const pipelineUsage = isAdmin ? await stageUsage() : {};
   const estimateOutput = isAdmin ? await getEstimateOutputDefaults() : sanitizeEstimateOutputDefaults({});
-  const driveDefaults = isAdmin ? await getScheduleDefaults() : { driveBufferMin: DEFAULT_DRIVE_BUFFER_MIN };
-  const scheduling = isAdmin ? await getSchedulingSettings() : DEFAULT_SCHEDULING;
 
   // ---- Mailboxes (Gmail) — admin surface, env-gated ----
   const gmailOn = gmailEnabled();
@@ -97,7 +93,7 @@ export default async function SettingsPage({
         k === "sales"
           ? "Quotes, bids & customer questions."
           : k === "installs"
-            ? "Projects, scheduling & field coordination."
+            ? "Field coordination."
             : "General inbound — the address on the website.",
     })).map((mb) => {
     const c = connByKey.get(mb.key);
@@ -240,8 +236,6 @@ export default async function SettingsPage({
           venueTypes={venueTypesFrom(settings.venueTypes)}
           reviewLimits={reviewLimitsFrom(settings.reviewLimits)}
           estimateOutput={estimateOutput}
-          driveDefaults={driveDefaults}
-          scheduling={scheduling}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",

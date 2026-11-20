@@ -8,10 +8,8 @@ export type ServiceType =
   | "system"
   | "box_sale"
   | "flame_test"
-  | "repair"
   | "inspection"
   | "consulting"
-  | "rental"
   | "custom";
 
 /** Same six entries as the "+ New quote" split menu (quotes/controls.tsx) —
@@ -58,15 +56,6 @@ export const SERVICE_TYPES: Array<{
     badgeBd: "#f0d6cd",
   },
   {
-    key: "repair",
-    label: "Repair quote",
-    sub: "Auto-priced by labor + travel + parts",
-    badge: "Auto",
-    badgeInk: "#9a6a1f",
-    badgeSoft: "#fbf3dd",
-    badgeBd: "#f0e2bd",
-  },
-  {
     key: "inspection",
     label: "Inspection quote",
     sub: "Auto-priced by line sets + level + travel",
@@ -83,15 +72,6 @@ export const SERVICE_TYPES: Array<{
     badgeInk: "#6b4fa1",
     badgeSoft: "#f0ebf9",
     badgeBd: "#ddd2f0",
-  },
-  {
-    key: "rental",
-    label: "Rental quote",
-    sub: "Auto-priced by equipment + duration",
-    badge: "Auto",
-    badgeInk: "#2f7a52",
-    badgeSoft: "#e6f4ec",
-    badgeBd: "#cde7d8",
   },
   {
     key: "custom",
@@ -115,10 +95,8 @@ export const BUILDER_BASE: Record<ServiceType, string> = {
   box_sale: "/estimator",
   custom: "/estimator",
   flame_test: "/flame-tests/quote",
-  repair: "/repairs/quote",
   inspection: "/inspections/quote",
   consulting: "/design/engagements/quote",
-  rental: "/rentals/quote",
 };
 
 export type BuilderPathOpts = {
@@ -126,7 +104,7 @@ export type BuilderPathOpts = {
   category?: string;
   /** #160 — optional quote name; blank → the builder's own auto-name. */
   name?: string;
-  /** #160 — customer location id; never sent to rental (no venue concept). */
+  /** #160 — customer location id. */
   venue?: string;
   /** #160 — contact NAME (contacts have no id). */
   contact?: string;
@@ -148,7 +126,7 @@ export function builderPath(type: ServiceType, customerId: string, opts: Builder
   if (type === "box_sale") p.set("box", "1");
   if (type === "custom") put("category", opts.category);
   put("name", opts.name);
-  if (type !== "rental") put("venue", opts.venue);
+  put("venue", opts.venue);
   put("contact", opts.contact);
   put("replaces", opts.replaces);
   const qs = p.toString();

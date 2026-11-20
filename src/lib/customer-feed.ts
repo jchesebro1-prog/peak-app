@@ -2,10 +2,7 @@ import { byCustomer as commsByCustomer, canSeeThread, isSharedThread } from "@/l
 import { getAll as getAllFlame } from "@/lib/stores/flame-jobs";
 import { completedAtOf, getAll as getAllInspections } from "@/lib/stores/inspections";
 import { notesForCustomer } from "@/lib/stores/notes";
-import { getAllProjects } from "@/lib/stores/projects";
-import { loadPipelines } from "@/lib/pipelines-server";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAll as getAllRepairs } from "@/lib/stores/repair-jobs";
 import { getAll as getAllSurveys } from "@/lib/stores/surveys";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { meetingRowsLinkedTo, type MeetingLinkedRow } from "@/lib/stores/meetings";
@@ -17,7 +14,6 @@ import {
   jobFeedRows,
   meetingFeedRows,
   noteFeedRows,
-  projectFeedRows,
   quoteFeedRows,
   surveyFeedRows,
   visitFeedRows,
@@ -32,10 +28,9 @@ import { mailboxViewer } from "@/lib/mailbox-viewer";
  * (visitsForCustomer); everything else is getAll()+filter — the app-wide
  * full-scan idiom, fine at beta volumes (hundreds of records).
  *
- * The two store-owned conversions the pure builders must not know about
- * happen here: inspection completion via completedAtOf (ISO → ms) and
- * project stage labels via the Pipelines loaded once (loadPipelines) and
- * passed down to projectFeedRows. Tombstones are already excluded by listDocs.
+ * The store-owned conversion the pure builders must not know about happens
+ * here: inspection completion via completedAtOf (ISO → ms). Tombstones are
+ * already excluded by listDocs.
  */
 
 /** Feed cap — "Show more" is deferred (product flag, D121). */
@@ -54,18 +49,15 @@ export async function loadCustomerFeed(
   viewer?: { id: string; name: string }
 ): Promise<FeedRow[]> {
   const mailbox = viewer?.id ? await mailboxViewer(viewer) : null;
-  const [notes, quotes, threads, visits, flames, repairs, inspections, surveys, projects, pipes, meetings] =
+  const [notes, quotes, threads, visits, flames, inspections, surveys, meetings] =
     await Promise.all([
       notesForCustomer(cust.id),
       getAllQuotes(),
       commsByCustomer(cust.id),
       visitsForCustomer(cust.id),
       getAllFlame(),
-      getAllRepairs(),
       getAllInspections(),
       getAllSurveys(),
-      getAllProjects(),
-      loadPipelines(),
       viewerId
         ? meetingsReadOr(meetingRowsLinkedTo("company", cust.id, viewerId), [] as MeetingLinkedRow[], "company feed")
         : Promise.resolve([] as MeetingLinkedRow[]),
@@ -101,18 +93,6 @@ export async function loadCustomerFeed(
       })
     );
 
-  for (const r of repairs.filter((x) => x.customerId === cust.id))
-    rows.push(
-      ...jobFeedRows("repair", {
-        id: r.id,
-        venue: r.venue,
-        openedAt: r.approvedAt,
-        openedBy: r.owner,
-        completedAt: r.completedAt,
-        completedBy: r.assignedTo || r.owner,
-      })
-    );
-
   for (const i of inspections.filter((x) => x.customerId === cust.id))
     rows.push(
       ...jobFeedRows("inspection", {
@@ -126,9 +106,6 @@ export async function loadCustomerFeed(
     );
 
   for (const s of surveys.filter((x) => x.customerId === cust.id)) rows.push(...surveyFeedRows(s));
-
-  for (const p of projects.filter((x) => x.customerId === cust.id))
-    rows.push(...projectFeedRows(p, pipes));
 
   if (meetings.length) {
     // attendee display names: the linked contact's current name, else the name Krisp / the calendar gave

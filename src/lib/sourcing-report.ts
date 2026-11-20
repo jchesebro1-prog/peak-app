@@ -22,7 +22,7 @@
  * Pure — the loader hands in quotes, parts, fixtures and the rate.
  */
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { mfrKey } from "@/lib/catalog-books";
 import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/design/grid-virtual-parts";
 import { CUSTOM_ITEM_PREFIX } from "@/lib/design/grid-custom-items";

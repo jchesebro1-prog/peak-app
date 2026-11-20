@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { grossQuoteValue } from "@/lib/rewards/credit-line";
+import { grossQuoteValue } from "@/lib/credit-line";
 import { serviceRewardCredit } from "@/lib/rewards/service-credit";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfView } from "@/lib/quote-pdf/state";

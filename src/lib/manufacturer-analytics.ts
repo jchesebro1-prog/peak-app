@@ -16,7 +16,7 @@
 import type { Quote } from "@/lib/stores/quotes";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { decidedAt, wonAt } from "@/lib/dashboard/metrics";
 import { mfrKey } from "@/lib/catalog-books";
 import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/design/grid-virtual-parts";

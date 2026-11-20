@@ -35,9 +35,7 @@ import { systemMatchKeys } from "@/lib/specs/records";
 import { blobEnabled } from "@/lib/blob";
 import { parseThreadAttachmentRef } from "@/lib/vendor-quotes/rules";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import { tasksForQuote } from "@/lib/stores/tasks";
 import { resolveTier } from "@/lib/pricing-tiers";
-import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { documentRevStamp, pdfView } from "@/lib/quote-pdf/state";
@@ -436,12 +434,6 @@ export default async function EstimatorPage({
       loadSystemCategoryOptions(),
     ]);
   const vendorPdfEnabled = vendorPdfGate === null;
-  // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
-  // saved once; q.id is only real once a doc exists to key tasks off of).
-  const quoteTasks = q ? await tasksForQuote(q.id) : [];
-  // D149/#118 — reusable task-template sets applicable to quotes, for the
-  // "Apply template" control next to the Tasks card.
-  const templateSets = await taskTemplateSetsFor("quote");
 
   // Only catalog fabrics with a $/sq ft rate feed the curtain configurator
   // (#227: fabricAreaRateOf — the catalog rate, a seed, or cost per sq ft —
@@ -612,8 +604,6 @@ export default async function EstimatorPage({
       next={next}
       aiSource={aiSource}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
-      quoteTasks={quoteTasks}
-      templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
       assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
       freightRule={freightRule}
       portalStatusError={portalStatusError}

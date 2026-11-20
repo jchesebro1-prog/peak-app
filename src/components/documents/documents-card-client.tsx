@@ -759,17 +759,6 @@ function EditDocumentDialog({
               </select>
             </label>
             <label style={LABEL}>
-              Project
-              <select style={INPUT} value={draft.projectId} onChange={(e) => setDraft({ ...draft, projectId: e.target.value })}>
-                <option value="">No project</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={LABEL}>
               Notes
               <textarea
                 style={{ ...INPUT, minHeight: 70, resize: "vertical" }}

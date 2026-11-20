@@ -3,7 +3,7 @@ import type { KeyProduct, SpecItem, SpecSection } from "@/app/(app)/estimator/ty
 import { latestSentRevision } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { OLD_VENDOR_PRICE_NOTE } from "./old-vendor-line";
 import { applyAutoFreight } from "@/app/(app)/estimator/freight-default";

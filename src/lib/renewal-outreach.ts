@@ -62,9 +62,8 @@ import {
   travelLineShare,
 } from "@/lib/service-pricing";
 import { getLiftRate } from "@/lib/service-quote-inputs";
-import { quoteRewardCredit } from "@/lib/rewards/credit-line";
-import { serviceLetterPrice } from "@/lib/rewards/service-credit";
-import { rewardPointsPhrase } from "@/lib/rewards/points";
+import { quoteRewardCredit } from "@/lib/credit-line";
+import { serviceLetterPrice } from "@/lib/credit-line";
 import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { sameWholeMarkup } from "@/lib/markup";
 
@@ -215,7 +214,7 @@ export async function signerFor(
 /** #282 phase 3: the Rewards credit line of a renewal-letter PDF — as points
  *  on the customer's side (#282 points follow-up, 1 point = $1). */
 function creditSentence(p: { gross: number; credit: number; net: number }): string {
-  return `Applied to the quoted price of ${money(p.gross)}: ${rewardPointsPhrase(p.credit)} (${money(p.credit)}). The total below is after the points.`;
+  return `Applied to the quoted price of ${money(p.gross)}: a credit of ${money(p.credit)}. The total below is after the credit.`;
 }
 
 /** #275: the renewal letter's lift sentence (the PDF letter is prose). */

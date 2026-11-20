@@ -1,8 +1,7 @@
 import { getDoc, insertWithPrefixedId, listDocs, listDocsByField, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
-import { normalizeInvites, type VisitInviteRecipient } from "@/lib/visit-invite-plan";
-import { readAttendees } from "@/lib/visit-plan/people";
-import { chicagoDayKey } from "@/lib/drive-plan/day";
+import { readAttendees } from "@/lib/visit-fields";
+import { chicagoDayKey } from "@/lib/chicago-day";
 
 /**
  * Site visits (D76, Jeff 2026-07-19 — PUNCHLIST #2 phase 1). A visit links a
@@ -11,7 +10,8 @@ import { chicagoDayKey } from "@/lib/drive-plan/day";
  * first post-rebuild collection (drizzle migration 0004).
  *
  * Invites are per person since spec 2026-10-09 site-visit scheduling
- * (`invites`, written by src/lib/visit-invite.ts through setVisitInvites).
+ * (`invites`); invite sending was removed with site-visit scheduling, so the
+ * stored invite fields are history only.
  */
 
 export type SiteVisitInvite = {
@@ -54,7 +54,7 @@ export type SiteVisit = {
    *  Normalized on read: a pre-spec-2 `invite` / `googleEventId` reads as one
    *  entry for the lead. `invite` / `googleEventId` keep mirroring the lead's
    *  entry for older readers. */
-  invites: VisitInviteRecipient[];
+  invites: unknown[];
   googleEventId?: string; // the lead's direct calendar copy (D77)
   /** Gmail ids of invite mail sent to people since removed from the visit
    *  (their entry is gone) — the Gmail import never re-fetches them. */
@@ -107,7 +107,7 @@ function normalizeVisit(v: SiteVisit): SiteVisit {
   v.endAt = v.endAt ?? null;
   v.customerId = v.customerId ?? null;
   v.attendees = withoutLead(readAttendees(v.attendees), v.assignedTo);
-  v.invites = normalizeInvites(v);
+  if (!Array.isArray(v.invites)) v.invites = [];
   v.stage = deriveVisitStage(v, Date.now());
   v.leadId = v.leadId ?? null;
   v.surveyId = v.surveyId ?? null;
@@ -178,38 +178,6 @@ export async function createVisit(input: SiteVisitInput): Promise<SiteVisit> {
   }));
 }
 
-/** Most removed-recipient Gmail ids kept on one visit (the latest win). */
-const MAX_RETIRED_GMAIL_IDS = 200;
-
-/** Record what each person was sent (spec 2026-10-09 site-visit scheduling).
- *  The lead's entry is mirrored into the old single fields for older readers
- *  (the agenda's googleEventId dedupe, "invite sent" on the company record) —
- *  exactly: a lead holding no copy of that kind clears the old field, so a
- *  deleted or moved-away calendar copy never lingers as a dedupe key. */
-export async function setVisitInvites(id: string, invites: VisitInviteRecipient[], lead: VisitInviteRecipient | null, retiredGmailIds: string[] = []): Promise<void> {
-  await patchDoc<SiteVisit>("site_visits", id, (d) => {
-    d.invites = invites;
-    if (retiredGmailIds.length) {
-      const kept = Array.isArray(d.inviteGmailIds) ? d.inviteGmailIds.filter((x) => typeof x === "string" && !!x) : [];
-      d.inviteGmailIds = [...new Set([...kept, ...retiredGmailIds])].slice(-MAX_RETIRED_GMAIL_IDS);
-    }
-    if (lead?.channel === "calendar" && lead.eventId) d.googleEventId = lead.eventId;
-    else delete d.googleEventId;
-    d.invite =
-      lead?.channel === "ics"
-        ? { sentAt: lead.sentAt, to: lead.to, fromMailbox: lead.fromMailbox ?? "", ...(lead.gmailId ? { gmailId: lead.gmailId } : {}) }
-        : null;
-    d.updatedAt = Date.now();
-  });
-}
-
-/** A pre-spec-2 doc has only the old single stamp, read as "told the visit's
- *  current times". Pin it to those times BEFORE a write changes them, so the
- *  dispatch that follows sees a move and updates the lead's copy. */
-function pinLegacyInvites(d: SiteVisit): void {
-  if (!Array.isArray(d.invites)) d.invites = normalizeInvites(d);
-}
-
 /* ---- #34 lifecycle mutations (the LEAD claim model — no approver gate) ---- */
 
 /** Claim: assign-to-self. No claimedAt anywhere in the app — stage +
@@ -234,7 +202,6 @@ export async function releaseVisit(id: string): Promise<void> {
 
 export async function scheduleVisit(id: string, startAt: number, endAt: number, attendees?: string[]): Promise<void> {
   await patchDoc<SiteVisit>("site_visits", id, (d) => {
-    pinLegacyInvites(d);
     d.startAt = startAt;
     d.endAt = endAt;
     if (attendees) d.attendees = withoutLead(readAttendees(attendees), d.assignedTo);
@@ -249,7 +216,6 @@ export type VisitBookingPatch = { startAt: number; endAt: number; assignedTo: st
  *  lead and attendees in one write. The caller cleans the names. */
 export async function updateVisitBooking(id: string, patch: VisitBookingPatch): Promise<SiteVisit | null> {
   const saved = await patchDoc<SiteVisit>("site_visits", id, (d) => {
-    pinLegacyInvites(d);
     d.startAt = patch.startAt;
     d.endAt = patch.endAt;
     d.assignedTo = patch.assignedTo;

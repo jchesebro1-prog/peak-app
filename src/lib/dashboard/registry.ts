@@ -38,14 +38,11 @@ export const WIDGETS = [
   { id: "my-win-rate", title: "Win rate", desc: "Your won vs lost quotes, all time.", size: "tile", timeframe: "none", surfaces: HOME },
   { id: "my-out-for-signature", title: "Out for signature", desc: "Your quotes currently sent.", size: "tile", timeframe: "none", surfaces: HOME },
   { id: "my-avg-quote", title: "Avg quote", desc: "Average value of your quotes.", size: "tile", timeframe: "none", surfaces: HOME },
-  { id: "my-queue", title: "My Queue", desc: "Open and overdue items from your queue.", size: "full", timeframe: "none", surfaces: HOME },
-  { id: "today-plan", title: "Today", desc: "Today's planned task blocks and anything at risk.", size: "half", timeframe: "none", surfaces: HOME },
   { id: "inbox", title: "Inbox", desc: "Threads waiting on a reply, per mailbox.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "my-leads", title: "My leads", desc: "Follow-up worklist for leads you own.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "my-designs", title: "My designs", desc: "Your budgetary designs in the sandbox.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "my-pipeline", title: "My pipeline", desc: "Your quotes by status with the stage sheet.", size: "full", timeframe: "none", surfaces: HOME },
   { id: "catalog", title: "Catalog", desc: "Price books and part counts.", size: "half", timeframe: "none", surfaces: HOME },
-  { id: "calendar", title: "Calendar", desc: "Your next 14 days.", size: "half", timeframe: "none", surfaces: HOME },
   { id: "venue-assessments", title: "Venue assessments", desc: "Recent assessments and pending syncs.", size: "half", timeframe: "none", surfaces: HOME },
   { id: "team-activity", title: "Team activity", desc: "What everyone else touched recently.", size: "half", timeframe: "none", surfaces: HOME },
   { id: "needs-attention", title: "Needs attention", desc: "Reviews waiting on you and stale sent quotes.", size: "half", timeframe: "none", surfaces: HOME },
@@ -61,22 +58,8 @@ export const WIDGETS = [
   { id: "pipeline-by-estimator", title: "Pipeline by estimator", desc: "Open, won and win rate per team member, all time.", size: "full", timeframe: "none", surfaces: BOTH },
   // #348 slice 6 — no perm: Reports is a team page, so the bid list stays staff-only.
   { id: "bids-by-bidder", title: "Bids by GC/EC", desc: "Bids sent per GC and EC, decided, and the awarded-to-us rate.", size: "full", timeframe: "history", surfaces: REPORTS },
-  /* ---- Reports: Installs (forward = next 12 months) ---- */
-  { id: "backlog-value", title: "Backlog value", desc: "Open project value landing in the next 12 months.", size: "tile", timeframe: "forward", surfaces: BOTH },
-  { id: "to-be-billed", title: "To be billed", desc: "Value billed at landing in the next 12 months.", size: "tile", timeframe: "forward", surfaces: BOTH },
-  { id: "expected-collected", title: "Expected collected", desc: "Net-30 collections in the next 12 months.", size: "tile", timeframe: "forward", surfaces: BOTH },
-  { id: "book-margin", title: "Markup at completion", desc: "Blended markup across the open book.", size: "tile", timeframe: "forward", perm: "approve", surfaces: BOTH },
-  { id: "billing-forecast", title: "Billing forecast", desc: "Installs and consulting milestones, billed vs collected.", size: "full", timeframe: "forward", surfaces: BOTH },
-  { id: "backlog-by-stage", title: "Backlog value by stage", desc: "Open book grouped by project stage.", size: "half", timeframe: "forward", surfaces: BOTH },
-  { id: "margin-donut", title: "Markup at completion (detail)", desc: "Projected profit vs estimated cost.", size: "half", timeframe: "forward", perm: "approve", surfaces: BOTH },
-  { id: "upcoming-completions", title: "Upcoming completions", desc: "Next six projects to land.", size: "half", timeframe: "forward", surfaces: BOTH },
-  { id: "completion-timeline", title: "Completion timeline", desc: "Where each open project lands.", size: "full", timeframe: "forward", surfaces: BOTH },
-  { id: "project-locations", title: "Project locations", desc: "Open projects on the map, sized by value.", size: "full", timeframe: "forward", surfaces: BOTH },
   /* ---- Spec task 4: backward widgets ---- */
   { id: "avg-margin", title: "Avg. markup", desc: "Cost-weighted quote markup (total profit ÷ total cost) for quotes created in the period.", size: "tile", timeframe: "history", perm: "approve", surfaces: BOTH },
-  { id: "projected-profit", title: "Projected profit", desc: "Value times markup ÷ (1 + markup) across the open book.", size: "tile", timeframe: "forward", perm: "approve", surfaces: BOTH },
-  { id: "open-projects", title: "Open projects", desc: "Projects with crews scheduled or on site.", size: "half", timeframe: "none", surfaces: BOTH },
-  { id: "backlog", title: "Backlog", desc: "Sold projects still in procurement or delivery.", size: "half", timeframe: "none", surfaces: BOTH },
   { id: "equipment-sold", title: "Equipment sold", desc: "Won line items by catalog category, with item drill-down.", size: "half", timeframe: "history", surfaces: BOTH },
 ] as const satisfies readonly WidgetDef[];
 
@@ -101,23 +84,20 @@ export function galleryFor(surface: Surface, roles: string[]): WidgetDef[] {
   return WIDGETS.filter((w) => w.surfaces.includes(surface) && canSee(w, roles));
 }
 
-/** Starting layouts. Home = today's Dashboard order; Reports = today's
- *  Sales view then today's Installs view. The spec-task-4 backward widgets
+/** Starting layouts. Home = today's Dashboard order; Reports = the Sales
+ *  view. The spec-task-4 backward widgets
  *  are gallery picks, not defaults. #348's Bids by GC/EC IS a Reports default
  *  (Jeff, Open question 11), right after Pipeline by estimator — a user with
  *  a saved layout is unaffected and adds it from the gallery. */
 export const PRESETS: Record<Surface, readonly WidgetId[]> = {
   home: [
     "my-open-pipeline", "my-win-rate", "my-out-for-signature", "my-avg-quote",
-    "my-queue", "today-plan", "inbox", "my-leads", "my-designs", "my-pipeline",
-    "catalog", "calendar", "venue-assessments", "team-activity", "needs-attention",
+    "inbox", "my-leads", "my-designs", "my-pipeline",
+    "catalog", "venue-assessments", "team-activity", "needs-attention",
   ],
   reports: [
     "total-quoted", "won-value", "win-rate", "avg-quote",
     "quoted-vs-won", "pipeline-by-stage", "win-donut", "top-customers", "pipeline-by-estimator", "bids-by-bidder",
-    "backlog-value", "to-be-billed", "expected-collected", "book-margin",
-    "billing-forecast", "backlog-by-stage", "margin-donut", "upcoming-completions",
-    "completion-timeline", "project-locations",
   ],
 };
 

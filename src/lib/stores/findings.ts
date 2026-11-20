@@ -238,13 +238,11 @@ export async function saveFinding(incoming: Partial<Finding> & { key: string }, 
   const inc = incoming as unknown as Record<string, unknown>;
   if (!(await readRow("findings", key))) return createFinding(key, inc, user.id);
 
-  let prevDue: number | undefined;
   const r = await withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `finding:${key}`, async (): Promise<Saved> => {
     const row = await readRow("findings", key);
     if (!row || row.deleted) return fail("Finding not found");
     const curRev = nextRev(row) - 1;
     const cur = normalizeFinding({ ...row.doc, rev: curRev }, key);
-    prevDue = cur.nextDue;
     if (typeof inc.rev === "number" && inc.rev < curRev) return fail("conflict");
     if (cur.voided) return fail("This finding is voided.");
     const e = applyEditable(cur, inc, false);
@@ -256,15 +254,7 @@ export async function saveFinding(incoming: Partial<Finding> & { key: string }, 
     return { ok: true, doc: next };
   });
   if (!r.ok) return r;
-  // #353 review M3 — a moved or cleared next-due date closes the old date's open reminder.
-  await closeFindingReminders(key, prevDue, r.doc.nextDue);
   return { ok: true, doc: await allocateOrKeep(r.doc) };
-}
-
-async function closeFindingReminders(key: string, before: number | undefined, after: number | undefined): Promise<void> {
-  if ((before ?? null) === (after ?? null)) return;
-  const { closeRemindersIfDateChanged } = await import("@/lib/assessments/reminder-close");
-  await closeRemindersIfDateChanged("finding", key, before, after);
 }
 
 async function createFinding(key: string, inc: Record<string, unknown>, by: string): Promise<Saved> {
@@ -397,13 +387,11 @@ export async function allocatePrintedId(f: Finding): Promise<Finding> {
 export async function transitionFinding(key: string, to: FindingStatus, user: { id: string }, extra?: { note?: string; patch?: Partial<Finding> }): Promise<Saved> {
   if (!oneOf(STATUSES, to)) return fail("Unknown status");
   if (typeof user?.id !== "string" || !user.id) return fail("Unknown user");
-  let prevDue: number | undefined;
   const r = await withAdvisoryLock(ASSESSMENT_LOCK_NAMESPACE, `finding:${key}`, async (): Promise<Saved> => {
     const row = await readRow("findings", key);
     if (!row || row.deleted) return fail("Finding not found");
     const curRev = nextRev(row) - 1;
     const cur = normalizeFinding({ ...row.doc, rev: curRev }, key);
-    prevDue = cur.nextDue;
     if (cur.status === to && !cur.voided) return { ok: true, doc: cur };
     let cand = cur;
     if (extra?.patch && isObj(extra.patch)) {
@@ -419,7 +407,6 @@ export async function transitionFinding(key: string, to: FindingStatus, user: { 
     await writeRow("findings", key, next as unknown as Record<string, unknown> & { rev: number }, false);
     return { ok: true, doc: next };
   });
-  if (r.ok) await closeFindingReminders(key, prevDue, r.doc.nextDue);
   return r;
 }
 

@@ -13,7 +13,7 @@ import { LinkTiles } from "./shared";
 import type { UserVM } from "./types";
 
 /**
- * Settings → Sales & Rewards (settings cleanup): the Rewards, Catalog,
+ * Settings → Sales (settings cleanup): the Catalog,
  * Estimating Rules and Templates shortcut row, then Review limits, Pipelines
  * and Customer fields — each card unchanged from the old Admin section.
  */

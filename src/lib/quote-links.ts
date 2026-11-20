@@ -1,8 +1,8 @@
 /**
  * #221 — the one place that maps a quote to its own builder's edit URL.
  * Copied EXACTLY from the private editHrefFor() that used to live in
- * quotes/page.tsx: every branch, including consulting's and rental's
- * routes, and the same encodeURIComponent(id) query-string shape.
+ * quotes/page.tsx: every branch, including consulting's route, and the
+ * same encodeURIComponent(id) query-string shape.
  * Unknown / missing / "system" quoteType all fall through to the
  * Estimator, since a system (Grid) quote's builder IS the Estimator.
  *
@@ -17,14 +17,15 @@ export function quoteBuilderHref(q: QuoteLinkInput): string {
   switch (q.quoteType) {
     case "flame_test":
       return `/flame-tests/quote?id=${id}`;
-    case "repair":
-      return `/repairs/quote?id=${id}`;
     case "inspection":
       return `/inspections/quote?id=${id}`;
     case "consulting":
       return `/design/engagements/quote?id=${id}`;
+    // The repair and rental builders were removed: an old quote of either type
+    // opens its row in the Quotes hub (status, value and history stay readable).
+    case "repair":
     case "rental":
-      return `/rentals/quote?id=${id}`;
+      return `/quotes?id=${id}`;
     default:
       return `/estimator?id=${id}`;
   }

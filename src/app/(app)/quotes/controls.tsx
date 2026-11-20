@@ -141,41 +141,6 @@ export function NewQuoteMenu() {
               </div>
             </Link>
             <Link
-              href="/quotes/new?type=repair"
-              className="qt-menuitem"
-              style={{
-                display: "block",
-                textDecoration: "none",
-                color: "#16181d",
-                borderRadius: 8,
-                padding: "10px 12px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>
-                  Repair quote
-                </span>
-                <span
-                  style={{
-                    fontSize: 8.5,
-                    fontWeight: 700,
-                    letterSpacing: ".04em",
-                    textTransform: "uppercase",
-                    color: "#9a6a1f",
-                    background: "#fbf3dd",
-                    border: "1px solid #f0e2bd",
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                  }}
-                >
-                  Auto
-                </span>
-              </div>
-              <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
-                Auto-priced by labor + travel + parts
-              </div>
-            </Link>
-            <Link
               href="/quotes/new?type=inspection"
               className="qt-menuitem"
               style={{
@@ -243,41 +208,6 @@ export function NewQuoteMenu() {
               </div>
               <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
                 Fee-based design &amp; advisory work
-              </div>
-            </Link>
-            <Link
-              href="/quotes/new?type=rental"
-              className="qt-menuitem"
-              style={{
-                display: "block",
-                textDecoration: "none",
-                color: "#16181d",
-                borderRadius: 8,
-                padding: "10px 12px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>
-                  Rental quote
-                </span>
-                <span
-                  style={{
-                    fontSize: 8.5,
-                    fontWeight: 700,
-                    letterSpacing: ".04em",
-                    textTransform: "uppercase",
-                    color: "#2f7a52",
-                    background: "#e6f4ec",
-                    border: "1px solid #cde7d8",
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                  }}
-                >
-                  Auto
-                </span>
-              </div>
-              <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>
-                Auto-priced by equipment + duration
               </div>
             </Link>
           </div>
