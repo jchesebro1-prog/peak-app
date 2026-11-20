@@ -877,6 +877,8 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
   const R = await import("@/lib/assist/ask-runner");
   const { runAsk, buildAskParams, webSearchToolFor, ASK_CUSTOM_TOOLS, webSourcesOf, typedEmails, isToolInputJsonError, isWebToolRejection, isKeyRejected, ASK_FAILED_TEXT } = R;
   const { getRun, createRun, newRunId, recordAskConfirm, userFeatureSpend, ASK_CONFIRMED_MAX } = await import("@/lib/stores/assist-runs");
+  const { ASK_DAILY_TEXT, ASK_DAILY_USD_PER_USER, ASK_HARD_PER_HOUR, ASK_HARD_RATE_TEXT, ASK_KEY_REJECTED_TEXT } = await import("@/lib/assist/features/ask-limits");
+  const { softDeleteDoc } = await import("@/db/doc-store");
   const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
   const { fixtureId } = await import("./test-fixtures");
   const { ASK_CUT_OFF_NOTE, ASK_FINAL_NOTE, ASK_NO_KEY_TEXT, ASK_REFUSAL_TEXT, ASK_TIMEOUT_NOTE } = await import("@/lib/assist/features/ask-limits");
@@ -1165,6 +1167,44 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
       ok(p.model === "claude-sonnet-5-5" && (p.output_config as { effort: string }).effort === "medium" && p.fallbacks === "default" && p.tools.some((t) => t.type === "web_search_20260209") && h.calls[0].opts.timeout > 85_000 && h.run?.requestedModel === "claude-sonnet-5-5" && (h.run.outcomeDetail as { hard: boolean }).hard === true, "runAsk: hard uses the askHard slot — Sonnet 5.5, medium effort, fallbacks, web_search_20260209, 90 s");
     }
 
+    // Final review — spend guard: Try harder has its own 15/h limit on top of the shared 60/h.
+    {
+      const HARD = { id: "u-ask3-hard", name: "Ask3 Hard" };
+      const hs = assistSettingsOf({ assistUsers: [HARD.id], assistFeatures: { ask: true } });
+      let passed = 0;
+      for (let n = 0; n < ASK_HARD_PER_HOUR; n++) if ((await ask(q(`hard ${n}`), [{}], { me: HARD, settings: hs, hard: true })).res.ok) passed++;
+      const over = await ask(q("hard again"), [{}], { me: HARD, settings: hs, hard: true });
+      const plain = await ask(q("plain"), [{}], { me: HARD, settings: hs });
+      ok(
+        ASK_HARD_PER_HOUR === 15 && passed === 15 && over.calls.length === 0 && over.res.runId === null && over.events.length === 1 && over.events[0].t === "error" && (over.events[0] as { message: string }).message === ASK_HARD_RATE_TEXT && plain.res.ok && plain.calls.length === 1,
+        "runAsk: Try harder is limited to 15 per hour per user (no call, no run past it); an ordinary question still goes through"
+      );
+    }
+
+    // Final review — spend guard: a daily per-user budget ($5, Chicago day) from today's logged Ask cost.
+    {
+      const DAILY = { id: "u-ask3-daily", name: "Ask3 Daily" };
+      const ds = assistSettingsOf({ assistUsers: [DAILY.id], assistFeatures: { ask: true } });
+      const seedRun = async (o: Partial<AssistRun>) => {
+        const r = { ...(await getRun(runIds[0]))!, id: newRunId(NOW) + Math.random().toString(36).slice(2, 6), userId: DAILY.id, userName: DAILY.name, feature: "ask" as const, createdAt: NOW, outcome: null, outcomeDetail: null, outcomeAt: null, ...o };
+        await createRun(r);
+        runIds.push(r.id);
+      };
+      await seedRun({ costUsd: 3, createdAt: NOW - 3_600_000 });
+      await seedRun({ costUsd: 1.99 });
+      await seedRun({ costUsd: 10, createdAt: dayStart - 1 }); // yesterday (Chicago)
+      await seedRun({ costUsd: 10, feature: "reply" }); // another feature
+      await seedRun({ costUsd: 10, userId: "u-ask3-daily-other" }); // another user
+      const sum0 = await userFeatureSpend(DAILY.id, "ask", dayStart, dayEnd);
+      const under = await ask(q("still ok"), [{}], { me: DAILY, settings: ds });
+      await seedRun({ costUsd: 0.01 });
+      const overDay = await ask(q("one more"), [{}], { me: DAILY, settings: ds });
+      ok(
+        ASK_DAILY_USD_PER_USER === 5 && Math.abs(sum0 - 4.99) < 1e-9 && under.res.ok && under.calls.length === 1 &&
+          overDay.calls.length === 0 && overDay.res.runId === null && overDay.events.length === 1 && (overDay.events[0] as { message: string }).message === ASK_DAILY_TEXT,
+        "runAsk: the daily budget sums only today's (Chicago) Ask cost for this user — under $5 runs; at or over $5 refuses \"Ask AI daily limit reached — try again tomorrow.\" with no call and no run"
+      );
+    }
 
     // Final review — runAsk never throws: a failure in the pre-run checks is one error event, no run (D958).
     {
@@ -1191,6 +1231,19 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
       );
     }
 
+    // Final review — a rejected key (401 / 403) says so; the run is still logged.
+    {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const e401 = Anthropic.APIError.generate(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }, undefined, new Headers());
+      const k = await ask(q("key?"), [{ throws: e401 }]);
+      const k403 = await ask(q("key 403?"), [{ throws: Object.assign(new Error("403 permission"), { status: 403 }) }]);
+      const errMsg = (x: typeof k) => (x.events.find((e) => e.t === "error") as { message: string } | undefined)?.message;
+      ok(
+        e401 instanceof Anthropic.AuthenticationError && isKeyRejected(e401) && !isKeyRejected(Object.assign(new Error("500"), { status: 500 })) && !isKeyRejected(new Error("401 in text only")) &&
+          errMsg(k) === ASK_KEY_REJECTED_TEXT && errMsg(k403) === ASK_KEY_REJECTED_TEXT && !!k.run && k.run.ok === false && k.run.stopReason === "error" && /401/.test(k.run.error ?? "") && k.events[k.events.length - 1].t === "done",
+        "runAsk: a 401/403 from Anthropic shows \"The Claude API key was rejected — check Settings → Beta → Assist pilot.\" and the run is still logged"
+      );
+    }
 
     // Cards: page context + prior tokens feed the whitelist; unknown ids / emails are dropped.
     {
@@ -1276,6 +1329,7 @@ export async function askRunnerChecks(ok: Ok): Promise<void> {
     const action = readFileSync("src/lib/assist/ask-actions.ts", "utf8");
     ok(/^"use server";/.test(action) && /const me = await requireUser\(\);/.test(action) && /recordAskConfirm\(id, me\.id, kind\)/.test(action) && /ASK_CARD_KINDS\.includes\(kind\)/.test(action), "recordAskCardAction: a server action — requireUser, kind checked, recordAskConfirm(runId, me.id, kind)");
   } finally {
+    for (const id of runIds) await softDeleteDoc("assist_runs" as never, id).catch(() => {});
     await removeCustomer(CID).catch(() => {});
   }
 }
@@ -1501,14 +1555,19 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   const pilot = read("src/app/(app)/settings/groups/assist-pilot.tsx");
   ok(pilot.includes("<AskReportTable ask={assist.ask} />") && pilot.includes("{assist.askModels.ask}") && pilot.includes("{assist.askModels.askHard}") && read("src/app/(app)/settings/assist-data.ts").includes("ask: askReport(runs),"), "settings: the pilot card shows the Ask AI model hint and table");
   const companyActions = read("src/app/(app)/companies/actions.ts");
+  ok(/const user = await requireUser\(\);/.test(projNote) && /typeof projectId === "string"/.test(projNote) && /PROJECT_NOTE_MAX/.test(projNote) && /await addNote\(id, user\.name \|\| undefined, t\)/.test(projNote) && !/redirect|projectErrorPath/.test(projNote) && /return \{ ok: false, error: "That project no longer exists\." \}/.test(projNote), "ask ui: addProjectNoteAction reuses addNote and returns {ok, error} — never redirects");
   ok(/const lead = await logActivity\(id,[^\n]*\);\s*if \(!lead\) return \{ ok: false as const, error: "That lead no longer exists\." \};/.test(read("src/app/(app)/leads/actions.ts")), "ask ui: logActivityAction reports a missing lead as an error");
   ok(/typeof siteId === "string"/.test(companyActions) && /typeof text === "string"/.test(companyActions) && /if \(t\.length > VENUE_NOTE_MAX\)/.test(companyActions) && /const VENUE_NOTE_MAX = 4000;/.test(companyActions) && /return \{ ok: true as const, customerId: site\.companyId \|\| null \};/.test(companyActions), "ask ui: addVenueNoteAction checks types, caps the note at 4,000 and returns the venue's company");
   ok(/export async function addVenueNoteAction\(siteId: string, text: string\) \{\s*const me = await requireUser\(\);/.test(companyActions) && /parentKind: "site", parentId: site\.id, customerId: site\.companyId \|\| null/.test(companyActions), "ask ui: the venue note action requires a user and writes a site note");
   const actions = read("src/lib/assist/ask-actions.ts");
   ok(/export async function createAskTaskAction[\s\S]*?const me = await requireUser\(\);[\s\S]*?createAskTask\(req, \{ id: me\.id, name: me\.name \}\)/.test(actions), "ask ui: createAskTaskAction requires a user");
+  const { activeUsers } = await import("@/lib/users");
+  const { upsert: upsertCustomer, remove: removeCustomer } = await import("@/lib/stores/customers");
   const { fixtureId } = await import("./test-fixtures");
   const { seeded } = await import("@/db");
   await seeded();
+  const users = await activeUsers();
+  const me = { id: users[0].id, name: users[0].name };
   const CID = fixtureId("ask4", "co");
   const CID2 = fixtureId("ask4", "co2");
   const SITE_MINE = fixtureId("ask4", "site-mine");
@@ -1517,19 +1576,42 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   const { saveSite, softDeleteSite } = await import("@/lib/identity/sites");
   const made: string[] = [];
   try {
+    await upsertCustomer({ id: CID, name: "Ask4 Co", type: "Education", locations: [], contacts: [] } as never);
+    if (r.ok) made.push(r.task.id);
+    ok(
+      r.ok && !!task && task.title === "Call Robin" && task.customerId === CID && !task.leadId && !task.quoteId && task.assigneeUserId === me.id && task.assigneeName === me.name && typeof task.dueAt === "number" && task.dueAt > Date.now() && task.notes === "about the bid",
+      "createAskTask: the title tidied, an existing company linked, a missing lead dropped, the assignee defaults to me, the #327 due default applies"
+    );
+    if (r2.ok) made.push(r2.task.id);
+    ok(r2.ok && r2.task.assigneeUserId === users[users.length - 1].id && r2.task.dueAt === new Date("2034-02-03T12:00:00").getTime(), "createAskTask: a picked assignee and date are kept (noon, like the Inbox dialog)");
     // Email threads: my own thread is linked and filed under "Email" (the Inbox's section); another user's is dropped.
     const T_MINE = fixtureId("ask4", "thread-mine");
     const T_THEIRS = fixtureId("ask4", "thread-theirs");
     const base = { mailbox: "personal", unread: false, customer: "Ask4 Co", contactName: "Pat", contactEmail: "pat@ask4.test", subject: "Ask4 bid", channel: "email", status: "waiting_us", createdAt: NOW, updatedAt: NOW, messages: [] };
+    await createFixture("comms", { id: T_MINE, mailboxUser: me.name, ...base } as never);
     await createFixture("comms", { id: T_THEIRS, mailboxUser: "Someone Else Ask4", ...base } as never);
+    if (r3.ok) made.push(r3.task.id);
+    if (r4.ok) made.push(r4.task.id);
+    ok(r3.ok && r3.task.threadId === T_MINE && r3.task.customerId === CID && r3.task.section === "Email" && r4.ok && !r4.task.threadId && r4.task.section === "", "createAskTask: a thread link is written only for my own thread (loadThreadFor), filed under Email like the Inbox's; another user's thread is dropped");
     // #341 — Ask may READ a teammate's company-linked thread, but a task's thread link stays own-only (the Inbox's rule)
     const T_SHARED4 = fixtureId("ask4", "thread-shared");
     await createFixture("comms", { id: T_SHARED4, mailboxUser: "Someone Else Ask4", ...base, customerId: CID, linkedBy: "user" } as never);
+    if (r4b.ok) made.push(r4b.task.id);
+    ok(r4b.ok && !r4b.task.threadId && r4b.task.customerId === CID && r4b.task.section === "", "createAskTask (#341): a teammate's linked (readable) thread is still never a task's thread link — own-only, like the Inbox");
+    // A venue rides only with its own company.
+    await upsertCustomer({ id: CID2, name: "Ask4 Other Co", type: "Education", locations: [], contacts: [] } as never);
     await saveSite({ id: SITE_MINE, companyId: CID, name: "Ask4 Main Stage", isPrimary: true, venueKind: "proscenium" });
     await saveSite({ id: SITE_OTHER, companyId: CID2, name: "Ask4 Other Stage", isPrimary: true, venueKind: "proscenium" });
+    if (r5.ok) made.push(r5.task.id);
+    if (r6.ok) made.push(r6.task.id);
+    if (r7.ok) made.push(r7.task.id);
+    ok(r5.ok && r5.task.siteId === SITE_MINE && r6.ok && r6.task.customerId === CID && !r6.task.siteId && r7.ok && r7.task.siteId === SITE_OTHER, "createAskTask: a venue is kept with its own company, dropped when the company differs, kept when no company is linked");
   } finally {
+    await softDeleteSite(SITE_MINE).catch(() => {});
     await softDeleteSite(SITE_OTHER).catch(() => {});
     await dropFixtures("ask4").catch(() => 0);
+    await removeCustomer(CID).catch(() => {});
+    await removeCustomer(CID2).catch(() => {});
   }
 }
 

@@ -196,6 +196,30 @@ const OLD_BID_SPEC: QuotePipeline = {
 };
 const OLD_LIST: QuotePipeline[] = [DEFAULT_QUOTE_PIPELINES[0], OLD_BID_SPEC];
 
+function pipelineChecks(ok: Ok) {
+  const seed = DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!;
+  ok(seed.stages[0].id === "lead-qualify" && seed.stages[0].label === "Lead / Qualify" && seed.stages[0].tag === "draft" && seed.stages[1].id === "collect-info" && !validateQuotePipeline(seed).length,
+    "b3 #42: the BID SPEC seed starts Lead / Qualify (a plain Draft stage) → Collect Information, and validates");
+  const once = withLeadQualifyStage(OLD_LIST);
+  ok(!!once && once[1].stages.map((s) => s.id).join() === "lead-qualify,collect-info,create-bid,bid-sent,awarded" && once[0] === OLD_LIST[0] && OLD_BID_SPEC.stages.length === 4,
+    "b3 #42: a stored list gains the stage before Collect Information; other pipelines and the input are untouched");
+  ok(withLeadQualifyStage(once!) === null, "b3 #42: idempotent — a list that has it changes nothing (never a duplicate)");
+  const renamed = [{ ...OLD_BID_SPEC, stages: [{ id: "lq", label: "Lead/qualify", tag: "draft" as const }, ...OLD_BID_SPEC.stages] }];
+  ok(withLeadQualifyStage(renamed) === null, "b3 #42: a stage already named Lead / Qualify (any spelling) counts as present");
+  ok(withLeadQualifyStage([DEFAULT_QUOTE_PIPELINES[0]]) === null, "b3 #42: no BID SPEC pipeline → nothing to do");
+  const noCollect = withLeadQualifyStage([{ ...OLD_BID_SPEC, stages: OLD_BID_SPEC.stages.filter((s) => s.id !== "collect-info") }]);
+  ok(noCollect?.[0].stages[0].id === LEAD_QUALIFY_STAGE.id, "b3 #42: with Collect Information gone it goes first");
+  // #353 review I2 / M1
+  ok(!isPreviewDeploy({}) && !isPreviewDeploy({ VERCEL_ENV: "" }) && !isPreviewDeploy({ VERCEL_ENV: "production" }) && isPreviewDeploy({ VERCEL_ENV: "preview" }) && isPreviewDeploy({ VERCEL_ENV: "development" }),
+    "I2: isPreviewDeploy — any VERCEL_ENV other than production; unset (dev, tests) is not a preview");
+  const unmarked = { pipelineFixes: [] as string[] }, marked = { pipelineFixes: [LEAD_QUALIFY_FIX] };
+  ok(shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: false }) && !shouldEnsureLeadQualify(marked, { preview: false, inTransaction: false }) &&
+     !shouldEnsureLeadQualify(unmarked, { preview: true, inTransaction: false }) && !shouldEnsureLeadQualify(unmarked, { preview: false, inTransaction: true }),
+    "I2 / M1: the ensure runs only unmarked, never on a preview deploy, never inside the caller's transaction");
+  ok(/shouldEnsureLeadQualify\(s, \{ preview: isPreviewDeploy\(\), inTransaction: inTransaction\(\) \}\)/.test(src("src/lib/pipelines-server.ts")) &&
+     /if \(!isPreviewDeploy\(\)\) after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")),
+    "I2 pin: loadPipelines and the Assessments page's lazy reminder sweep both ask isPreviewDeploy()");
+}
 
 async function pipelineDbChecks(ok: Ok) {
   const before = await getSettingsPatch();
@@ -238,6 +262,23 @@ async function pipelineDbChecks(ok: Ok) {
 
 /* ------------------------------------------------------------------ #34 consulting phases ------------------------------------------------------------------ */
 
+function phasePickerChecks(ok: Ok) {
+  const menu = ["Programming", "Schematic Design", "Design Development", "Construction Documents", "Construction Admin"];
+  ok(JSON.stringify(pickManualPhases(menu, undefined)) === JSON.stringify(menu), "b3 #34: no posted list (an older client) = every phase, as before");
+  ok(JSON.stringify(pickManualPhases(menu, ["construction admin", " Programming ", "Nope"])) === '["Programming","Construction Admin"]',
+    "b3 #34: ticked phases are kept in menu order; names off the menu are dropped");
+  ok(pickManualPhases(menu, []) === null && pickManualPhases(menu, ["Nope"]) === null && pickManualPhases(menu, "Programming") === null,
+    "b3 #34: no phase ticked (or garbage) is refused");
+  // Only ticked phases get tasks: generateSchedule places lines by the engagement's own phases.
+  const eng = [{ id: "ph-a", name: "Programming" }, { id: "ph-b", name: "Construction Admin" }];
+  const modal = src("src/app/(app)/design/engagements/new-engagement-modal.tsx");
+  ok(/useState<string\[\]>\(\(\) => \[\.\.\.phaseMenu\]\)/.test(modal) && /data-testid="new-engagement-phases"/.test(modal) && /disciplines,\s*phases,\s*\}\);/.test(modal),
+    "b3 #34 pin: the modal's phase checklist starts all ticked and posts the ticks");
+  const act = src("src/app/(app)/design/engagements/actions.ts");
+  ok(/requirePerm\("create"\)[\s\S]{0,2200}pickManualPhases\(mergedConsultingPhases\(\(await getSettings\(\)\)\.consultingPhases\), input\?\.phases\)/.test(act) && /if \(!phases\) return \{ ok: false, error: "Tick at least one phase\." \}/.test(act) && /^      phases,$/m.test(act),
+    "b3 #34 pin: the create action (create permission) allowlists the ticked phases against Settings and seeds only those");
+  ok(src("src/app/(app)/design/engagements/view.tsx").includes("phaseMenu={data.phaseMenu}"), "b3 #34 pin: the hub hands the modal the Settings phase menu");
+}
 
 async function phaseDbChecks(ok: Ok) {
   const eng = await createManualEngagement({ customerId: "TESTb3:co-none", customer: "B3 Co", name: "TESTb3 phases", phases: ["Programming", "Construction Admin"], startAt: Date.UTC(2026, 0, 1), endAt: Date.UTC(2026, 5, 1) }, { name: "Pat" });
@@ -255,6 +296,44 @@ async function phaseDbChecks(ok: Ok) {
 
 /* ------------------------------------------------------------------ #35 visit edit rights ------------------------------------------------------------------ */
 
+function visitRightsChecks(ok: Ok) {
+  const roster = [
+    { id: "u1", name: "Jeff Chesebro" },
+    { id: "u2", name: "Sam Okafor" },
+    { id: "u3", name: "Pat Lee" },
+    { id: "u4", name: "pat lee " }, // an (archived) namesake makes "Pat Lee" ambiguous
+  ];
+  const tech = { id: "u2", name: "Sam Okafor", roles: ["Estimator"] };
+  const other = { id: "u1", name: "Jeff Chesebro", roles: ["Estimator"] };
+  const approver = { id: "u9", name: "Rae Approver", roles: ["Reviewer"] };
+  const sched = { stage: "scheduled", assignedTo: "sam okafor" };
+  ok(isVisitLead(sched, tech, roster) && canChangeVisit(sched, tech, roster), "b3 #35: the lead (by unique name, case-insensitive) can change a scheduled visit");
+  ok(!canChangeVisit(sched, other, roster), "b3 #35: a teammate who is neither lead nor approver cannot");
+  ok(canChangeVisit(sched, approver, roster) && canChangeVisit(sched, { ...other, roles: ["Manager"] }, roster) && canChangeVisit(sched, { ...other, roles: ["Admin"] }, roster),
+    "b3 #35: anyone holding approve (Reviewer / Manager / Admin) can");
+  const amb = { stage: "scheduled", assignedTo: "Pat Lee" };
+  ok(!isVisitLead(amb, { id: "u3", name: "Pat Lee" }, roster) && !canChangeVisit(amb, { id: "u3", name: "Pat Lee", roles: ["Estimator"] }, roster) && canChangeVisit(amb, approver, roster),
+    "b3 #35: an ambiguous lead name (#349: a namesake on the roster, any status) is nobody's — approvers only");
+  ok(!canChangeVisit({ stage: "scheduled", assignedTo: "" }, tech, roster), "b3 #35: a scheduled visit with no lead is approvers-only");
+  ok(canChangeVisit({ stage: "claimed", assignedTo: "Jeff Chesebro" }, tech, roster) && canChangeVisit({ stage: "open" }, tech, roster),
+    "b3 #35: request-pool visits keep their own claim model (not restricted here)");
+  const gate = "if (!canChangeVisit(v, me, await allUsers())) return { ok: false, error: VISIT_EDIT_REFUSAL };";
+  const before = (text: string, a: string, b: string) => text.indexOf(a) >= 0 && text.indexOf(b) > text.indexOf(a);
+  const va = src("src/app/(app)/venue-assessments/visit-actions.ts");
+  const rm = va.slice(va.indexOf("export async function removeVisitAction"), va.indexOf("export async function scheduleVisitAction"));
+  const sc = va.slice(va.indexOf("export async function scheduleVisitAction"));
+  ok(before(rm, gate, "await cancelVisitInvites(v") && before(rm, gate, "await removeVisit(id)"), "b3 #35 pin: removeVisitAction refuses before cancelling invites or deleting");
+  ok(before(sc, gate, "await scheduleVisit(id"), "b3 #35 pin: scheduleVisitAction refuses to re-time a scheduled visit before it writes");
+  const cp = src("src/app/(app)/companies/[id]/page.tsx");
+  ok(cp.includes("canEdit={canChangeVisit(v, me, visitRoster)}") && cp.includes("<DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />"),
+    "b3 #35 pin: the company record shows read-only Edit / Delete to everyone else");
+  ok(!cp.includes("await allUsers()") && /getCompanyLogo\(cust\.id\),[\s\S]{0,200}allUsers\(\),\s*\]\);/.test(cp) && cp.includes("const visitRoster = everyone.map("),
+    "M8 pin: the company record fetches the roster in its parallel read, not after it");
+  const vh = src("src/lib/venue-history-server.ts"), cs = src("src/lib/consulting-stages.ts");
+  ok(/so the directory is a single pass over the data\.\n \*\/\nexport async function loadVenueDirectory/.test(vh) && /amount\. Nothing here reads settings or the store\.\n \*\/\nexport function manualMilestoneSeeds/.test(cs),
+    "M6 pin: the moved doc comments sit on their own functions again");
+  ok(!/from "@\/lib\/stores|from "@\/db/.test(src("src/lib/visit-edit-rights.ts")), "b3 #35 pin: the rule module is store-free");
+}
 
 /* ------------------------------------------------------------------ #8 rigging depth ------------------------------------------------------------------ */
 
@@ -317,6 +396,29 @@ const DAY = 86_400_000;
 
 function reminderChecks(ok: Ok) {
   const now = Date.UTC(2026, 9, 15, 15);
+  const findings = [
+    f("fd1", { nextDue: now + 20 * DAY }),
+    f("fd2", { nextDue: now + 45 * DAY }),
+    f("fd3", { nextDue: now - 2 * DAY }),
+    f("fd4", { nextDue: now + 5 * DAY, voided: { by: "x", at: 1, reason: "dup" } }),
+    f("fd5", {}),
+    f("fd6", { nextDue: now + 10 * DAY, customerId: "co2", assessmentId: "AS-1002" }),
+  ];
+  const base = {
+    findings,
+    venues: [{ siteId: "st1", customerId: "co1", nextAssessmentAt: now + 25 * DAY }, { siteId: "st2", customerId: "co2", nextAssessmentAt: now + 60 * DAY }, { siteId: "st3", customerId: "co3", nextAssessmentAt: now + 3 * DAY }],
+    assessments: [
+      { id: "AS-1001", siteId: "st1", createdBy: "u7", visitDate: 1 },
+      { id: "AS-1002", siteId: "st2", createdBy: "u8", visitDate: 1 },
+      { id: "AS-1003", siteId: "st3", createdBy: "u7", visitDate: 1 },
+      { id: "AS-1004", siteId: "st3", createdBy: "u8", visitDate: 9 },
+    ],
+    owners: new Map<string, string | null>([["co1", "u1"], ["co2", "u-gone"], ["co3", null]]),
+    activeUserIds: new Set(["u1", "u7", "u8"]),
+    siteNames: new Map([["st1", "Lincoln HS — Auditorium"]]),
+    dayLabel: (ms: number) => new Date(ms).toISOString().slice(0, 10),
+    now,
+  };
   const fs = src("src/lib/stores/findings.ts");
   ok(/prevDue = cur\.nextDue;[\s\S]*await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /if \(r\.ok\) await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /closeFindingReminders\(key, f\.nextDue, undefined\)/.test(fs),
     "M3 pin: saveFinding, transitionFinding and voidFinding close the old date's reminders");
@@ -345,7 +447,9 @@ async function reminderDbChecks(ok: Ok) {
   const F1 = "fd_b3r0000000000001", F2 = "fd_b3r0000000000002", SITE = PFX + "st1", SITE2 = PFX + "st2", CO = PFX + "co1", AS = PFX + "AS1";
   const F3 = "fd_b3r0000000000003"; // at a deleted venue (M8)
   const due1 = now + 12 * DAY, due1b = now + 15 * DAY, dueV = now + 20 * DAY, dueV2 = now + 22 * DAY;
+  const allIds = [fid(F1, due1), fid(F1, due1b), fid(F2, now + 90 * DAY), fid(F3, due1), vid(dueV), vid(dueV2)];
   const cleanup = async () => {
+    await db.delete(DOC_TABLES.tasks).where(inArray(DOC_TABLES.tasks.id, allIds));
     for (const [coll, id] of [["findings", F1], ["findings", F2], ["findings", F3], ["findings", "fd_b3r0000000000009"], ["assessments", AS], ["venue_profiles", SITE]] as const)
       await db.delete(DOC_TABLES[coll]).where(inArray(DOC_TABLES[coll].id, [id]));
     await db.delete(sites).where(like(sites.id, PFX + "%"));
@@ -367,18 +471,35 @@ async function reminderDbChecks(ok: Ok) {
     await db.update(sites).set({ deleted: true }).where(inArray(sites.id, [SITE2]));
     await setNextAssessmentAt(SITE, CO, dueV);
     ok((await getVenueProfile(SITE))?.nextAssessmentAt === Math.round(dueV), "b3 #10 db: a venue's next assessment date is stored on its profile (the new minimal field)");
+    ok(stoppedRun.stopped && stoppedRun.created === 0 && !(await task(fid(F1, due1))), "M5 db: a deadline already passed stops before the reads and writes nothing");
+    const t1 = await task(fid(F1, due1)), tv = await task(vid(dueV));
+    ok(!!t1 && !!tv && !t1.deleted && t1.doc.assigneeUserId === "u1" && tv.doc.assigneeUserId === "u1" && t1.doc.customerId === CO && r1.created >= 2,
+      "b3 #10 db: the sweep creates the finding and venue reminders, assigned to the account rep: " + JSON.stringify(r1));
+    ok(t1.doc.dueAt === due1 && t1.doc.siteId === SITE, "b3 #10 db: due on the finding's date, linked to the venue");
+    ok(!(await task(fid(F3, due1))), "M8 db: no reminder for a finding whose venue was deleted");
+    ok(r2.created === 0 && r2.closed === 0, "b3 #10 db: a second run creates and closes nothing (idempotent)");
 
     // M3 — a moved finding date (through the store) closes the old day's reminder at once; the sweep adds the new one.
     const moved = await saveFinding({ key: F1, nextDue: due1b } as never, { id: "u1" });
+    ok(moved.ok && (await task(fid(F1, due1)))?.doc.status === "done", "M3 db: moving a finding's next-due date closes the old date's open reminder");
+    ok((await task(fid(F1, due1b)))?.doc.status === "open" && (await task(fid(F1, due1)))?.doc.status === "done", "M3 db: the sweep then creates the new date's reminder, leaving the old one done");
     // M3 — clearing it closes that one too.
     await saveFinding({ key: F1, nextDue: null } as never, { id: "u1" });
+    ok((await task(fid(F1, due1b)))?.doc.status === "done", "M3 db: clearing a finding's next-due date closes its open reminder");
     // M3 — a venue date moved by a path without the hook: the sweep's catch-all closes the old one.
     await setNextAssessmentAt(SITE, CO, dueV2);
+    ok((await task(vid(dueV)))?.doc.status === "done" && (await task(vid(dueV2)))?.doc.status === "open" && r3.closed >= 1,
+      "M3 db: the sweep closes a venue reminder whose date moved and creates the new one: " + JSON.stringify(r3));
     // M3 — the action's hook: clearing the venue date closes its reminder right away.
     await setNextAssessmentAt(SITE, CO, null);
+    ok((await task(vid(dueV2)))?.doc.status === "done" && (await getVenueProfile(SITE))?.nextAssessmentAt === undefined, "M3 db: clearing a venue's date closes its open reminder");
 
     // a deleted reminder is never re-created
     await ins("findings", "fd_b3r0000000000009", fdoc("fd_b3r0000000000009", SITE, due1, "Delete me"));
+    allIds.push(fid("fd_b3r0000000000009", due1));
+    await softDeleteDoc("tasks", fid("fd_b3r0000000000009", due1));
+    const del = await getDocRows("tasks", [fid("fd_b3r0000000000009", due1)]);
+    ok(r4.created === 0 && del.length === 1 && del[0].deleted, "b3 #10 db: a reminder someone deleted is never re-created");
   } finally {
     await cleanup();
   }
@@ -386,6 +507,14 @@ async function reminderDbChecks(ok: Ok) {
 
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */
 
+export async function batch3PureChecks(ok: Ok) {
+  listPagingChecks(ok);
+  pipelineChecks(ok);
+  phasePickerChecks(ok);
+  visitRightsChecks(ok);
+  await rigDepthChecks(ok);
+  reminderChecks(ok);
+}
 
 export async function batch3DbChecks(ok: Ok) {
   await listDbChecks(ok);
@@ -398,4 +527,8 @@ if (process.argv[1]?.endsWith("test-oct15-batch3.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
   const db = !!process.env.PGLITE_PATH;
+  batch3PureChecks(okf)
+    .then(() => (db ? batch3DbChecks(okf) : undefined))
+    .then(() => { console.log(`${pass} PASS, ${fail} FAIL${db ? "" : " (pure only — set PGLITE_PATH for the DB half)"}`); process.exit(fail ? 1 : 0); })
+    .catch((e) => { console.error(e); process.exit(1); });
 }

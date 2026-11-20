@@ -374,6 +374,41 @@ const MON = "2026-10-12";
 const FRI = "2026-10-16";
 const SAT = "2026-10-17";
 
+function dueChecks(ok: Ok): void {
+  const cases: Array<[string, string, string]> = [
+    // [phrase, anchor, expected day]
+    ["", MON, "2026-10-14"], ["", FRI, "2026-10-20"], ["", SAT, "2026-10-20"],
+    ["sometime soon", MON, "2026-10-14"],
+    ["today", MON, MON], ["today", FRI, FRI], ["today", SAT, SAT],
+    ["by EOD", MON, MON],
+    ["tomorrow", MON, "2026-10-13"], ["tomorrow", FRI, "2026-10-17"], ["tomorrow morning", SAT, "2026-10-18"],
+    ["Thursday", MON, "2026-10-15"], ["by Thursday", FRI, "2026-10-22"], ["thurs", SAT, "2026-10-22"],
+    ["Monday", MON, "2026-10-19"], ["Friday", FRI, "2026-10-23"], ["Saturday", SAT, "2026-10-24"],
+    ["end of the week", MON, FRI], ["end of week", FRI, FRI], ["by the end of the week", SAT, "2026-10-23"],
+    ["next week", MON, "2026-10-19"], ["next week", FRI, "2026-10-19"], ["early next week", SAT, "2026-10-19"],
+    ["end of month", MON, "2026-10-31"], ["by the end of the month", FRI, "2026-10-31"], ["end of the month", SAT, "2026-10-31"],
+    ["10/22", MON, "2026-10-22"], ["by 10/22/2026", FRI, "2026-10-22"], ["Oct 22", SAT, "2026-10-22"],
+    ["October 22nd", MON, "2026-10-22"], ["2026-10-22", MON, "2026-10-22"], ["22 October", MON, "2026-10-22"],
+    // a recently passed date → the default; one > ~180 days back rolls to next year
+    ["10/1", MON, "2026-10-14"], ["Sep 1", FRI, "2026-10-20"], ["10/1/2026", MON, "2026-10-14"],
+    ["Jan 5", MON, "2027-01-05"], ["April 1", MON, "2027-04-01"],
+    ["13/45", MON, "2026-10-14"],
+    // a month name only counts as a whole word
+    ["2 marketing calls", MON, "2026-10-14"], ["3 decks", FRI, "2026-10-20"],
+    // compound phrases resolve to their most specific part
+    ["by EOD Friday", MON, FRI], ["Friday EOD", MON, FRI], ["COB Thursday", MON, "2026-10-15"],
+    ["by EOD Friday", SAT, "2026-10-23"], ["COB Thursday", FRI, "2026-10-22"],
+    ["end of next week", MON, "2026-10-23"], ["end of next week", FRI, "2026-10-23"], ["end of next week", SAT, "2026-10-23"],
+    ["Wednesday of next week", MON, "2026-10-21"], ["Wednesday of next week", FRI, "2026-10-21"], ["next week Wednesday", SAT, "2026-10-21"],
+    ["tomorrow EOD", FRI, "2026-10-17"],
+    // several weekdays named: the one written first wins, not the first in the week
+    ["Friday or Monday", MON, FRI], ["Monday or Friday", MON, "2026-10-19"], ["Thursday or Tuesday", MON, "2026-10-15"],
+    ["by Wednesday, otherwise Tuesday", MON, "2026-10-14"],
+  ];
+  for (const [phrase, anchor, want] of cases) {
+  }
+  ok(p.hour === 17 && p.minute === 0, "due: stamped 5:00 pm Chicago");
+}
 
 /* ---------- sender rules (§5) ---------- */
 
@@ -900,6 +935,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const tri = (id: string, extra: Record<string, unknown>) =>
       ({ id, mailbox: "personal", mailboxUser: MIKE, unread: true, customerId: null, customer: "Acme", contactName: "Pat", contactEmail: "pat@acme.test", subject: "Q", channel: "email", status: "waiting_us", assignedTo: MIKE, link: null, messages: [{ id: "m1", at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi" }], createdAt: T0, updatedAt: T0, ...extra }) as unknown as CommThread;
     const court = (owner: Court["owner"]): Court => ({ owner, reason: "", source: "rule", at: T0 });
+    ok(picked[0]?.since === T0, "org triage: the row dates from the last inbound");
     /* D901 — a stale court (new mail never organized) doesn't hide that mail; the kill switch reads status only */
     const newMsgs = [
       { id: "m1", at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi" },
@@ -1049,6 +1085,10 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
       { ownerIds: o.ownerIds ?? [ARI_ID], budgetMs: o.budgetMs, deadlineMs: o.deadlineMs },
       { ctx: o.ctx ?? pilot, run: { provider, ...(o.fallback ? { fallback: o.fallback } : {}) }, now: NOW, clock: o.clock }
     );
+  const tasksOn = async (threadId: string) => {
+    rows.forEach((t) => registerFixture("tasks", t.id));
+    return rows;
+  };
   const fileAns = (target: string, confidence = "strong", needsReply = true) => JSON.stringify({ target, confidence, reason: "Asks about the stage curtain", needsReply });
   const courtAns = (o: { owner: string; teammateId?: string; promises?: Array<{ text: string; ownerUserId: string; dueText: string }> }) =>
     JSON.stringify({ owner: o.owner, teammateId: o.teammateId ?? "", reason: "read by the fake", promises: o.promises ?? [] });
@@ -1136,10 +1176,27 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const h1 = await read(handoff);
   ok(callsH.length === 1 && callsH[0].user.includes(`Thread owner ("me"): ${ARI_ID}`) && callsH[0].user.includes(`Peak teammate ${DANA_ID}`) && callsH[0].user.includes(`${DANA_ID} — TEST335 Dana`), "ai pass: the court prompt names the owner, the team, and who wrote each message");
   ok(h1.court?.owner === "me" && h1.court.source === "rule" && !h1.court.pendingAi && h1.court.basis === lastH.id && h1.status === "waiting_us" && rH.courts === 0, "ai pass: the AI agreeing with a rule hand-off (me) leaves the rule court, pending cleared, status waiting_us");
+  const hTasks = await tasksOn(handoff);
+  ok(
+    hTasks.length === 1 &&
+      hTasks[0].id === promiseTaskId(handoff, lastH.id, "Send Pat pricing on the stage curtain") &&
+      hTasks[0].assigneeUserId === ARI_ID &&
+      hTasks[0].dueAt === due &&
+      hTasks[0].section === "Email" &&
+      hTasks[0].customerId === CUST &&
+      hTasks[0].notes.startsWith("From email: "),
+    "ai pass: the promise becomes one Email task for the named owner, due Friday 5 pm, linked to the thread's customer"
+  );
   /* idempotent: the same promise again makes no second task */
   const again = await applyPromises(h1, lastH, [{ text: "send pat pricing on the stage   curtain", ownerUserId: ARI_ID, dueText: "Friday" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team });
+  ok(again.length === 1 && again[0].taskId === hTasks[0]?.id && (await tasksOn(handoff)).length === 1, "ai pass: a promise-task is created once (a re-run is idempotent)");
   /* backlog / old mail → no task */
   ok((await applyPromises(h1, lastH, [{ text: "Another thing", ownerUserId: "", dueText: "" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team, backlog: true })).length === 0, "ai pass: backlog → no promise-task");
+  ok(
+    (await applyPromises(h1, lastH, [{ text: "Another thing", ownerUserId: "", dueText: "" }], lastH.at + PROMISE_MAX_AGE_MS + 1, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team })).length === 0 &&
+      (await tasksOn(handoff)).length === 1,
+    "ai pass: mail older than a week → no promise-task"
+  );
 
   /* 5b. a hand-off the rules can't see (no name) — only the AI reading catches it */
   const unnamed = await mk("handoff-unnamed", {
@@ -1159,6 +1216,8 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   );
   const u1 = await read(unnamed);
   ok(u1.court?.owner === "me" && u1.court.source === "ai" && u1.status === "waiting_us" && rU.courts === 1, "ai pass: a hand-off to a named teammate who is me → court me (AI), status waiting_us");
+  const uTasks = await tasksOn(unnamed);
+  ok(uTasks.length === 1 && uTasks[0].assigneeUserId === DANA_ID, "ai pass: a promise owner the newest message doesn't name falls back to the internal author (D899)");
 
   /* 5c. D899 — a quoted customer text naming a teammate can't route the task to them */
   const quotedName = await mk("promise-quoted-name", {
@@ -1175,7 +1234,9 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const qT = await read(quotedName);
   const qLast = qT.messages[qT.messages.length - 1];
   const qMade = await applyPromises(qT, qLast, [{ text: "Send Pat the drawings", ownerUserId: ARI_ID, dueText: "Monday" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team });
+  ok(qMade.length === 1 && qMade[0].ownerUserId === DANA_ID && (await tasksOn(quotedName))[0]?.assigneeUserId === DANA_ID, "ai pass: a model owner named only in the quoted customer text is refused — the task goes to the internal author");
   const qNoAuthor = await applyPromises(qT, { ...qLast, id: qLast.id + "-x" }, [{ text: "Send Pat the drawings", ownerUserId: DANA_ID, dueText: "" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: null, users: team });
+  ok(qNoAuthor.length === 1 && qNoAuthor[0].ownerUserId === ARI_ID && (await tasksOn(quotedName)).length === 2, "ai pass: …and with no internal author it goes to the thread owner");
 
   /* 6. "someone will be in touch" → a promise owned by the internal author */
   const vague = await mk("vague", {
@@ -1185,6 +1246,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "customer", promises: [{ text: "Get in touch with Pat", ownerUserId: "", dueText: "next week" }] }) }));
   const v1 = await read(vague);
   const vLast = v1.messages[v1.messages.length - 1];
+  const vTasks = await tasksOn(vague);
   ok(v1.court?.source === "rule" && v1.court.owner === "customer" && !v1.court.pendingAi && v1.court.promise?.ownerUserId === DANA_ID, "ai pass: a 'customer' reading never overrides the rules; the promise is still recorded");
 
   /* 7. an unknown name is dropped */
@@ -1200,18 +1262,21 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   );
   const g1 = await read(ghost);
   const gLast = g1.messages[g1.messages.length - 1];
+  const gTasks = await tasksOn(ghost);
   ok(g1.court?.source === "rule" && g1.court.owner === "customer" && g1.court.teammateId === DANA_ID && !g1.court.pendingAi, "ai pass: an unknown teammate id is dropped — the rule court stands");
 
   /* 8. a customer's own message makes no promise-tasks */
   const custMsg = await mk("customer-promise", { messages: [msg({ body: "We will send the PO Friday." })] });
   await organizeThread(custMsg, { ctx: pilot });
   await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "me", promises: [{ text: "Send the PO", ownerUserId: "", dueText: "Friday" }] }) }));
+  ok((await tasksOn(custMsg)).length === 0 && !(await read(custMsg)).court?.pendingAi, "ai pass: promises in a customer's message never become tasks");
 
   /* 9. backlog threads never get a court reading */
   const bl = await mk("backlog-court", { messages: [msg({ body: "Can you call?" }), msg({ fromEmail: "dana@peaksystemsgroup.com", to: "pat@ai-school.test", body: "I'll call you Friday." })] });
   await organizeThread(bl, { ctx: pilot, backlog: true });
   const callsBl: ProviderRequest[] = [];
   await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "me", promises: [{ text: "Call Pat", ownerUserId: DANA_ID, dueText: "Friday" }] }) }, { calls: callsBl }));
+  ok(!callsBl.some((c) => c.system !== FILING_SYSTEM) && (await tasksOn(bl)).length === 0, "ai pass: backlog → no court call, no task");
 
   /* 10. errors: attempts counted, gives up at MAX_AI_ATTEMPTS */
   const flaky = await mk("flaky", { resolution: "suggested", suggestedCustomerId: CUST });
@@ -1258,12 +1323,15 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const callsD: ProviderRequest[] = [];
   const say = (text: string) => routedProvider({ promise: courtAns({ owner: "customer", promises: [{ text, ownerUserId: DANA_ID, dueText: "Thursday" }] }) }, { calls: callsD });
   const [rd1, rd2] = await Promise.all([run(say("Send Pat the pricing")), run(say("Get pricing over to Pat"))]);
+  const dTasks = await tasksOn(dup);
   const dLast = (await read(dup)).messages.slice(-1)[0];
+  ok(dTasks.length === 1 && callsD.length === 1 && rd1.tasks + rd2.tasks === 1, "ai lease: two passes at once on one thread (different wording) → one call, one task");
   ok((await read(dup)).court?.promisesFor === dLast.id && !(await read(dup)).court?.aiLeaseUntil && !(await read(dup)).court?.pendingAi, "ai lease: the court records promisesFor the message; the lease is released");
   await patchDoc<CommThread>("comms", dup, (d) => {
     d.court = { ...d.court!, pendingAi: true };
   });
   await run(say("Email Pat the price list"));
+  ok((await tasksOn(dup)).length === 1 && !(await read(dup)).court?.pendingAi, "ai lease: a re-run after the marker creates nothing");
   const held = await mk("leased", { resolution: "suggested", suggestedCustomerId: CUST });
   await organizeThread(held, { ctx: pilot, backlog: true });
   await patchDoc<CommThread>("comms", held, (d) => {
@@ -1330,6 +1398,7 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const callsOld: ProviderRequest[] = [];
   await run(routedProvider({ file: fileAns("none", "weak", false), promise: courtAns({ owner: "me", promises: [{ text: "Call Pat", ownerUserId: DANA_ID, dueText: "Friday" }] }) }, { calls: callsOld }));
   const tOld = await read(staleOld);
+  ok(callsOld.length === 0 && !tOld.court?.pendingAi && !tOld.filing?.pendingAi && (await tasksOn(staleOld)).length === 0, "ai stuck: stale mail older than a week is re-organized as backlog — no model call, no task");
 
   /* 16. one user's backlog doesn't starve another */
   const ANN = "TEST335 Ann";
@@ -2148,6 +2217,10 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     return id;
   };
   const get = async (id: string) => (await getDoc<CommThread>("comms", id))!;
+  const tasksOn = async (threadId: string) => {
+    rows.forEach((t) => registerFixture("tasks", t.id));
+    return rows;
+  };
   const LIV = "TEST335 Liv Cleanup";
   const LIV_ID = "TEST335-u-liv";
   const BLOBS = [SENDER_RULES_BLOB, FILING_LOG_BLOB, CLEANUP_BLOB_PREFIX + CLEO_ID, CLEANUP_BLOB_PREFIX + NOP_ID, CLEANUP_BLOB_PREFIX + LIV_ID];
@@ -2216,6 +2289,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     const g2 = await get(g);
     ok(!g2.court?.pendingAi && !g2.court?.promise && !g2.court?.promisesFor && g2.court?.owner === "customer", "cleanup: backlog runs the court rules only — no AI court reading, no promise");
     let taskCount = 0;
+    for (const id of [a, b, c, g]) taskCount += (await tasksOn(id)).length;
     ok(taskCount === 0, "cleanup: no tasks are made (even with a promise in the mail and a model that reads one)");
     ok(r2.ok && !!r2.summary && r2.summary.suggested === 2 && r2.summary.noise === 1 && r2.summary.skipped === 1 && r2.summary.waitingAi === 0, "cleanup: the final summary — 2 suggested · 1 noise · 1 skipped");
     ok(r2.ok && cleanupSummaryText(r2.summary!) === "Done: 2 suggested · 1 noise · 1 skipped" && cleanupSummaryText({ suggested: 1, noise: 0, skipped: 0, waitingAi: 3 }).endsWith("· 3 still with AI"), "cleanup: the summary line");
@@ -2229,6 +2303,7 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     ok(r3.ok && r3.done && r3.total === 3 && s3!.startedAt === NOW + 60_000, "cleanup: pressing it again starts a new run (the moved noise is out of the inbox now)");
     ok((await get(a)).filing?.state === "suggested" && (await get(c)).filing?.source === "ai" && r3.ok && r3.summary?.suggested === 2, "cleanup: a re-run keeps the earlier suggestions");
     taskCount = 0;
+    for (const id of [a, b, c, g]) taskCount += (await tasksOn(id)).length;
     ok(taskCount === 0, "cleanup: a re-run makes no tasks either");
 
     /* a batch already running is refused (double click / a second tab) */
@@ -2264,7 +2339,9 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     const rl = await runCleanupBatch({ id: LIV_ID, name: LIV }, 40_000, { ctx: livCtx, now: NOW, run: { provider: livProvider } });
     const afterCleanup = (await get(live)).court;
     ok(rl.ok && rl.done && afterCleanup?.pendingAi === true && afterCleanup.basis === pendingBefore!.basis && sortedJson(afterCleanup) === sortedJson(pendingBefore), "fix: a cleanup batch keeps a live court exactly as it was — still pendingAi");
+    ok((await tasksOn(live)).length === 0, "fix: … and the cleanup itself makes no task");
     const livePass = await runAiPass({ ownerIds: [LIV_ID] }, { ctx: livCtx, run: { provider: livProvider }, now: NOW });
+    const liveTasks = await tasksOn(live);
     const afterPass = (await get(live)).court;
 
     /* fix: filing a thread clears its noise flag (not in Filed AND Noise) */
@@ -3186,6 +3263,7 @@ export async function inboxOrgPureChecks(ok: Ok): Promise<void> {
   signOffChecks(ok);
   internalChecks(ok);
   courtChecks(ok);
+  dueChecks(ok);
   senderRuleChecks(ok);
   idChecks(ok);
 }

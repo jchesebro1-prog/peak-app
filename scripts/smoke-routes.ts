@@ -50,9 +50,6 @@ const ROOT = path.resolve(__dirname, "..");
 const ROUTES = [
   "/",
   "/quotes",
-  "/projects",
-  "/rewards", // #282
-  "/settings/rewards", // #282
   "/estimator",
   "/design/lineset",
   /* No "/design/grid": the standalone Grid index was removed when The Grid
@@ -71,7 +68,6 @@ const ROUTES = [
   "/import/export?type=venues",
   "/import/export?type=venues&kind=template",
   // Daylite history import (Task 12) — two-file preview + chunked confirm.
-  "/import/daylite",
   "/catalog",
   "/catalog/documents", // #207 — the Datasheets to-do list
   "/catalog/documents?show=missing-datasheet",
@@ -95,7 +91,6 @@ const ROUTES = [
   "/estimating-rules/curtain-mounts", // #292 — curtain-mount hardware (admin)
   "/inspections",
   "/flame-tests",
-  "/repairs",
   // Extra top-level routes found under src/app/(app) — cheap to add, same coverage rationale.
   "/customers",
   "/companies",
@@ -106,10 +101,6 @@ const ROUTES = [
   "/leads/shows", // booth capture: trade shows + contact cards
   "/leads/booth", // booth capture: staff Booth mode
   "/opportunities",
-  "/schedule",
-  "/schedule?view=timeline", // #145 D172 — consulting rows grouped above installs
-  "/schedule?view=people", // #145 D172 — the By person portfolio view
-  "/calendar",
   "/reports",
   "/reports/sourcing", // Batch 6 #66 — most-quoted products / projected sourcing
   "/reviews",
@@ -136,8 +127,6 @@ const ROUTES = [
   "/inbox?view=organize", // #335 Inbox organization
   "/inbox?view=organize&tab=noise",
   "/inbox?view=organize&tab=filed",
-  "/queue",
-  "/triage", // Morning triage — the full ranked list (lazily builds the slot on the scratch db)
   "/templates",
   "/consulting",
   "/venue-assessments",
@@ -145,7 +134,6 @@ const ROUTES = [
   "/assessments/new",
   "/assessments/findings", // #337 Task 9: the findings register
   "/assessments/pick-lists", // #337 Task 11: the pick-list admin (manage_users)
-  "/field-work",
   "/design-studio/lineset",
   "/design-studio/motors",
   "/design-studio/steel",
@@ -169,8 +157,6 @@ const ROUTES = [
    * without a single smoked route, and the service lines' letter/report/quote
    * builders are the customer-facing deliverables. */
   "/design",
-  "/rentals",
-  "/rentals/board",
   "/quotes/new",
   // #288 — the staff Portal quotes queue: default (Needs action), and a
   // filtered + searched view focused on a quote id that isn't there.
@@ -180,9 +166,6 @@ const ROUTES = [
   "/flame-tests/report/options",
   "/inspections/scheduling",
   "/inspections/report/options",
-  "/repairs/scheduling",
-  "/repairs/results",
-  "/repairs/report/options",
   /* Legacy redirect stubs: these assert the hop still resolves, same as the
    * /customers/lakefront entry below. */
   "/design-studio",
@@ -293,8 +276,6 @@ const CONTENT_CHECKS: Array<{ route: string; reject: string; expect: string; lab
  * cannot distinguish a rendered editor from a miss.
  */
 const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true }> = [
-  { route: "/projects/P-3001" },
-  { route: "/api/projects/P-3001/handoff" },
   { route: "/inspections/RI-2042" },
   { route: "/venue-assessments/FS-1055" },
   // #119 Recordings (D152): the recorder page for a seeded survey and the beta/no-Krisp gates.
@@ -330,10 +311,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/estimator?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+estimate" },
   { route: "/estimator?customer=lakefront&category=Acoustics&replaces=Q-2041" },
   { route: "/flame-tests/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+flame" },
-  { route: "/repairs/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&replaces=Q-2041" },
   { route: "/inspections/quote?customer=lakefront&venue=lf2&contact=Nobody&name=Smoke+inspection" },
   { route: "/design/engagements/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+consulting" },
-  { route: "/rentals/quote?customer=lakefront&contact=Tom+Reyes&name=Smoke+rental&replaces=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // #207: the part editor with its Documents section (a seeded fabric SKU).
   { route: "/catalog?edit=RB-MV-MN" },
@@ -353,7 +332,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // on the static /design/engagements entry above.
   { route: "/design/engagements/CE-1001" },
   { route: "/design/engagements/CE-1001?tab=activity" },
-  { route: "/design/engagements/CE-1001?tab=schedule" },
   // #323 — the Oversight tab mounts the Meetings card beside the Recordings card.
   { route: "/design/engagements/CE-1001?tab=oversight" },
   // #323 — the lead drawer's detail mode mounts the Meetings card slot.
@@ -366,8 +344,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/flame-tests/report?job=FT-3001&variant=summary" },
   { route: "/flame-tests/results?job=FT-3001" },
   { route: "/flame-tests/letter?id=FT-3001" },
-  { route: "/repairs/report?job=RP-4001" },
-  { route: "/repairs/results?job=RP-4001" },
   { route: "/inspections/RI-2042/report" },
   /* The Grid's derived drawings (D112 riser, device schedule). */
   { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },

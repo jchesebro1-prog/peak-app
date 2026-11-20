@@ -379,6 +379,21 @@ function sendPackageChecks(ok: Ok) {
   ok(/\{!m\.boxSale && \(\s*<nav aria-label="Estimate view"/.test(rd("src/components/estimate-output/package-view.tsx")), "box sale package page (source): PackageView drops the toggle when the model says so");
 }
 
+function intakeChecks(ok: Ok) {
+  const card = SERVICE_TYPES.find((t) => t.key === "box_sale");
+  ok(!!card && card.label === BOX_SALE_COPY.label && card.sub === BOX_SALE_COPY.cardSub && SERVICE_TYPES[1]?.key === "box_sale" && isServiceType("box_sale"),
+    "box sale intake: + New quote has a Box goods sale card, right after System / equipment quote");
+  ok(BUILDER_BASE.box_sale === "/estimator" && builderPath("box_sale", "c1") === "/estimator?customer=c1&box=1" && !new URLSearchParams(builderPath("system", "c1").split("?")[1]).has("box"),
+    "box sale intake: the card opens the Estimator with ?box=1 (a system quote never carries it)");
+  ok(readHandoff({ box: "1" }).boxSale === true && readHandoff({}).boxSale === false && readHandoff({ box: "yes" }).boxSale === false, "box sale intake: the Estimator reads ?box=1 and nothing else");
+  const act = rd("src/app/(app)/quotes/new/actions.ts");
+  ok(act.includes('quoteType: input.type === "custom" || input.type === "box_sale" ? "system" : input.type,') && act.includes('...(input.type === "box_sale" ? { boxSale: true } : {}),'),
+    "box sale intake (source): a draft minted from an Inbox thread is a system quote with the flag");
+  const link = rd("src/lib/gmail/linking.ts");
+  ok(link.includes("...(input.boxSale === true ? { boxSale: true } : {}),") && /boxSale\?: boolean;/.test(link), "box sale intake (source): linkThreadToNewQuote passes the flag to create");
+  ok(rd("src/app/(app)/estimator/page.tsx").includes("if (!q && handoff?.boxSale) initial.boxSale = true;"), "box sale intake (source): a new estimate opened with ?box=1 starts with the switch on");
+}
+
 
 /** Final review (I1–I4 + minors) — behavioural where the code takes injected deps. */
 async function finalReviewChecks(ok: Ok) {
@@ -552,6 +567,20 @@ function modelNumberChecks(ok: Ok) {
 
 // (later tasks: check functions above this line)
 
+export async function boxSalePureChecks(ok: Ok) {
+  dataChecks(ok);
+  documentChecks(ok);
+  wiringChecks(ok);
+  printChecks(ok);
+  buildUiChecks(ok);
+  packageReviewChecks(ok);
+  sendPackageChecks(ok);
+  intakeChecks(ok);
+  await finalReviewChecks(ok);
+  bomToggleChecks(ok);
+  modelNumberChecks(ok);
+  // (later tasks: pure checks above this line)
+}
 
 export async function boxSaleDbChecks(ok: Ok) {
   await storeDbChecks(ok);
@@ -563,4 +592,8 @@ if (process.argv[1]?.endsWith("test-box-sale.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
   const db = !!process.env.PGLITE_PATH;
+  boxSalePureChecks(okf)
+    .then(() => (db ? boxSaleDbChecks(okf) : undefined))
+    .then(() => { console.log(`${pass} PASS, ${fail} FAIL${db ? "" : " (pure only — set PGLITE_PATH for the DB half)"}`); process.exit(fail ? 1 : 0); })
+    .catch((e) => { console.error(e); process.exit(1); });
 }

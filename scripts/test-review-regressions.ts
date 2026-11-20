@@ -80,6 +80,7 @@ async function main() {
   const flame = await setFlameRates({ laborRate: 123, mileageRate: 1.23 });
   assert.equal(flame.laborRate, 123, "flame-test setRates must return the editable labor rate");
   assert.equal((await getFlameRates()).mileageRate, 1.23, "flame-test getRates must preserve mileage overrides");
+  assert.equal(repair.laborRate, 234, "repair setRates must return the editable labor rate");
 
   const inspection = await setInspectionRates({ laborRate: 345, mileageRate: 3.45 });
   assert.equal(inspection.laborRate, 345, "inspection setRates must return the editable labor rate");
@@ -1142,11 +1143,18 @@ async function main() {
     const E = Date.now() - 5 * 86_400_000;
     await logPriceList("v-t122c", { receivedAt: Date.now(), effectiveAt: E, note: "2026 list" }, "Tester");
     const key = `auto: vendor v-t122c newer-list ${E}`;
+    assert.equal(first.created, 1, "#122 a newer list creates exactly one owner task");
+    assert.equal(first.owner, "Catalog Owner T122", "#122 the owner comes from settings.catalogOwner");
+    assert.equal(made.length, 1, "#122 the task is keyed by source");
+    assert.equal(made[0].assignee, "Catalog Owner T122", "#122 the task is addressed to the owner by display name");
+    assert.equal(made[0].link?.kind, "company", "#122 the task links to the vendor company");
+    assert.ok(made[0].title.startsWith("Update catalog: Vendor C T122 price list effective "), "#122 newer-list title");
 
     // a later import stamps pricedAt ≥ effectiveAt → current, nothing new
     await upsertDoc("catalog_parts", { ...part("T122-C1"), pricedAt: E });
     await upsertDoc("catalog_parts", { ...part("T122-C2"), pricedAt: E + 1 });
     assert.equal((await loadVendors("v-t122c")).rows[0]?.status, "current", "#122 pricedAt ≥ effectiveAt flips the status to current");
+    assert.deepEqual([none.checked, none.created], [0, 0], "#122 the cron path runs with zero vendors");
   }
 
   // #122 §3 — a ledger save spawns the owner task immediately, and that task's

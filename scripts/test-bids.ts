@@ -200,9 +200,10 @@ export async function bidChecks(ok: Ok) {
   const tq = (over: Record<string, unknown> = {}) =>
     ({ id: "Q-9", name: "Gym", customer: "MPSD", owner: "Dana Tester", status: "sent", updatedAt: 1, bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: null }, ...over }) as unknown as Quote;
   const two = new Map([["Q-9", [{ bid: B() }, { bid: B() }]]]);
-
   const awardedQ = tq({ id: "Q-10", bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } });
   const doneQ = tq({ id: "Q-11" });
+  ok(!liveClosed.has("quote:Q-9"), "bids: a bid_due-only row survives closedKeys while the bid is still due");
+  ok(liveClosed.has("quote:Q-10") && liveClosed.has("quote:Q-11"), "bids: an awarded (or fully submitted) bid's row is hidden");
 
   // addressee helpers (slice 2b-i task 1)
   const dueMs = Date.UTC(2026, 9, 21, 19, 0); // Oct 21 2:00 PM CDT
@@ -388,6 +389,13 @@ export async function bidSendChecks(ok: Ok) {
 export async function bidDbChecks(ok: Ok) {
   const { gc1, gc2, own, ct1 } = BID_FIX;
   const q = fixtureId(348, "bq"), qWon = fixtureId(348, "bqwon"), lead = fixtureId(348, "blead");
+  const regAll = async () => {
+    for (const [t, id] of [["quote", q], ["quote", qWon], ["lead", lead]] as const) for (const p of await listFor(t, id)) registerFixture("record_parties", p.id);
+    if (proj) {
+      registerFixture("projects", proj.id);
+      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
+    }
+  };
   try {
     await dropBidIdentityFixtures();
     await saveCompany({ id: gc1, name: "Bid GC One", type: "customer", lifecycle: "active", deleted: false });
@@ -429,6 +437,7 @@ export async function bidDbChecks(ok: Ok) {
     ok(!selfBid.ok && selfBid.error === "The customer can't bid on its own estimate.", "bids db: the customer can't bid on its own estimate");
     const a2 = await addBidder({ quoteId: q, companyId: gc2, role: "gc", submitVia: "website" }, "u");
     ok(a2.ok && a2.party.bid?.submitVia === "website", "bids db: a bidder can submit via website");
+    await regAll();
     const onQuote = await listFor("quote", q), onLead = await listFor("lead", lead);
     ok(onQuote.filter((p) => p.role === "owner").length === 1 && onQuote.find((p) => p.role === "owner")?.companyId === own, "bids db: the owner party was added to the estimate");
     ok(onLead.filter((p) => p.role === "gc").length === 2 && onLead.every((p) => p.bid === null), "bids db: the lead lists both GCs, without bid state");
@@ -450,6 +459,7 @@ export async function bidDbChecks(ok: Ok) {
     if (!wp.ok) throw new Error("won-quote bidder missing");
     const wpId = wp.party.id;
     await setPartyBid(wp.party.id, newBidderState("email"));
+    await regAll();
     const awWon = await awardBid(qWon, wp.party.id);
     ok(!awWon.ok && awWon.error === "Only an open estimate can be awarded.", "bids db: a won estimate can't be awarded");
     const upWon = await updateBidder(wp.party.id, { gcBidNo: "1" });
@@ -539,7 +549,6 @@ export async function bidDbChecks(ok: Ok) {
     ok(cov(dAw).project.owner === "Bid Owner" && cov(dAw).project.customer === "Bid GC One" && !("owner" in cov(dOwn).project), "cover: an addressed estimate shows the Owner row; an owner-addressed one is unchanged");
     const pkg = (d: typeof dAw) => packageViewModel({ doc: d, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 } as never, closed: false, won: false }, headerLine: "", currentHref: null, view: "narrative", base: "/x", letterheadSrc: "/l.png" });
     ok(pkg(dAw).owner === "Bid Owner" && !("owner" in pkg(dOwn)), "package page: an addressed estimate carries the owner; an owner-addressed one is unchanged");
-
     for (const f of ["src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx"]) {
       ok(/rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : ""/.test(readFileSync(join(process.cwd(), f), "utf8")), `rewards: ${f} gates the perks line on the addressee`);
     }
@@ -583,10 +592,14 @@ export async function bidDbChecks(ok: Ok) {
     // won → project Bill to, undo refused
     ok((await awardBid(q, g1)).ok, "bids db: award again");
     await setStatus(q, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    await regAll();
+    ok(!!proj && proj.billToCompanyId === gc1 && proj.customerId === own, "bids db: the project bills the awarded GC; the customer stays the owner");
+    const projParties = proj ? await listFor("project", proj.id) : [];
+    ok(projParties.some((p) => p.companyId === gc1) && !projParties.some((p) => p.companyId === gc2), "bids db: the awarded GC carries to the project; the losing bidder doesn't");
     const noUndo = await undoAward(q);
     ok(!noUndo.ok && noUndo.error === "The estimate is won — the award can't be undone.", "bids db: a won estimate's award can't be undone");
   } finally {
-    try { } catch {}
+    try { await regAll(); } catch {}
     await dropFixtures(348);
     await dropBidIdentityFixtures();
   }
@@ -1536,6 +1549,13 @@ export async function portalBidDbChecks(ok: Ok) {
   const { own, gc1, gc2, gc3, gc4, oth, ct1, ct2 } = I_FIX;
   const iq = fixtureId(348, "iq"), iq2 = fixtureId(348, "iq2");
   const NAMES = { own: "Portal Owner I", gc1: "Portal GC One I", gc2: "Portal GC Two I", gc3: "Portal GC Three I", gc4: "Portal GC Four I", oth: "Portal Other I" };
+  const regAll = async () => {
+    for (const p of await listFor("quote", iq)) registerFixture("record_parties", p.id);
+    if (proj) {
+      registerFixture("projects", proj.id);
+      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
+    }
+  };
   const ses = (cid: string) => ({ grantId: "PG-i", customerId: cid, name: "T", email: "t@i.test" });
   const T = Date.UTC(2034, 2, 10);
   const sentRevs = (q: Quote | null) => (q?.revisions ?? []).filter((r) => r.reason === "sent");
@@ -1573,6 +1593,7 @@ export async function portalBidDbChecks(ok: Ok) {
       await addBidder({ quoteId: iq, companyId: gc3, role: "gc" }, "u"),
       await addBidder({ quoteId: iq, companyId: gc4, role: "gc" }, "u"),
     ];
+    await regAll();
     if (!added.every((a) => a.ok)) throw new Error("portal bidders missing");
     const [p1, p2, p3, p4] = added.map((a) => (a.ok ? a.party.id : ""));
     await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
@@ -1815,6 +1836,13 @@ export async function portalBidDbChecks(ok: Ok) {
       const mPdf = mq ? portalBidPdfSource(mq, gc1, mBids) : null;
       ok(mState.kind === "unavailable" && mPdf === null && mBids.length === 0, "portal-bid db: an unknown quote id is unavailable with no PDF source");
     }
+    // 9. No other bidder named on gc1's addressed page.
+    {
+      const q = (await getQuote(iq))!;
+      const rev1 = q.revisions!.find((r) => r.rev === r1 && r.reason === "sent")!;
+      const props = await loadQuoteDocumentProps(q, { revision: rev1, photos: { href: (d) => d }, bidderPartyId: p1 });
+      const json = JSON.stringify(props);
+    }
 
     // 3. An unsent revision: draft → sent cuts r2, delivered to gc2 only.
     await setStatus(iq, "draft", "Test");
@@ -1933,6 +1961,7 @@ export async function portalBidDbChecks(ok: Ok) {
 
     // 7. Won.
     await setStatus(iq, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    await regAll();
     {
       const a = await stateFor(gc1), b = await stateFor(gc2);
       ok(a.q.status === "won" && a.s.kind === "ok" && !a.s.closed && a.list.history.length === 1 && a.list.open.length === 0, "portal-bid db: the awarded bidder sees a won estimate in its history");
@@ -2047,7 +2076,7 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(count("src/lib/portal-quotes.ts") === 4 && count("src/lib/portal-service-quotes.ts") === 1, "portal-bid db: the portal write actions still gate on portalListsQuote (4 + 1)");
     }
   } finally {
-    try { } catch {}
+    try { await regAll(); } catch {}
     await dropFixtures(348);
     await dropPortalBidIdentityFixtures();
   }

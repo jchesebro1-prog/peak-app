@@ -12,6 +12,26 @@ import { iconSource, iconVersion, parseIconFile, iconHref, manifestIcons, iconCa
 const ROOT = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(ROOT, p), "utf8");
 
+/* --- Bug fix: addFieldTask could overwrite any task by id --- */
+function fieldTaskPureChecks(ok: Ok) {
+  const me = { id: "u1" };
+  const mine = { projectId: "P-1", section: "Install", assigneeUserId: "u1" };
+}
+
+async function fieldTaskDbChecks(ok: Ok) {
+  const { registerFixture } = await import("./test-fixtures");
+  const me = { id: "u-b6", name: "Batch Six" };
+  const other = { id: "u-b6b", name: "Other Person" };
+  registerFixture("tasks", office.id);
+  ok(!hit.ok && after?.title === "Office task — must survive" && after.createdBy === "Other Person", "fieldtask db: an office id is refused and the office task is unchanged");
+
+  const id = "tk-b6x" + Math.random().toString(36).slice(2, 6);
+  registerFixture("tasks", id);
+  ok(a.ok && a.task.id === id && a.task.assigneeUserId === "u-b6" && a.task.section === "Install", "fieldtask db: a fresh Field Work id inserts, assigned to the caller");
+  ok(!otherProj.ok, "fieldtask db: the same id on another project is refused");
+  if (srv.ok) registerFixture("tasks", srv.task.id);
+  ok(srv.ok && /^T-\d+$/.test(srv.task.id), "fieldtask db: no client id gets a server-allocated T-#### id");
+}
 
 /* --- #66 most-quoted products / projected sourcing --- */
 function sourcingChecks(ok: Ok) {
@@ -101,6 +121,35 @@ async function appIconChecks(ok: Ok) {
   ok(/\|icons\|/.test(src("src/middleware.ts")), "#67: /icons/* stays outside the session gate (login page, home-screen install)");
 }
 
+/* --- #65 Download today's jobs --- */
+function todayJobsChecks(ok: Ok) {
+  const day = "2026-10-16";
+  const start = Date.UTC(2026, 9, 16, 5); // 00:00 Chicago (CDT)
+  const end = Date.UTC(2026, 9, 17, 5) - 1;
+  const dayKeyOf = (ms: number) => (ms >= start && ms <= end ? day : ms < start ? "2026-10-15" : "2026-10-17");
+  const me = { id: "u7", name: "Nic Trapani" };
+  const svc = (id: string, extra: Record<string, unknown> = {}) => ({ id, stage: "scheduled", assignedTo: "Nic Trapani", scheduledDate: day, customer: "Lincoln HS", venue: "Aud", ...extra });
+  ok(ids === "site_visit:SV-1,site_visit:SV-2,survey:FS-9,inspection:IN-1,repair_job:RP-1,assessment:AS-1001,project:P-1",
+    `#65: today's jobs are mine (lead / attendee / assignee / crew / assessor), today only, not completed or done (got ${ids})`);
+  ok(sv1.href === "/venue-assessments/FS-9" && sv2.href === "/companies/c2" && sv1.collection === null, "#65: a visit opens its survey, else its company; it is not mirrored");
+  ok(pages[0] === "/field-work" && pages.filter((p) => p === "/venue-assessments/FS-9").length === 1, "#65: the Field Work list plus each page once");
+  const cached = new Set(pages.filter((p) => p !== "/inspections/IN-1"));
+  const mirrored = new Set(["surveys:FS-9", "inspections:IN-1", "repair_jobs:RP-1", "assessments:AS-1001"]);
+  ok(readyLine(5, 5) === "Ready offline: 5 jobs" && readyLine(1, 1) === "Ready offline: 1 job" && readyLine(5, 7).startsWith("Ready offline: 5 jobs (2 couldn") && readyLine(0, 0) === "No jobs for you today.",
+    "#65: the result line reads 'Ready offline: N jobs'");
+  ok(isoDay("2026-10-16") === day && isoDay("") === "" && isoDay("10/16/2026") === "", "#65: isoDay takes only YYYY-MM-DD");
+
+  const route = src("src/app/api/sync/today/route.ts");
+  ok(/if \(!mayPullFieldData\(me\.roles\)\) return NextResponse\.json\(\{ error: "forbidden" \}, \{ status: 403 \}\)/.test(route) && route.includes("getOptionalUser()"),
+    "#65: /api/sync/today has the pull's gate — signed in and `create` (#351)");
+  const sw = src("public/sw.js");
+  ok(sw.includes("const port = event.ports && event.ports[0]") && sw.includes(".then(() => reply(true))") && sw.includes(".catch(() => reply(false))"), "#65: the service worker answers a CACHE_ROUTE that carries a port");
+  const btn = src("src/components/sync/download-today.tsx");
+  ok(btn.includes('fetch("/api/sync/today"') && btn.includes("engine.pull({ force: true })") && btn.includes("readyLine(ready, jobs.length)") && !/from "@\/lib\/stores\//.test(btn.replace(/import type[^\n]*\n/g, "")),
+    "#65: the button lists, pulls into the mirror, caches pages and reports — and imports no store");
+  ok(/async pull\(opts: \{ force\?: boolean \} = \{\}\): Promise<boolean>/.test(src("src/lib/sync/engine.ts")) && src("src/lib/sync/engine.ts").includes("this.pullForbidden) return false"),
+    "#65: a forced pull still honours a 403 (pullForbidden) and reports success");
+}
 
 /* --- #64 Attach in the Inbox composer --- */
 async function attachPureChecks(ok: Ok) {
@@ -317,6 +366,37 @@ async function reviewDbChecks(ok: Ok) {
     "#356 reply all (DB): the Cc rides on the message and the bridge sends it");
 }
 
+/* --- #356 re-review fixes --- */
+async function rereviewPureChecks(ok: Ok) {
+  const { replyAllCc, parseAddressList } = await import("../src/lib/reply-all");
+  const F = await import("../src/lib/inbox-forward");
+  const { FORWARD_ATTS_LOADING } = await import("../src/lib/inbox-forward-copy");
+  const reader = src("src/app/(app)/inbox/thread-reader.tsx");
+  ok(/<FieldRow label="To">[\s\S]{0,400}readOnly=\{mode !== "forward"\}/.test(reader) && /setCTo\(vm\.contactEmail \|\| ""\)/.test(reader),
+    "#356 re-review: To is read-only in Reply / Reply all and shows the thread contact — a typed To can only be sent by Forward (which sends it)");
+  ok(reader.includes("showCc ? cCc : undefined") && reader.includes('setCCc(m === "replyAll" ? vm.replyAllCc : "")') && !reader.includes("vm.boxAddress : \"\""),
+    "#356 re-review: the shown Cc row goes out on Reply too; Reply all no longer Cc's our own mailbox");
+  ok(reader.includes("if (fwdOriginals && fwdAttsLoading) {") && F.attachmentsPending({ gmailId: "g", attachments: [] }) && !F.attachmentsPending({ gmailId: "g", attsListed: true }) && !F.attachmentsPending({}) &&
+     FORWARD_ATTS_LOADING === "Attachments still loading — try again in a moment",
+    "#356 re-review: a Forward while the original's attachments are still loading says so instead of leaving them off");
+
+  // 3 — an offline tick
+  const live = (id: string) => id === "P-1";
+  const stored = { id: "T-6100", title: "Hang borders", projectId: "P-1", section: "Install", assigneeUserId: "u9", createdBy: "Jeff Chesebro", status: "open", doneAt: null, updatedAt: 1, notes: "keep" };
+  const user = { id: "u1", name: "Nic Trapani" };
+  const tick = { ...stored, status: "done", doneAt: 5, updatedAt: 5, rev: 3, syncState: "pending" };
+  ok(d.ok && !!d.doc && d.doc.status === "done" && d.doc.doneAt === 5 && d.doc.notes === "keep" && d.doc.assigneeUserId === "u9" && !("rev" in d.doc && d.doc.rev === 3),
+    "#356 re-review push: an offline tick on an office Install task is allowed — status / doneAt / updatedAt from the device, the rest from the stored copy");
+  const route = src("src/app/api/sync/push/route.ts");
+  ok(route.includes("if (decision.doc) pushDoc = decision.doc;") && route.includes("sanitizePushedDoc(coll, { ...pushDoc, id: rec.id },"), "#356 re-review push: the route writes the merged tick document");
+
+  // 4 — Reply all Cc
+  ok(parseAddressList('"Doe, Jane" <jane@x.org>, bob@x.org; Info <info@peak.com>').map((a) => a.email).join() === "jane@x.org,bob@x.org,info@peak.com", "#356 re-review: address lists split on top-level commas (a quoted comma stays)");
+  ok(replyAllCc({ to: "Info <info@peak.com>, Jane <jane@x.org>", cc: "pat@customer.org, Bob <bob@x.org>, jane@x.org" }, ["info@peak.com", "me@peak.com", "Pat@Customer.org"]) === "Jane <jane@x.org>, Bob <bob@x.org>" &&
+     replyAllCc({ to: "info@peak.com" }, ["info@peak.com"]) === "" && replyAllCc(null, []) === "",
+    "#356 re-review: Reply all Cc = the message's other To / Cc recipients, minus our own addresses and the primary contact");
+  ok(/replyAllCc: replyAllCc\([\s\S]{0,250}\[bm\?\.address, user\.email, sel\.contactEmail\]/.test(src("src/app/(app)/inbox/page.tsx")), "#356 re-review: the reader gets the Cc from the replied-to message, excluding the mailbox, the user and the contact");
+}
 
 async function rereviewDbChecks(ok: Ok) {
   const C = await import("../src/lib/stores/comms");
@@ -336,9 +416,29 @@ async function rereviewDbChecks(ok: Ok) {
   ok(r2.ok, "#356 re-review (DB): unticking the originals sends the forward anyway");
 }
 
+export async function batch6PureChecks(ok: Ok) {
+  fieldTaskPureChecks(ok);
+  sourcingChecks(ok);
+  await appIconChecks(ok);
+  todayJobsChecks(ok);
+  await attachPureChecks(ok);
+  await reviewPureChecks(ok);
+  await rereviewPureChecks(ok);
+}
+
+export async function batch6DbChecks(ok: Ok) {
+  await fieldTaskDbChecks(ok);
+  await attachDbChecks(ok);
+  await reviewDbChecks(ok);
+  await rereviewDbChecks(ok);
+}
 
 if (process.argv[1]?.endsWith("test-batch6.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
   const db = !!process.env.PGLITE_PATH;
+  batch6PureChecks(okf)
+    .then(() => (db ? batch6DbChecks(okf) : undefined))
+    .then(() => { console.log(`${pass} PASS, ${fail} FAIL${db ? "" : " (pure only — set PGLITE_PATH for the DB half)"}`); process.exit(fail ? 1 : 0); })
+    .catch((e) => { console.error(e); process.exit(1); });
 }

@@ -494,6 +494,12 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(/\.pk-dropdown-row:hover \.pk-nav-pop,\s*\.pk-nav-pop:focus-visible \{\s*opacity: 1;/.test(css2), "popout: the nav ⧉ shows on row hover or keyboard focus");
   }
 
+  /* Task 4 — posters: each client site posts `changed` after its action succeeds (spec §5) */
+  {
+    // TasksCard's status and assignee selects submit through <form action>; each action is wrapped so a pop-out posts after the write
+    {
+    }
+  }
 
   /* real BroadcastChannel round trip (Node has one): own posts are ignored, another window's arrive */
   if (typeof BroadcastChannel !== "undefined") {

@@ -196,6 +196,13 @@ export async function partyDbChecks(ok: Ok) {
     await createFixture("quotes", { ...buildQuote(wonQ, { name: "Party won", customer: "Party Co One", customerId: co1, value: 1000 }, "system", null, Date.now()), status: "won" } as never);
     const ownerOnWon = await addParty({ recordType: "quote", recordId: wonQ, companyId: co1, role: "owner" }, "u-test");
     if (ownerOnWon.ok) registerFixture("record_parties", ownerOnWon.party.id);
+    ok(!!proj, "parties db: fixture won quote spawns a project");
+    if (proj) {
+      registerFixture("projects", proj.id); // the kickoff auto-task the spawn creates
+      const onProj = await listFor("project", proj.id);
+      for (const p of onProj) registerFixture("record_parties", p.id);
+      ok(onProj.length === 1 && onProj[0].role === "owner" && onProj[0].companyId === co1, "parties db: project inherits the estimate's parties");
+    }
 
     // lead → quote through leads.convert: owner carries, GC does not
     const convLead = fixtureId(348, "convlead");

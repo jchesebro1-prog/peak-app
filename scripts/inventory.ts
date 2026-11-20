@@ -55,7 +55,6 @@ import { flameJobsSeed } from "../src/db/seeds/flame-jobs";
 import { inspectionsSeed } from "../src/db/seeds/inspections";
 import { designsSeed } from "../src/db/seeds/designs";
 
-
 function pad(s: string, n: number) {
   return s.length >= n ? s : s + " ".repeat(n - s.length);
 }
@@ -78,6 +77,13 @@ async function main() {
 
   // ---- Document collections -------------------------------------------------
   const seedIds = new Map<string, Set<string>>();
+  for (const [coll, make] of SEEDS) {
+    try {
+      seedIds.set(coll, new Set(make().map((d) => d.id)));
+    } catch {
+      seedIds.set(coll, new Set());
+    }
+  }
 
   console.log("");
   console.log("DOCUMENT COLLECTIONS");
