@@ -15,7 +15,6 @@ import {
   type FlameJobVenueResult,
 } from "@/lib/stores/flame-jobs";
 import { flameRenewalOutreach } from "@/lib/renewal-outreach";
-import { removeServiceCalendar, syncServiceCalendar } from "@/lib/service-calendar";
 
 /**
  * Flame-test job mutations — the FlameJobStore calls the prototype makes from
@@ -35,16 +34,6 @@ export async function scheduleFlameTest(formData: FormData): Promise<void> {
   const job = await get(id);
   if (!job) return;
   await schedule(id, { scheduledDate, assignedTo });
-  await syncServiceCalendar({
-    kind: "flame",
-    id,
-    assignedTo,
-    previousAssignedTo: job.assignedTo,
-    date: scheduledDate,
-    title: `${job.venue || job.customer} — Flame test`,
-    location: job.venue || job.customer,
-    description: `Flame test ${job.id} · ${job.customer}`,
-  });
   revalidatePath("/", "layout");
 }
 
@@ -55,7 +44,6 @@ export async function unscheduleFlameTest(formData: FormData): Promise<void> {
   if (!id) return;
   const job = await get(id);
   if (!job || job.stage !== "scheduled") return;
-  await removeServiceCalendar({ kind: "flame", id, assignedTo: job.assignedTo });
   await unschedule(id);
   revalidatePath("/", "layout");
 }
@@ -152,9 +140,6 @@ export async function deleteFlameJobAction(id: string): Promise<{ ok: true } | {
   if (!id) return { ok: false, error: "Missing job id." };
   const job = await get(id);
   if (!job) return { ok: false, error: "That flame test could not be found." };
-  if (job.stage === "scheduled") {
-    await removeServiceCalendar({ kind: "flame", id, assignedTo: job.assignedTo });
-  }
   await remove(id);
   revalidatePath("/", "layout");
   return { ok: true };

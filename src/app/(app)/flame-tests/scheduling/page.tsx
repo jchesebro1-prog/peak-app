@@ -8,10 +8,8 @@ import {
   msOf,
   fmtShort,
   money,
-  syncFromQuotes as syncFlameJobsFromQuotes,
   type FlameJob,
 } from "@/lib/stores/flame-jobs";
-import { safeSweep } from "@/lib/safe-sweep";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { FlameMap } from "../controls";
@@ -61,7 +59,7 @@ export default async function FlameSchedulingPage() {
   // this screen lists as awaiting a date. Without the sweep here, the one
   // screen a dispatcher checks for a missing job is the one screen that
   // cannot create it.
-  await safeSweep("flame jobs (scheduler)", async () => (await syncFlameJobsFromQuotes()).created);
+  // No quote sweep: a won quote is only a status change — it no longer creates a job or record.
   const [jobs, roster] = await Promise.all([getAll(), activeUsers()]);
 
   const identity = new Map(roster.map((u) => [u.name, { color: u.color, initials: u.initials }]));

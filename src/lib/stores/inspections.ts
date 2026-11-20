@@ -1294,14 +1294,6 @@ export async function createFromQuote(
     const share = Math.round((q.value || 0) / venues.length);
     const contact = q.contact || insp.contact || null;
 
-    // PUNCHLIST #13, decision A — one lightweight linked project per QUOTE
-    // (spawned once, shared by every venue-record below), not per venue.
-    const { spawnServiceLinkedProject } = await import("@/lib/stores/projects");
-    const project = await spawnServiceLinkedProject(
-      { id: q.id, name: q.name || "Rigging Inspection", customer: q.customer, customerId: q.customerId, locationId: q.locationId, owner: q.owner, quoteType: q.quoteType },
-      "inspection"
-    );
-
     const made: InspectionRecord[] = [];
     for (let i = 0; i < venues.length; i++) {
       const v = venues[i];
@@ -1316,7 +1308,6 @@ export async function createFromQuote(
       const lineSets = Math.max(0, Number(v.lineSets) || 0);
       const rec = await create({
         quoteId: q.id,
-        projectId: project.id,
         level,
         lineSets,
         // first venue absorbs the rounding remainder

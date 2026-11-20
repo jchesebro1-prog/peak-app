@@ -11,7 +11,6 @@ import {
   unschedule,
 } from "@/lib/stores/inspections";
 import { inspectionRenewalOutreach } from "@/lib/renewal-outreach";
-import { removeServiceCalendar, syncServiceCalendar } from "@/lib/service-calendar";
 
 /**
  * Inspection inbox mutations. `createInspection` mirrors the prototype's
@@ -47,11 +46,6 @@ export async function scheduleInspection(formData: FormData): Promise<void> {
   if (!rec) return;
   try {
     await assign(id, assignedTo, scheduledDate);
-    await syncServiceCalendar({
-      kind: "inspection", id, assignedTo, previousAssignedTo: rec.assignedTo,
-      date: scheduledDate, title: `${rec.venue || rec.customer} — Rigging inspection`,
-      location: rec.venue || rec.customer, description: `Inspection ${rec.id} · ${rec.customer}`,
-    });
   } catch (error) {
     console.error("scheduleInspection failed", error);
     redirect("/inspections/scheduling?err=" + encodeURIComponent("Couldn’t schedule that inspection — please try again."));
@@ -66,7 +60,6 @@ export async function unscheduleInspection(formData: FormData): Promise<void> {
   const rec = await get(id);
   if (!rec) return;
   try {
-    await removeServiceCalendar({ kind: "inspection", id, assignedTo: rec.assignedTo });
     await unschedule(id);
   } catch (error) {
     console.error("unscheduleInspection failed", error);

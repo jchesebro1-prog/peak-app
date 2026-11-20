@@ -13,11 +13,9 @@ import {
   dueLabel,
   timeAgo,
   RENEWAL_LEAD_DAYS,
-  syncFromQuotes as syncInspectionsFromQuotes,
   type InspectionRecord,
   type InspectionStageKey,
 } from "@/lib/stores/inspections";
-import { safeSweep } from "@/lib/safe-sweep";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { coordsOf } from "@/lib/geo";
@@ -112,7 +110,7 @@ export default async function InspectionsPage({
   // which is why the sweep's coverage map had to become tombstone-aware
   // first: otherwise deleting a record from a still-won quote re-spawns a
   // blank one under a new id on the very next render.
-  await safeSweep("inspections", syncInspectionsFromQuotes);
+  // No quote sweep: a won quote is only a status change — it no longer creates a job or record.
   const [records, quotes, customers] = await Promise.all([
     getAll(),
     allQuotes(),

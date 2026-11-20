@@ -6,10 +6,8 @@ import {
   levelMeta,
   msOf,
   fmtShort,
-  syncFromQuotes as syncInspectionsFromQuotes,
   type InspectionRecord,
 } from "@/lib/stores/inspections";
-import { safeSweep } from "@/lib/safe-sweep";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
@@ -87,7 +85,7 @@ export default async function InspectionSchedulingPage({
   // #173 (D227): a healed inspection is born `stage: "requested"` — the
   // "waiting on a date" list of this screen. Sweep here too, so the screen
   // a dispatcher checks for a missing inspection can also create it.
-  await safeSweep("inspections (scheduler)", syncInspectionsFromQuotes);
+  // No quote sweep: a won quote is only a status change — it no longer creates a job or record.
   const [records, roster, customers] = await Promise.all([
     getAll(),
     activeUsers(),
