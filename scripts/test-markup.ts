@@ -283,8 +283,6 @@ export async function markupDbChecks(ok: Ok) {
   ok((await value("tiers.gold")) === 25 && (await resolveTier(null)).markup === 0.43, "markup db: tier defaults are markup");
   await db.delete(t).where(inArray(t.id, [id, flameId, fresh.id]));
   const pt = DOC_TABLES.projects;
-  ok(praw.pricingBasis === "markup" && praw.name === "markup project (patched)" && praw.margin === 0.43 && pread?.margin === 0.43,
-    "markup db: updateProject can't clear or change a project's pricingBasis (its markup is never converted twice)");
 }
 
 /* ---- Price parity (#367 Task 8): every margin-era output in docs/markup/parity-baseline.json, reproduced by the

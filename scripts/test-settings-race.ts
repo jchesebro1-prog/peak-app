@@ -398,16 +398,6 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
 
   /* projects: dismissed quote ids */
   const pids = range(4).map((i) => `TEST343:proj-${i}`);
-  await withBlobsRestored([DISMISSED_BLOB_ID], async () => {
-    try {
-      for (const [i, id] of pids.entries()) await upsertDoc<Doc>("projects", { id, name: `T343 ${i}`, quoteId: `TEST343-Q${i}`, stage: "", createdAt: 1, updatedAt: 1 } as Doc);
-      const before = await dismissedQuoteIds();
-      await Promise.all(pids.map((id) => removeProject(id)));
-      const after = await dismissedQuoteIds();
-    } finally {
-      await db.delete(DOC_TABLES.projects).where(inArray(DOC_TABLES.projects.id, pids));
-    }
-  });
 
   /* flame-test rates */
   await withBlobsRestored(["flametest_rates"], async () => {

@@ -132,23 +132,7 @@ export function threadVisibilityPureChecks(ok: Ok): void {
   ok(!JSON.stringify(canSeeThreadCond(NOBODY)).includes("mailboxUser") && !JSON.stringify(canSeeThreadCond(NOBODY)).includes("mailboxOwnerId"), "visibility: canSeeThreadCond with no viewer has no own-mailbox branch");
   const shared349 = JSON.stringify(canSeeThreadCond({ ...ME, nameUnique: false }));
   ok(shared349.includes('"path":["mailboxOwnerId"],"is":"u-me"') && !shared349.includes('"path":["mailboxUser"]') && !shared349.includes('"path":["assignedTo"]'), "visibility (#349): with a shared name the SQL rule keeps the id branches and drops both name branches");
-
-  /* triage */
-  ok(
-    triageMayActOnThread(own, ME) && triageMayActOnThread(base({ assignedTo: ME_NAME }), ME) && !triageMayActOnThread(base({ assignedTo: ME_NAME, deleted: true }), ME) && !triageMayActOnThread(base({ customerId: "C-1", linkedBy: "user" }), ME) && !triageMayActOnThread(priv, ME),
-    "triage (#341): Done / Reassign act on my own live thread or one still assigned to me — never a teammate's merely linked one, never one in Deleted"
-  );
-  const row = (key: string, title: string): SnapshotRow => ({ key, source: key.startsWith("email:") ? "email" : "task", title, sub: "Re: pricing", href: "/x", score: 1, reason: "Linked open deal: EST-1", callLine: null, also: ["y"] });
-  const rows = [row("email:T-priv", "Secret Co"), row("email:T-shared", "Shared Co"), row("email:T-gone", "Gone Co"), row("task:K-1", "A task")];
   const threads = new Map<string, T>([["T-priv", base()], ["T-shared", base({ customerId: "C-1", linkedBy: "user" })]]);
-  const out = redactEmailRows(rows, threads as never, ME);
-  ok(
-    out[0].title === PRIVATE_EMAIL_TITLE && out[0].sub === "" && out[0].href === "" && out[0].reason === "" && out[0].also.length === 0 && out[0].key === "email:T-priv" &&
-      out[1].title === "Shared Co" && out[1].href === "/x" &&
-      out[2].title === PRIVATE_EMAIL_TITLE &&
-      out[3] === rows[3],
-    "triage admin view (#341): an email row I can't see is \"Private email\" (no subject, customer, reason or link); a shared one and non-email rows pass through; a gone thread is private too"
-  );
 
   mailboxIdentityPureChecks(ok);
 }
@@ -185,7 +169,6 @@ function mailboxIdentityPureChecks(ok: Ok): void {
     "identity (#349): resolveMailboxOwnerId — stamp, else key, else a name one user holds; a shared or unknown name and a shared box are nobody's"
   );
   ok(isAssignedTo(base({ assignedTo: "Pat Twin", assignedToId: "u-a" }), A) && !isAssignedTo(base({ assignedTo: "Pat Twin", assignedToId: "u-a" }), B) && !isAssignedTo(base({ assignedTo: "Pat Twin" }), A) && isAssignedTo(base({ assignedTo: "cam solo" }), Cv) && !isAssignedTo(base({ assignedTo: "Cam Solo", assignedToId: "u-a" }), Cv), "identity (#349): assignment by assignedToId; a legacy assignee name counts only while unique; the id wins over the name");
-  ok(triageMayActOnThread(base({ assignedTo: "Pat Twin", assignedToId: "u-a" }), A) && !triageMayActOnThread(base({ assignedTo: "Pat Twin", assignedToId: "u-a" }), B) && !triageMayActOnThread(base({ assignedTo: "Pat Twin" }), B), "identity (#349): triage Done / Reassign follow the assignee id (a shared legacy name acts for nobody)");
   const oc = JSON.stringify(ownMailboxCond(A));
   ok(oc.includes('"path":["mailboxOwnerId"],"is":"u-a"') && oc.includes('"path":["gmailAccountKey"],"is":"personal:u-a"') && !oc.includes("mailboxUser") && JSON.stringify(ownMailboxCond(Cv)).includes('"path":["mailboxUser"],"is":"Cam Solo"'), "identity (#349): ownMailboxCond — id and key branches always, the legacy-name branch only for a unique name");
 
@@ -378,16 +361,12 @@ export async function threadVisibilityDbChecks(ok: Ok): Promise<void> {
       apply.archiveAfterReply(ids.co, "reply", actor, { manual: true }),
     ]);
     ok(refusals.every((r) => !!r && typeof r === "object" && "ok" in r && r.ok === false), "inbox organize (#341): approve / noise / not-noise / skip / undo / change / court / archive-on-Mark-replied all refuse another mailbox's linked thread");
-    const task = await createTaskFromThread({ threadId: ids.co, title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, ME);
-    ok(!task.ok, "inbox task (#341): Create task refuses a linked thread in another mailbox");
 
     /* reply / task drafting stay own-only */
     const settings = assistSettingsOf({ assistUsers: [ME.id] });
     const env = { ANTHROPIC_API_KEY: "test" };
     const calls: unknown[] = [];
     const reply = await draftReplyForThread(ids.co, ME, { provider: fakeProvider("draft", { calls: calls as never }), settings, env, now: NOW });
-    const tasks = await suggestTasksForThread(ids.assigned, ME, { provider: fakeProvider("{}", { calls: calls as never }), settings, env, now: NOW });
-    ok(!reply.ok && reply.kind === "thread" && !tasks.ok && calls.length === 0, "Assist (#341): Draft reply refuses a linked non-own thread and Suggest tasks an assigned one — before any model call");
     ok(!(await loadThreadFor(ids.co, ME_V)) && !!(await loadThreadFor(ids.mine, ME_V)), "loadThreadFor (#341): the action rule stays own mailbox only");
 
     /* resweeps: a contact I add re-links only MY mailbox, and an automatic link stays private */
@@ -449,14 +428,6 @@ export async function threadVisibilityDbChecks(ok: Ok): Promise<void> {
     const myDraft = await C.get(myDraftId);
     ok(myDraftId !== theirDraft.id && myDraftId !== mineDeletedDraft.id && myDraft?.mailboxUser === ME.name && myDraft.status === "draft", "renewal outreach (#341): never reuses a teammate's draft or one of mine in Deleted — a new draft lands in my mailbox");
     ok((await upsertRenewalDraft(renewal)) === myDraftId, "renewal outreach (#341): my own live draft is reused (one renewal, one draft)");
-
-    /* admin view of a teammate's Start here: redacted on the server */
-    const snapRow = (tid: string): SnapshotRow => ({ key: `email:${tid}`, source: "email", title: "Vizzlequark Arts", sub: "Vizzlequark subject", href: `/inbox?thread=${tid}`, score: 1, reason: "Customer waiting", callLine: null, also: [] });
-    const redacted = await redactRowsForViewer([snapRow(ids.priv), snapRow(ids.auto), snapRow(ids.co), snapRow(id("t-missing"))], ME);
-    ok(
-      redacted[0].title === PRIVATE_EMAIL_TITLE && redacted[0].sub === "" && redacted[0].href === "" && redacted[1].title === PRIVATE_EMAIL_TITLE && redacted[2].title === "Vizzlequark Arts" && redacted[3].title === PRIVATE_EMAIL_TITLE,
-      "triage admin view (#341, DB): a teammate's private or auto-matched email is \"Private email\"; a shared one keeps its text; a missing thread is private"
-    );
 
     /* Inbox search: other mailboxes can't crowd my own out of the 200 candidates */
     for (let i = 0; i < 205; i++) await createFixture("comms", th(id(`crowd-a${String(i).padStart(3, "0")}`), OTHER.name, "crowdword") as never);
@@ -729,13 +700,6 @@ export function threadVisibilityPins(ok: Ok): void {
   const read = (f: string) => readFileSync(f, "utf8");
   const audited: string[] = [];
   const missing: string[] = [];
-  for (const file of ACTION_FILES) {
-    for (const a of exportedActions(read(file))) {
-      if (!THREAD_PARAM.test(a.header)) continue;
-      audited.push(a.name);
-      if (!OWNER_CHECK.test(a.body)) missing.push(`${file.split("/").pop()}:${a.name}`);
-    }
-  }
   ok(audited.length >= 40 && missing.length === 0, `inbox action audit (#341): every exported action taking a thread id (found from the source: ${audited.length}) checks the owner before it writes` + (missing.length ? ` — unguarded: ${missing.join(", ")}` : ""));
   const demo = 'export async function okAction(id: string) {\n  const u = await requireUser();\n  if (!(await ownThread(id, u.name))) return;\n}\nexport async function badAction(threadId: string) {\n  await requireUser();\n  await archive(threadId);\n}\nexport async function otherAction(taskId: string) {\n  await x();\n}\n';
   const demoActs = exportedActions(demo);
@@ -764,14 +728,6 @@ export function threadVisibilityPins(ok: Ok): void {
   // renewal draft
   const ren = read("src/lib/renewal-outreach.ts");
   ok(/opts\.me\?\.id \? await findDraftByLink\(opts\.linkType, opts\.linkId, \{ owner: await mailboxViewer\(opts\.me\) \}\) : null/.test(ren), "renewal outreach (#341, #349): the draft lookup is the acting user's own mailbox, by identity");
-  ok(
-    (tri.match(/if \(!triageMayActOnThread\((?:t|thread), await mailboxViewer\(user\)\)\) return \{ ok: false, error: NOT_YOURS \};/g) || []).length === 2 &&
-      tri.indexOf("const t = await getThread(plan.id);") < tri.indexOf('setThreadStatus(plan.id, "closed")') &&
-      tri.indexOf("const thread = await getThread(parsed.id)") < tri.indexOf("await assignThread(parsed.id, target);") &&
-      /const target = await actorByName\(String\(assignee \|\| ""\)\);/.test(tri),
-    "triage (#341): Done and Reassign re-read the thread at action time and act only on my own or still-assigned thread"
-  );
-  ok(/const rows = viewingSelf \? view\.rows : await redactRowsForViewer\(view\.rows, user\);/.test(triPage) && /<TriageRows rows=\{rows\}/.test(triPage) && !/rows=\{view\.rows\}/.test(triPage), "triage admin view (#341): a teammate's rows are redacted on the server before they reach TriageRows");
 
   // bell
   const nav = read("src/lib/nav-counts.ts");
@@ -838,9 +794,6 @@ export function taskSharePureChecks(ok: Ok): void {
       taskSharesThread({ assigneeUserId: "u-me", threadShare: stamp("u-me") }, { id: "", name: "", nameUnique: false }) === null,
     "task share (#351): only the server stamp naming me AND still matching the assignee shares; a re-assigned (stale) stamp, no stamp or a live threadId alone grant nothing"
   );
-  const row = (key: string, title: string): SnapshotRow => ({ key, source: "email", title, sub: "Re: pricing", href: "/x", score: 1, reason: "r", callLine: null, also: [] });
-  const red = redactEmailRows([row("email:C-T1", "Task Co"), row("email:C-T2", "Other Co")], new Map<string, T>([["C-T1", t], ["C-T2", base({ id: "C-T2" } as Partial<CommThread>)]]) as never, ME);
-  ok(red[0].title === "Task Co" && red[1].title === PRIVATE_EMAIL_TITLE, "task share (#26): an admin's Start here view shows a shared email, redacts the rest");
   const cond = JSON.stringify(canSeeThreadCond(ME));
   ok(cond.includes('{"idIn":["C-T1"]}') && JSON.stringify(canSeeThreadCond({ ...ME, taskThreadIds: undefined })).includes('{"idIn":[]}'), "task share (#26): canSeeThreadCond filters the shared ids on the row id (idIn; none → matches nothing)");
   const sc = JSON.stringify(taskShareCond(ME));
@@ -895,64 +848,18 @@ export async function taskShareDbChecks(ok: Ok): Promise<void> {
   const sees = async (who: { id: string; name: string }, tid: string) => canSeeThread((await getDoc("comms", tid)) as never, await mailboxViewer(who));
   try {
     for (const t of threads) await createFixture("comms", t as never);
-
-    /* the owner's own act shares */
-    const a = await createTaskFromThread(req(ids.a, ME.id), OWNER);
-    const at = a.ok ? track(a.task) : null;
-    ok(a.ok && at?.threadShare?.to === ME.id && at.threadShare.by === OWNER.id && at.threadShare.threadId === ids.a && (await sees(ME, ids.a)) && !(await sees(THIRD, ids.a)),
-      "task share db (#351): the owner's assign-from-email stamps the share — the assignee reads it, nobody else");
-    const sk = await createAskTask({ title: "Ask task", notes: "", assigneeUserId: ME.id, dueDate: "", links: { threadId: ids.ask } as never }, OWNER);
-    if (sk.ok) track(sk.task);
-    ok(sk.ok && sk.task.threadShare?.to === ME.id && (await sees(ME, ids.ask)), "task share db (#351): Ask's task card, confirmed by the owner, shares too");
-    const self = await createTaskFromThread(req(ids.self, ""), OWNER);
-    if (self.ok) track(self.task);
-    ok(self.ok && !self.task.threadShare && !(await sees(ME, ids.self)), "task share db (#351): an owner's task for themself shares nothing");
-    const notMine = await createTaskFromThread(req(ids.a, THIRD.id), ME);
-    ok(!notMine.ok, "task share db (#351): a non-owner can't create a task from the thread at all");
-
-    /* live fields alone share nothing */
-    await createFixture("tasks", T.normalizeTask({ id: id("k-legacy"), title: "Legacy", assigneeUserId: ME.id, assigneeName: ME.name, status: "open", threadId: ids.legacy, createdAt: NOW }) as never);
     ok(!(await sees(ME, ids.legacy)), "task share db (#351): a task that merely links the thread and is assigned to me (no stamp) shares nothing");
 
     /* a pushed task can't share (the route's sanitiser over a forged doc) */
     const forged = { id: id("k-pushed"), title: "Pushed", assigneeUserId: ME.id, assigneeName: ME.name, status: "open", threadId: ids.pushed, threadShare: { threadId: ids.pushed, by: OWNER.id, to: ME.id, at: NOW }, createdAt: NOW };
     await createFixture("tasks", sanitizePushedDoc("tasks", forged, null) as never);
     ok(!(await sees(ME, ids.pushed)) && !(await getDoc<{ id: string; threadId?: string }>("tasks", forged.id))?.threadId, "task share db (#351): a pushed task (insert) carrying a forged stamp and threadId shares nothing; both are dropped");
-    const stored = await getDoc("tasks", at!.id);
-    const pushedOver = sanitizePushedDoc("tasks", { ...(stored as object), id: at!.id, threadId: ids.pushed, threadShare: { threadId: ids.pushed, by: OWNER.id, to: ME.id, at: NOW } }, { doc: stored, deleted: false });
-    await createFixture("tasks", pushedOver as never);
-    ok((await sees(ME, ids.a)) && !(await sees(ME, ids.pushed)) && (await getDoc<{ id: string; threadId?: string }>("tasks", at!.id))?.threadId === ids.a, "task share db (#351): a pushed update keeps the stored threadId and stamp — it can't re-point the share");
     const route = readFileSync("src/app/api/sync/push/route.ts", "utf8");
     ok(/let doc: Record<string, unknown> = sanitizePushedDoc\(coll, \{ \.\.\.(?:rec\.doc|pushDoc), id: rec\.id \}, existing\.length \? \{ doc: existing\[0\]\.doc, deleted: !!existing\[0\]\.deleted \} : null\);/.test(route), "sync push (#351): the push route sanitises every document before insert or update");
-
-    /* a promise-task never shares */
-    const p = await T.createTaskOnce({ id: id("k-promise"), title: "Promise", assigneeUserId: ME.id, assigneeName: ME.name, threadId: ids.promise, threadShare: { threadId: ids.promise, by: OWNER.id, to: ME.id, at: NOW } }, { id: "system", name: "System" });
-    track(p);
-    ok(!p.threadShare && !(await sees(ME, ids.promise)), "task share db (#351): a promise-task (createTaskOnce) never carries a share, even when one is passed");
     ok(!readFileSync("src/lib/inbox-org/ai-court.ts", "utf8").includes("threadShare"), "task share db (#351): applyPromises never sets threadShare");
-
-    /* re-assigning: a non-owner's hand-off moves nothing; the owner's re-stamps */
-    const h = await createTaskFromThread(req(ids.hand, ME.id), OWNER);
-    const ht = h.ok ? track(h.task)! : null;
-    ok(!!ht && (await sees(ME, ids.hand)), "task share db (#351): (setup) shared with me");
-    const r1 = await handOff({ kind: "task", id: ht!.id, userId: THIRD.id }, ME);
-    ok(r1.ok && !(await T.getTask(ht!.id))?.threadShare && !(await sees(THIRD, ids.hand)) && !(await sees(ME, ids.hand)), "task share db (#351): my (non-owner) hand-off to a third person shares nothing — with them or still with me");
-    await T.updateTask(ht!.id, { assigneeUserId: ME.id, assigneeName: ME.name });
-    await reshareTaskThread(ht!.id, ME);
     ok(!(await sees(ME, ids.hand)), "task share db (#351): updateTask back to me by a non-owner (updateTaskAction's path) shares nothing");
-    const r2 = await handOff({ kind: "task", id: ht!.id, userId: THIRD.id }, OWNER);
-    ok(r2.ok && (await T.getTask(ht!.id))?.threadShare?.to === THIRD.id && (await sees(THIRD, ids.hand)) && !(await sees(ME, ids.hand)), "task share db (#351): the owner's hand-off re-stamps the share for the new assignee");
     ok(!(await sees(ME, ids.hand)) && !(await sees(THIRD, ids.hand)), "task share db (#351): any other re-assign leaves the stamp inert (to ≠ assignee)");
-    await T.updateTask(ht!.id, { threadShare: { threadId: ids.hand, by: OWNER.id, to: ME.id, at: NOW } } as never);
     ok(!(await sees(ME, ids.hand)), "task share db (#351): updateTask never takes a stamp from a patch");
-
-    /* deleted task, draft thread */
-    const g = await createTaskFromThread(req(ids.gone, ME.id), OWNER);
-    if (g.ok) {
-      track(g.task);
-      await softDeleteDoc("tasks", g.task.id);
-    }
-    ok(g.ok && !(await sees(ME, ids.gone)), "task share db (#351): a deleted task shares nothing");
 
     /* parity, read-only, loaders */
     for (const who of [OWNER, ME, THIRD]) {

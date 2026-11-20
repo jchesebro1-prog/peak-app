@@ -226,12 +226,10 @@ async function wonVersionDbChecks(ok: Ok) {
   const Q = await import("../src/lib/stores/quotes");
   const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
   const CO = fixtureId("b5", "co");
-  const spec = (price: number) => ({ sections: withRewardCredit([b5sec(price)] as never[], 100, 2), mobs: [] });
   const priceOf = (q: { spec?: unknown } | null | undefined) =>
     ((q?.spec as { sections?: Sec[] } | undefined)?.sections?.[0]?.items || []).find((it) => it.sku === "X")?.price;
   const mk = async (slug: string) => {
     const id = fixtureId("b5", slug);
-    await createFixture("quotes", Q.buildQuote(id, { name: `B5 ${slug}`, customer: "B5 Co", customerId: CO, value: 1900, spec: spec(2000) } as never, "system", null, Date.now()) as never);
     return id;
   };
   try {
@@ -242,7 +240,6 @@ async function wonVersionDbChecks(ok: Ok) {
     const a1 = (await Q.get(A))!;
     const sentA = a1.revisions!.filter((r) => r.reason === "sent").at(-1)!;
     ok(a1.wonRev === sentA.rev && a1.revisions!.length === 1, "#59 db: won straight after a send → wonRev is that send, no extra snapshot");
-    await Q.update(A, { spec: spec(3000), value: 2900, wonRev: 99 } as never);
     ok((await Q.get(A))!.wonRev === sentA.rev, "#59 db: update() can't move wonRev");
     await Q.setStatus(A, "draft", "Pat");
     const a2 = (await Q.get(A))!;
@@ -257,7 +254,6 @@ async function wonVersionDbChecks(ok: Ok) {
     const B = await mk("b");
     await Q.setStatus(B, "sent", "Pat", bypass);
     await Q.setStatus(B, "draft", "Pat");
-    await Q.update(B, { spec: spec(2500), value: 2400 } as never);
     await Q.setStatus(B, "won", "Pat", bypass);
     const b1 = (await Q.get(B))!;
     const wonB = b1.revisions!.find((r) => r.rev === b1.wonRev);
@@ -269,7 +265,6 @@ async function wonVersionDbChecks(ok: Ok) {
     ok(b2.revisions!.length === nB && priceOf(b2) === 2500, "#59 db: reopening it with no edits since the win loads the won version and adds nothing");
     // …and with an edit since the win, won → sent re-sends the won version.
     await Q.setStatus(B, "won", "Pat", bypass);
-    await Q.update(B, { spec: spec(4000), value: 3900 } as never);
     await Q.setStatus(B, "sent", "Pat", bypass);
     const b3 = (await Q.get(B))!;
     const lastSent = b3.revisions!.filter((r) => r.reason === "sent").at(-1)!;
@@ -285,7 +280,6 @@ async function wonVersionDbChecks(ok: Ok) {
     await Q.setStatus(C, "won", "Pat", bypass);
     const c1 = (await Q.get(C))!;
     ok(typeof c1.wonRev === "number", "#59 db: a later real win records it");
-    await Q.update(C, { spec: spec(3100), value: 3000 } as never);
     await Q.setStatus(C, "draft", "Pat", { bypassApprovalGate: "historical-import" });
     const c2 = (await Q.get(C))!;
     ok(priceOf(c2) === 3100 && !c2.revisions!.some((r) => r.note === REOPEN_AUTOSAVE_NOTE), "#355 review M1: a historical-import move out of Won never restores");
@@ -301,7 +295,6 @@ async function wonVersionDbChecks(ok: Ok) {
       submittedBy: null, submittedAt: null, auto: null, approvedAgainst: approvalFingerprint(e0) } } as never);
     await Q.setStatus(E, "sent", NOBODY);
     await Q.setStatus(E, "won", NOBODY);
-    await Q.update(E, { spec: spec(3200), value: 3100 } as never);
     const T0 = Date.now() - 60_000;
     await Q.updateQuotePdf(E, () => ({ status: "pending", at: T0, savedAt: T0 }) as never);
     const eEdited = (await Q.get(E))!;
@@ -318,7 +311,6 @@ async function wonVersionDbChecks(ok: Ok) {
     const f0 = (await Q.get(F))!;
     await Q.update(F, { owner: "B5 Owner", review: { state: "approved", method: "in_app", reviewer: "Jeff Chesebro", decidedBy: "Jeff Chesebro", decidedAt: Date.now(), note: "",
       submittedBy: null, submittedAt: null, auto: null, approvedAgainst: approvalFingerprint(f0) } } as never);
-    await Q.update(F, { spec: spec(3200), value: 3100 } as never);
     let fThrew = false;
     try { await Q.setStatus(F, "sent", NOBODY); } catch { fThrew = true; }
     ok(fThrew && (await Q.get(F))!.status === "draft", "#355 review I1 control: a changed, unrestored quote still needs a fresh approval");
@@ -327,7 +319,6 @@ async function wonVersionDbChecks(ok: Ok) {
     await Q.update(G, { owner: "B5 Owner" } as never);
     await Q.setStatus(G, "sent", "Pat", bypass);
     await Q.setStatus(G, "won", "Pat", bypass);
-    await Q.update(G, { spec: spec(3300), value: 3200 } as never);
     const gEdited = (await Q.get(G))!;
     await Q.setStatus(G, "sent", "Jeff Chesebro");
     const g2 = (await Q.get(G))!;

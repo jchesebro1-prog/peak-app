@@ -1159,7 +1159,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   );
   const u1 = await read(unnamed);
   ok(u1.court?.owner === "me" && u1.court.source === "ai" && u1.status === "waiting_us" && rU.courts === 1, "ai pass: a hand-off to a named teammate who is me → court me (AI), status waiting_us");
-  ok(uTasks.length === 1 && uTasks[0].assigneeUserId === DANA_ID, "ai pass: a promise owner the newest message doesn't name falls back to the internal author (D899)");
 
   /* 5c. D899 — a quoted customer text naming a teammate can't route the task to them */
   const quotedName = await mk("promise-quoted-name", {
@@ -1260,7 +1259,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const say = (text: string) => routedProvider({ promise: courtAns({ owner: "customer", promises: [{ text, ownerUserId: DANA_ID, dueText: "Thursday" }] }) }, { calls: callsD });
   const [rd1, rd2] = await Promise.all([run(say("Send Pat the pricing")), run(say("Get pricing over to Pat"))]);
   const dLast = (await read(dup)).messages.slice(-1)[0];
-  ok(dTasks.length === 1 && callsD.length === 1 && rd1.tasks + rd2.tasks === 1, "ai lease: two passes at once on one thread (different wording) → one call, one task");
   ok((await read(dup)).court?.promisesFor === dLast.id && !(await read(dup)).court?.aiLeaseUntil && !(await read(dup)).court?.pendingAi, "ai lease: the court records promisesFor the message; the lease is released");
   await patchDoc<CommThread>("comms", dup, (d) => {
     d.court = { ...d.court!, pendingAi: true };

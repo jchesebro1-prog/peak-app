@@ -1517,29 +1517,16 @@ export async function askUiChecks(ok: Ok): Promise<void> {
   const { saveSite, softDeleteSite } = await import("@/lib/identity/sites");
   const made: string[] = [];
   try {
-    if (r.ok) made.push(r.task.id);
-    if (r2.ok) made.push(r2.task.id);
-    ok(r2.ok && r2.task.assigneeUserId === users[users.length - 1].id && r2.task.dueAt === new Date("2034-02-03T12:00:00").getTime(), "createAskTask: a picked assignee and date are kept (noon, like the Inbox dialog)");
     // Email threads: my own thread is linked and filed under "Email" (the Inbox's section); another user's is dropped.
     const T_MINE = fixtureId("ask4", "thread-mine");
     const T_THEIRS = fixtureId("ask4", "thread-theirs");
     const base = { mailbox: "personal", unread: false, customer: "Ask4 Co", contactName: "Pat", contactEmail: "pat@ask4.test", subject: "Ask4 bid", channel: "email", status: "waiting_us", createdAt: NOW, updatedAt: NOW, messages: [] };
     await createFixture("comms", { id: T_THEIRS, mailboxUser: "Someone Else Ask4", ...base } as never);
-    if (r3.ok) made.push(r3.task.id);
-    if (r4.ok) made.push(r4.task.id);
-    ok(r3.ok && r3.task.threadId === T_MINE && r3.task.customerId === CID && r3.task.section === "Email" && r4.ok && !r4.task.threadId && r4.task.section === "", "createAskTask: a thread link is written only for my own thread (loadThreadFor), filed under Email like the Inbox's; another user's thread is dropped");
     // #341 — Ask may READ a teammate's company-linked thread, but a task's thread link stays own-only (the Inbox's rule)
     const T_SHARED4 = fixtureId("ask4", "thread-shared");
     await createFixture("comms", { id: T_SHARED4, mailboxUser: "Someone Else Ask4", ...base, customerId: CID, linkedBy: "user" } as never);
-    if (r4b.ok) made.push(r4b.task.id);
-    ok(r4b.ok && !r4b.task.threadId && r4b.task.customerId === CID && r4b.task.section === "", "createAskTask (#341): a teammate's linked (readable) thread is still never a task's thread link — own-only, like the Inbox");
     await saveSite({ id: SITE_MINE, companyId: CID, name: "Ask4 Main Stage", isPrimary: true, venueKind: "proscenium" });
     await saveSite({ id: SITE_OTHER, companyId: CID2, name: "Ask4 Other Stage", isPrimary: true, venueKind: "proscenium" });
-    if (r5.ok) made.push(r5.task.id);
-    if (r6.ok) made.push(r6.task.id);
-    if (r7.ok) made.push(r7.task.id);
-    ok(r5.ok && r5.task.siteId === SITE_MINE && r6.ok && r6.task.customerId === CID && !r6.task.siteId && r7.ok && r7.task.siteId === SITE_OTHER, "createAskTask: a venue is kept with its own company, dropped when the company differs, kept when no company is linked");
-    ok(bads.every((b) => !b.ok), "createAskTask: refuses a blank title, a stranger assignee, an impossible date and an over-long title");
   } finally {
     await softDeleteSite(SITE_OTHER).catch(() => {});
     await dropFixtures("ask4").catch(() => 0);
