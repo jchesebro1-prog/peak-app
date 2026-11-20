@@ -8,27 +8,23 @@ import {
   listDocsFiltered,
   casDocKey,
   patchDoc,
-  patchDocKey,
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
-import type { AssistNudge } from "@/lib/brief/types";
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
 import { isBoxSaleQuoteType, isBoxSaleSource } from "@/lib/estimate-box-sale/rules";
-import { grossQuoteValue, quoteRewardCredit, withRewardCredit, withoutRewardCredit } from "@/lib/rewards/credit-line";
-import { serviceCreditSubdocKey } from "@/lib/rewards/service-credit";
+import { grossQuoteValue, quoteRewardCredit, withRewardCredit } from "@/lib/credit-line";
+import { serviceCreditSubdocKey } from "@/lib/credit-line";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { numberNewDoc } from "@/lib/stores/estimate-numbers";
 import { canSetPoReceived } from "@/lib/opportunities";
-import { createAssignment } from "@/lib/stores/assignments";
 import { getDb, withTransaction } from "@/db";
 import { liveKey } from "@/lib/estimate-live-save/live-key";
 import { liveSaveRefusal } from "@/lib/estimate-live-save/rules";
 import { DOC_TABLES } from "@/db/doc-tables";
 import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
-import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { canHavePdf, latestSentRevision, nextSendRevNo, pdfIsCurrent, type DocumentRevStamp, type QuotePdfState } from "@/lib/quote-pdf/state";
 import { isReopen, reopenTarget, REOPEN_AUTOSAVE_NOTE, sameWonContent, tracksWonVersion, WON_SNAPSHOT_NOTE, wonRevision } from "@/lib/quote-won-version";
@@ -409,13 +405,8 @@ export type Quote = {
    *  patchQuoteBid under the row lock; update() drops it. Content (QUOTE_CONTENT_FIELDS): the awarded bidder
    *  prints as "Prepared for" and the bid line prints under the meta grid; never bumps updatedAt. */
   bid?: QuoteBid | null;
-  /** #348 slice 6 (Jeff 2026-10-15) — "Scope only" for good: once this estimate has had a GC/EC bidder (or was
-   *  split off one that had), the owner's portal shows it as a BOM with no prices, even after every bidder row is
-   *  removed. Store-owned: written only by markBidScopeOnly (addBidder, and a party write that revives a removed
-   *  bidder row — a key-level write that never bumps updatedAt) and by create() when a SERVER caller passes
-   *  `opts.bidScopeOnly` (Move system → New estimate and Copy system → New estimate, same customer only) —
-   *  buildQuote never copies it from `partial`, and update() drops it, so no client save can set or clear it.
-   *  Never content, never snapshotted. Read through portalQuoteHasBidders (stamp OR bidder rows incl. deleted). */
+  /** A stored stamp of the removed customer portal (#348 slice 6: the owner's portal showed the estimate without
+   *  prices once it had a bidder). Nothing writes or reads it any more; update() still drops it from incoming saves. */
   bidScopeOnly?: true;
   /** Box goods sale (spec 2026-10-21) — an Estimator system estimate that sells equipment + freight only: the
    *  customer document is the BOM view and the client link the itemized list. Absent = false; stored only as `true`
@@ -423,11 +414,6 @@ export type Quote = {
    *  (QUOTE_CONTENT_FIELDS — a toggle stales the PDF) and frozen in a sent revision's docFields. Nothing narrative is
    *  ever deleted for it. Read through boxSaleOf (src/lib/estimate-box-sale/rules.ts). */
   boxSale?: boolean;
-  /** Estimator Phase 3 — the comms threads this estimate was emailed on
-   *  (spec §10.1 step 6), oldest first, ≤ 50, one per threadId. Written only
-   *  by recordEstimateEmail under the row lock; update() drops it so an
-   *  Estimator save can never erase it; never content, never snapshotted. */
-  estimateEmails?: EstimateEmailEntry[] | null;
   /** Estimator Phase 4 (spec §11.3) — review comments pinned to systems
    *  (sectionId null = the whole estimate), oldest first, ≤ 200. Written only
    *  by addReviewComment / resolveReviewComment / deleteReviewComment under
@@ -435,54 +421,20 @@ export type Quote = {
    *  never content (not a QUOTE_CONTENT_FIELDS member), never snapshotted, never
    *  copied by buildQuote, never bumps updatedAt. Staff-only. */
   reviewComments?: ReviewComment[] | null;
-  /** Estimator Phase 3 fix round 1 — an in-flight estimate email: who holds
-   *  the send and until when (epoch-ms). Written only by
-   *  claimEstimateEmailSend / releaseEstimateEmailSend under the row lock;
-   *  update() drops it; never content (not a QUOTE_CONTENT_FIELDS member),
-   *  never snapshotted, never bumps updatedAt. An expired claim is ignored. */
-  emailSending?: EstimateEmailClaim | null;
-  /** #334: set when Assist drafted this estimate from an email (D877). Never
-   *  content, never snapshotted, never copied by buildQuote; staff-only. */
-  assistDraft?: AssistDraftInfo;
-  /** AI daily brief (spec §2) — a follow-up note + nudge email for a quiet
-   *  sent quote. Written only by setAssistNudge (a key-level write — never
-   *  under the row lock's read-modify-write, never bumps updatedAt, never
-   *  touches estNo); update() drops it. Never content, never snapshotted;
-   *  staff-only. Fresh while the quote is still sent and `basis` is its send
-   *  time (`nudgeFresh`). */
-  assistNudge?: AssistNudge | null;
-  /** AI daily brief — the draft queue's per-quote lease (epoch-ms), taken and
-   *  released by compare-and-set (`casAssistNudgeKey`); update() drops it. */
-  assistNudgeLeaseUntil?: number | null;
+  /** Stored keys of removed features (estimate emails, an in-flight send claim, the Assist draft marker, the daily
+   *  brief's nudge and its lease). Nothing reads or writes them; update() still drops them from incoming saves so an
+   *  old browser tab can't write them back. */
+  estimateEmails?: unknown;
+  emailSending?: unknown;
+  assistDraft?: unknown;
+  assistNudge?: unknown;
+  assistNudgeLeaseUntil?: unknown;
   /** #368 — what the last Revise re-priced to today's catalog (estimate-reprice/rules.ts). Written only by
    *  setStatus's revise, in the same write as the move to Draft; a revise that changed nothing clears it.
    *  update() drops it; never content, never snapshotted, never copied by buildQuote. Staff-only (the Build banner). */
   repricedOnRevise?: RepricedOnRevise | null;
 };
 
-/** #334 (D877) — where an Assist-drafted estimate came from. `reasons` is
- *  keyed `"<sectionId>:<lineId>"`; `dismissedAt` hides the Estimator banner. */
-export type AssistDraftInfo = {
-  runId: string;
-  threadId: string;
-  at: number;
-  notes: string;
-  reasons: Record<string, string>;
-  dismissedAt?: number;
-};
-
-/** One in-flight estimate email (`Quote.emailSending`). */
-export type EstimateEmailClaim = { by: string; until: number };
-
-/** How long a send claim holds — the Estimator page's maxDuration (120 s). */
-export const ESTIMATE_EMAIL_CLAIM_MS = 120_000;
-
-/** One emailed copy of the estimate: the comms thread, the sent revision it
- *  carried, when, by whom (user name) and the To line. */
-export type EstimateEmailEntry = { threadId: string; rev: number; at: number; by: string; to: string; partyId?: string };
-
-/** Most entries kept on a quote; the oldest are dropped past it. */
-export const ESTIMATE_EMAILS_MAX = 50;
 
 /** #293 slice 3 — `Quote.shareLink`. `expiresAt: 0` = revoked. */
 export type QuoteShareLink = {
@@ -717,35 +669,6 @@ export function isImportedHistoryQuote(q: Pick<Quote, "source">): boolean {
   return q.source === "daylite";
 }
 
-type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "portalAcceptance" | "portalReview">;
-
-/** Customer portal list rule: the grant's customer's published quotes plus
- *  their own self-serve drafts (the retired estimate builder's
- *  "portal-self-serve" and #245's "portal-catalog" review quotes) — never an
- *  internal draft, never imported Daylite history. #248 Task 4 (carried from
- *  Task 2 review): a "portal-service" DRAFT is deliberately NOT listed —
- *  service quotes are never review quotes (Generate always sends them at
- *  once, firm), so the only way one is ever in draft is a staff recall
- *  (setStatus back to draft) — and that must not surface an in-progress
- *  staff edit to the customer. A sent/won/etc portal-service quote is still
- *  listed via the `status !== "draft"` branch below. */
-export function portalListsQuote(q: PortalQuoteFields, customerId: string): boolean {
-  if (!customerId || q.customerId !== customerId) return false;
-  if (isImportedHistoryQuote(q)) return false;
-  return (
-    q.status !== "draft" ||
-    q.source === "portal-self-serve" ||
-    q.source === "portal-catalog"
-  );
-}
-
-/** Customer portal Accept rule (button AND server action): a listed quote,
- *  sent, not already accepted, and not awaiting Peak's re-review (#245 Task
- *  13 — a refresh that turned up a price-on-request line, spec §4.5). */
-export function portalCanAcceptQuote(q: PortalQuoteFields, customerId: string): boolean {
-  return portalListsQuote(q, customerId) && q.status === "sent" && !q.portalAcceptance && !q.portalReview;
-}
-
 export type ApprovalGateAction = "send" | "won";
 export type ApprovalGateResult = { ok: true } | { ok: false; error: string };
 
@@ -890,18 +813,6 @@ export async function getMany(ids: readonly string[]): Promise<Map<string, Quote
   return out;
 }
 
-/** The live (not lost) renewal quote already minted for a completed job /
- *  record this cycle, if any (IDEAS #36 idempotence). */
-export async function byRenewalOf(recordId: string): Promise<Quote | null> {
-  if (!recordId) return null;
-  const list = await listDocs<Quote>("quotes");
-  const live = list.filter(
-    (q) => q.renewalOf === recordId && q.status !== "lost"
-  );
-  live.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return live[0] || null;
-}
-
 /**
  * The quote document create() writes, built without writing it. Pure: the
  * caller resolves the pipeline (null for service quotes) and the timestamp.
@@ -967,18 +878,14 @@ export function buildQuote(
 }
 
 /** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
-export async function create(partial: Partial<Quote> = {}, opts: { bidScopeOnly?: boolean } = {}): Promise<Quote> {
+export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
   const t = Date.now();
   const quoteType = partial.quoteType || "system";
   // System quotes enter their pipeline at its first stage (spec §3.4); a caller-chosen
   // pipeline is honoured when it exists, else the Settings default.
   const pipes = carriesPipeline(quoteType) ? await loadPipelines() : null;
   const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
-  // #348 slice 6: the Scope-only stamp comes only from the server-side second argument, never from `partial`.
-  const build = (id: string): Quote => {
-    const q = buildQuote(id, partial, quoteType, pl, t);
-    return opts.bidScopeOnly === true ? { ...q, bidScopeOnly: true } : q;
-  };
+  const build = (id: string): Quote => buildQuote(id, partial, quoteType, pl, t);
   // Explicit caller-supplied id (not a minted one) — no race to guard, keep
   // the prior upsert semantics. #223: an id that already exists keeps its
   // number — upsertDoc never replaces a stored estNo/estSuffix (doc-store).
@@ -1021,7 +928,7 @@ export async function update(
     delete clean.packagePeakHeader;
     // #348: bid details are patchQuoteBid's alone.
     delete clean.bid;
-    // #348 slice 6: the Scope-only stamp is markBidScopeOnly's alone — a save can never set or clear it.
+    // The removed portal's Scope-only stamp: a save can never set or clear it.
     delete clean.bidScopeOnly;
     // #368: the Revise re-price summary is setStatus's alone.
     delete clean.repricedOnRevise;
@@ -1081,52 +988,6 @@ export async function updateCheckingLiveKey(id: string, baseKey: string | undefi
     const after = quote ? await get(id) : null;
     return { quote, conflict: null, ...(after ? { liveKey: liveKey(after) } : {}) };
   });
-}
-
-/** #348 slice 6 (Jeff 2026-10-15) — the ONLY writer of `Quote.bidScopeOnly` after create: set it (never clear
- *  it) as one key-level write (`doc || {bidScopeOnly: true}` in SQL), the setAssistNudge precedent — no
- *  read-modify-write, so it can't race an Estimator save; estNo/estSuffix and updatedAt are left as stored (no
- *  version bump, nothing stales). Joins the caller's transaction (addBidder's row lock). False = missing / deleted. */
-export async function markBidScopeOnly(quoteId: string): Promise<boolean> {
-  if (!quoteId) return false;
-  const res = await patchDocKey("quotes", [quoteId], "bidScopeOnly", true);
-  return res.ids.length > 0;
-}
-
-/** AI daily brief (spec §2) — the ONLY writer of `Quote.assistNudge`: set
- *  (or, with null, remove) it as one key-level write (`doc || {assistNudge}`
- *  in SQL). The UPDATE takes the row lock itself, so it lands before or after
- *  a patchQuote, never inside one; estNo/estSuffix and updatedAt are left as
- *  stored. False = missing / deleted quote. */
-export async function setAssistNudge(quoteId: string, nudge: AssistNudge | null): Promise<boolean> {
-  const res = await patchDocKey("quotes", [quoteId], "assistNudge", nudge === null ? undefined : nudge);
-  return res.ids.length > 0;
-}
-
-/** AI daily brief — compare-and-set the nudge or its lease (the draft queue's
- *  writes): `next` lands only if the stored value still equals `expected`
- *  (undefined = absent). One key, in SQL — estNo and updatedAt untouched. */
-export async function casAssistNudgeKey<K extends "assistNudge" | "assistNudgeLeaseUntil">(
-  quoteId: string,
-  key: K,
-  expected: Quote[K] | undefined,
-  next: Quote[K] | undefined
-): Promise<boolean> {
-  return casDocKey("quotes", quoteId, key, expected, next);
-}
-
-/** #334 (D877) — hide an Assist-drafted estimate's banner. Under the row
- *  lock; never bumps updatedAt (a dismiss is not an edit, so it can't stale an
- *  open Estimator's version-checked send). False when there is no live draft
- *  marker to dismiss. */
-export async function dismissAssistDraft(id: string, now: number = Date.now()): Promise<boolean> {
-  let wrote = false;
-  await patchQuote(id, (q) => {
-    if (!q.assistDraft || typeof q.assistDraft !== "object" || q.assistDraft.dismissedAt) return;
-    q.assistDraft = { ...q.assistDraft, dismissedAt: now };
-    wrote = true;
-  });
-  return wrote;
 }
 
 /* ---- revisions (punch item 24) ---- */
@@ -1477,37 +1338,6 @@ export async function recordShareOpen(id: string, rev: number, now: number): Pro
   return wrote;
 }
 
-/**
- * Estimator Phase 3 — the ONLY writer of `Quote.estimateEmails`: remember
- * that this estimate went out on a comms thread. Under the row lock, append-
- * only, de-duplicated by threadId (a repeat is a no-op), capped at
- * ESTIMATE_EMAILS_MAX with the oldest dropped. Never bumps `updatedAt` and
- * never changes content. false = nothing written (unknown quote, a malformed
- * entry, or the thread was already recorded).
- */
-export async function recordEstimateEmail(id: string, entry: EstimateEmailEntry): Promise<boolean> {
-  const threadId = typeof entry?.threadId === "string" ? entry.threadId.trim() : "";
-  if (!threadId || threadId.length > 200) return false;
-  if (!Number.isSafeInteger(entry.rev) || entry.rev < 0 || !Number.isFinite(entry.at)) return false;
-  const clean: EstimateEmailEntry = {
-    threadId,
-    rev: entry.rev,
-    at: entry.at,
-    by: String(entry.by ?? "").slice(0, 200),
-    to: String(entry.to ?? "").slice(0, 1000),
-    // #348 2b-ii — which bidder this email went to (a bidder send only).
-    ...(typeof entry.partyId === "string" && /^pty_[0-9a-f]{16}$/.test(entry.partyId) ? { partyId: entry.partyId } : {}),
-  };
-  let wrote = false;
-  await patchQuote(id, (doc) => {
-    const cur = Array.isArray(doc.estimateEmails) ? doc.estimateEmails : [];
-    if (cur.some((e) => !!e && e.threadId === threadId)) return;
-    doc.estimateEmails = [...cur, clean].slice(-ESTIMATE_EMAILS_MAX);
-    wrote = true;
-  });
-  return wrote;
-}
-
 export type ReviewCommentWrite =
   | { ok: true; comments: ReviewComment[]; comment?: ReviewComment }
   | { ok: false; reason: "gone" | "invalid" | "no-system" | "full" | "missing" | "forbidden" };
@@ -1604,42 +1434,6 @@ export async function deleteReviewComment(id: string, commentId: string, allow: 
     res.v = { ok: true, comments: doc.reviewComments };
   });
   return res.v;
-}
-
-/**
- * Estimator Phase 3 fix round 1 — claim the quote's one in-flight estimate
- * email (`Quote.emailSending`) under the row lock. "busy" = another send's
- * claim hasn't expired; an expired claim is taken over. Never bumps
- * `updatedAt`, never changes content. Returns the claim to release with.
- */
-export async function claimEstimateEmailSend(
-  id: string,
-  by: string,
-  now: number,
-  ttlMs: number = ESTIMATE_EMAIL_CLAIM_MS
-): Promise<{ ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" }> {
-  if (!Number.isFinite(now) || !(ttlMs > 0)) return { ok: false, reason: "gone" };
-  let out: { ok: true; claim: EstimateEmailClaim } | { ok: false; reason: "busy" | "gone" } = { ok: false, reason: "gone" };
-  await patchQuote(id, (doc) => {
-    const cur = doc.emailSending;
-    if (cur && typeof cur.until === "number" && cur.until > now) {
-      out = { ok: false, reason: "busy" };
-      return;
-    }
-    const claim: EstimateEmailClaim = { by: String(by ?? "").slice(0, 200), until: now + ttlMs };
-    doc.emailSending = claim;
-    out = { ok: true, claim };
-  });
-  return out;
-}
-
-/** Release a claim taken by claimEstimateEmailSend — only that exact claim
- *  (a later sender's takeover of an expired one is left alone). */
-export async function releaseEstimateEmailSend(id: string, claim: EstimateEmailClaim): Promise<void> {
-  await patchQuote(id, (doc) => {
-    const cur = doc.emailSending;
-    if (cur && cur.by === claim.by && cur.until === claim.until) doc.emailSending = null;
-  });
 }
 
 /** #301 slice C (R13) — mirror the drawings list onto the latest SENT
@@ -1754,22 +1548,15 @@ async function copySentPdfSafely(id: string): Promise<void> {
  * becomes the newest revision. The recall itself is then recorded as another
  * revision, so the history reads as a continuous line rather than a jump.
  *
- * Refuses on `lost` quotes (#282 follow-up: a lost quote is out of the Rewards
- * program — it carries no credit, and a recall could put one back) and on `won`
- * quotes. A won quote has already spawned a project, and the
- * project copies `value`/`margin` (and derives every procurement line cost from
- * `value`) once at conversion and never re-reads the quote — so rewriting the
- * numbers afterwards would silently desync the two with no way to repair it
- * (`projects.ts` bails early when a project already exists).
+ * Refuses on `lost` and `won` quotes: a closed quote's numbers stay as they closed.
  */
 export async function restoreQuoteRevision(
   id: string,
   rev: number,
-  by?: string | null,
-  opts: { mayApplyCredit?: boolean } = {}
+  by?: string | null
 ): Promise<
   | { ok: false; reason: "not-found" | "no-such-rev" | "won" | "lost" }
-  | { ok: true; quote: Quote; creditNotice?: string }
+  | { ok: true; quote: Quote }
 > {
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return { ok: false, reason: "not-found" };
@@ -1777,11 +1564,8 @@ export async function restoreQuoteRevision(
   if (q.status === "lost") return { ok: false, reason: "lost" };
   const target = (q.revisions || []).find((r) => r.rev === rev);
   if (!target) return { ok: false, reason: "no-such-rev" };
-  // #282 phase 3: the snapshot's Rewards credit is re-clamped like a save
-  // (available now, the restored pre-credit total, $0; dropped for a portal
-  // quote / no customer / another customer's revision) before it goes back.
-  const { restoredCreditFor } = await import("./reward-ledger");
-  const credit = await restoredCreditFor(q, target, opts.mayApplyCredit ?? true);
+  // A stored credit on the snapshot goes back only up to what the quote carries now.
+  const credit = restoredCreditFor(q, target);
   // #304: the snapshot keeps the SKUs it was cut with; the spec it puts back
   // is LIVE, so a part renamed since moves to its live SKU (and model). The
   // revision itself is never written — the rewrite copies what it changes.
@@ -1816,32 +1600,18 @@ export async function restoreQuoteRevision(
     doc.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
-  return credit.notice ? { ok: true, quote: updated, creditNotice: credit.notice } : { ok: true, quote: updated };
+  return { ok: true, quote: updated };
 }
 
 /**
- * #282 follow-up (Jeff, 2026-09-30: "lost quotes shouldn't place into the
- * rewards program"): strip every Rewards credit from a quote going Lost — the
- * Estimator's credit line(s) and the service section's `rewardCredit` — and
- * set `value` back to the gross (pre-credit) price. A no-op when the quote
- * carries no credit. Copies what it rewrites (revisions share the payloads).
+ * The stored credit a recalled revision may put back, and its pre-credit
+ * price: never more than the quote carries now (nothing applies new credit)
+ * or the restored price itself.
  */
-function clearRewardCredit(doc: Quote): void {
-  const credit = quoteRewardCredit(doc);
-  if (!(credit > 0)) return;
-  const gross = grossQuoteValue(doc);
-  const key = serviceCreditSubdocKey(doc.quoteType);
-  const sub = key ? doc[key] : null;
-  if (key && sub && typeof sub === "object" && "rewardCredit" in sub) {
-    const next = { ...(sub as Record<string, unknown>) };
-    delete next.rewardCredit;
-    doc[key] = next;
-  }
-  const spec = doc.spec as { sections?: unknown } | null | undefined;
-  if (spec && typeof spec === "object" && Array.isArray(spec.sections)) {
-    doc.spec = { ...spec, sections: withoutRewardCredit(spec.sections as SpecSection[]) };
-  }
-  doc.value = gross;
+function restoredCreditFor(q: Quote, target: QuoteRevision): { credit: number; gross: number } {
+  const snap = { ...target, quoteType: target.quoteType ?? q.quoteType };
+  const gross = grossQuoteValue(snap);
+  return { credit: Math.max(0, Math.min(quoteRewardCredit(snap), quoteRewardCredit(q), gross)), gross };
 }
 
 /**
@@ -1893,8 +1663,7 @@ export async function reopenPlanFor(q: Quote, status: QuoteStatus, opts: Pick<Se
   const rewrite = renameRewriter(await liveRenameRefs());
   const target = reopenTarget(q, status, rewrite);
   if (!target) return null;
-  const { restoredCreditFor } = await import("./reward-ledger");
-  const c = await restoredCreditFor(q, target, true);
+  const c = restoredCreditFor(q, target);
   return { target, credit: c.credit, gross: c.gross, rewrite };
 }
 
@@ -1937,15 +1706,6 @@ export function asReopened(q: Quote, plan: ReopenPlan | null): Quote {
  * callers — including the plain quotes-list status buttons — could push an
  * unapproved quote straight to `won`).
  *
- * `"engine-owned-flow"` is the ONLY value, and it exists for exactly four
- * call sites: repairs/quote, inspections/quote, flame-tests/quote,
- * rentals/quote. Each of those builder screens marks its OWN quote won as
- * the last step of a self-contained accept flow (persist →
- * setStatus(id,"won") → spawn the job) — there is no separate estimator
- * review queue in that flow to check an approval record against, and gating
- * it would just break those screens outright. Do not reach for this
- * anywhere else; every other caller must go through the real gate.
- *
  * `"historical-import"` exists for the CSV importer (`/import` registry) only.
  * An imported row records a status a quote ALREADY reached in whatever system
  * it came from — it is not a decision being made in this app, and there is no
@@ -1953,12 +1713,15 @@ export function asReopened(q: Quote, plan: ReopenPlan | null): Quote {
  * Without this, importing a spreadsheet of won/lost history would throw on the
  * first non-draft row. The importer is already gated behind `manage_users`.
  *
- * `"portal-firm"` exists for `sendPortalFirm` (src/lib/portal-quotes.ts) only,
- * and opens `sent` only — a portal quote reaches `won` through the real gate.
+ * `"engine-owned-flow"` was the service quote builders' bypass (repairs,
+ * inspections, flame tests, rentals — each marked its OWN quote won as the last
+ * step of a self-contained accept flow). Those builders are gone and nothing
+ * in `src/` passes it any more; it stays because the test suites move their
+ * fixture quotes to sent / won with it. Do not reach for it in app code. (The
+ * portal's `"portal-firm"` bypass was removed with the portal.)
  */
 export type SetStatusOpts = {
-  // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
-  bypassApprovalGate?: "engine-owned-flow" | "historical-import" | "portal-firm";
+  bypassApprovalGate?: "engine-owned-flow" | "historical-import";
   /** #287: move only if the quote's `updatedAt` still equals this (the
    *  version the sender was shown — Approve & send →). Checked under the row
    *  lock before anything is written; a mismatch throws QuoteVersionChanged. */
@@ -1988,9 +1751,6 @@ export function resolveStatusGate(
     opts.bypassApprovalGate === "historical-import"
   )
     return { ok: true };
-  // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
-  // It opens the SEND only — Approve (→ won) stays on the normal gate.
-  if (opts.bypassApprovalGate === "portal-firm" && status === "sent") return { ok: true };
   if (status !== "won" && status !== "sent") return { ok: true };
   return requireApprovalToAdvance(review, status === "won" ? "won" : "send");
 }
@@ -2279,24 +2039,7 @@ export async function setStatus(
   // #287: Approve & send → moves only the version the sender was shown — before any write, the replay included.
   if (typeof opts.expectUpdatedAt === "number" && q.updatedAt !== opts.expectUpdatedAt) throw new QuoteVersionChanged();
   if (q.status === status) {
-    // #170: nothing to transition, but the downstream record may still be
-    // MISSING. This early return is the layer that actually gated the bug —
-    // `spawnFromQuote` was never reached at all. The four service builder
-    // screens persist their quote, call setStatus(id, "won") and then act;
-    // cfc00ad deleted the `createFromQuote`/`syncFromQuotes` calls they used
-    // to make for themselves, so re-approving an ALREADY-won quote created
-    // nothing anywhere. Replaying the spawn repairs that. No write, no
-    // history entry, no revision and no #16 assignment happen here — those
-    // belong to a real transition, and a no-op re-save must stay a no-op
-    // everywhere except this one idempotent repair. The approval gate is
-    // deliberately not consulted either: no status is being advanced, and
-    // every creator the replay reaches dedupes on the quote id, so the cost
-    // when the record already exists is one read. That "nothing else happens"
-    // claim is load-bearing and is pinned by test: the #170 `system-replay`
-    // fixture (a type that DOES fire the #16 assignment) asserts history,
-    // updatedAt, revisions and the assignments table are all untouched.
-    const { spawnFromQuote } = await import("./quote-spawn");
-    await spawnFromQuote(q, q.status, { replayUnchanged: true });
+    // Nothing to transition: a no-op re-save writes nothing.
     return q;
   }
   // #242: the owner's review limits are read only when this transition is
@@ -2393,13 +2136,6 @@ export async function setStatus(
     } else if (doc.bonusRecord) {
       doc.bonusRecord = null;
     }
-    // #282 follow-up: a lost quote is out of the Rewards program — drop any
-    // credit it carried and put `value` back to the pre-credit price, so
-    // nothing stays parked on it. The ledger reconcile below keys on the
-    // entries already posted (an open redeem returns the credit), never on
-    // the quote's current credit line, so clearing it first cannot skip the
-    // unredeem.
-    if (status === "lost") clearRewardCredit(doc);
     if (pipes && carriesPipeline(doc.quoteType)) {
       const pl = quotePipelineFor(pipes, doc);
       doc.pipelineId = pl.id;
@@ -2422,33 +2158,6 @@ export async function setStatus(
     doc.updatedAt = t;
   });
 
-  // Punch #16 (D14x): an install sale notifies the company as a Home Queue
-  // task, not email — see PUNCHLIST.md #16 for the five findings against an
-  // automated send. The unchanged-status branch above returns before reaching
-  // here, so this only runs the moment a quote actually transitions INTO
-  // "won", never on a no-op re-save of an already-won quote (#170's spawn
-  // replay is deliberately the only thing that branch does). Scoped to the
-  // quote types that actually become an Installs project — the SAME shared
-  // list projects.ts's three exclusion checks use (PROJECT_EXCLUDED_QUOTE_TYPES,
-  // review round-3: rental was missing here too, independently of the same
-  // gap in projects.ts) — flame-test/repair/inspection/consulting/rental
-  // wins run their own service workflows and dashboards, so an "install
-  // sold" task for those would be noise. There is no separate PM role
-  // (D87) — `owner` is the only reliably-present assignee at this hook point.
-  if (result && status === "won" && !isProjectExcludedQuoteType(q.quoteType)) {
-    await createAssignment({
-      title: `Install sold — reach out: ${result.name || result.customer || id}`,
-      assignee: result.owner || DEFAULT_ACTOR,
-      createdBy: by || DEFAULT_ACTOR,
-      link: { kind: "quote", id, label: result.name || result.customer || id },
-      source: "auto: quote won (#16)",
-    });
-  }
-
-  if (result) {
-    const { spawnFromQuote } = await import("./quote-spawn");
-    await spawnFromQuote(result, q.status);
-  }
   return result;
   });
   // #222: Blob I/O stays out of the status transaction. A same-status no-op
@@ -2479,18 +2188,6 @@ export async function setStatus(
   // #355 review I2: a reopen that put the won version back changed the document — on won → sent too, where the
   // copy above found no current file — so it re-renders and the generator settles the new sent revision's PDF.
   if (out && (revised.value || reopened.value)) await scheduleRevisePdfSafely(id);
-  // #282 phase 2: the Rewards ledger follows every real transition — earn +
-  // redeem on won, reverse + unredeem on leaving won. Never for an imported
-  // row (historical-import records history, it is not a sale made here), and
-  // never able to block the status change: a failure is logged, not thrown.
-  if (out && moved.value && opts.bypassApprovalGate !== "historical-import") await reconcileRewardsSafely(out, by);
-  // Estimator bonuses: a re-win keeps the project the first win spawned —
-  // bring its 5% pool to this record's package cost (no-op write skipped).
-  // After the transaction: a swallowed DB error here must not abort the
-  // status change's own Postgres transaction and roll the Won back.
-  if (out && moved.value && status === "won" && isBonusEligibleQuote(out)) {
-    await syncProjectBonusPool(id, out.bonusRecord?.packageBonusCost ?? 0);
-  }
   // #293 slice 2: same outer-transaction caveat as the copy above — inside
   // setQuoteStage's transaction this invalidation fires BEFORE commit, so a
   // rebuild that runs concurrently can cache the pre-transition state for up
@@ -2522,41 +2219,17 @@ async function bonusUserList(): Promise<{ id: string; name: string }[]> {
   }
 }
 
-/** Estimator bonuses: keep the linked install project's 5% pool equal to the record's package cost. */
-async function syncProjectBonusPool(quoteId: string, cost: number): Promise<void> {
-  try {
-    const { getProjectByQuote, updateProject } = await import("@/lib/stores/projects");
-    const proj = await getProjectByQuote(quoteId);
-    if (!proj) return;
-    const next = cost > 0 ? cost : undefined;
-    if (proj.performanceBonusPool === next) return;
-    await updateProject(proj.id, { performanceBonusPool: next });
-  } catch (e) {
-    console.error("[bonus] project pool sync failed for", quoteId, e);
-  }
-}
-
 /**
  * Estimator bonuses — the ONLY writer of `Quote.estimatorBonusSplit`. Never
- * content, so `updatedAt` is not bumped; a won quote's record is rebuilt (and
- * the install project's pool follows if the package cost moved). Null = not found.
+ * content, so `updatedAt` is not bumped; a won quote's record is rebuilt.
+ * Null = not found.
  */
 export async function setEstimatorBonusSplit(id: string, split: BonusSplit): Promise<Quote | null> {
   const users = await bonusUserList();
-  const cost = { after: 0, rebuilt: false };
-  const out = await patchQuote(id, (doc) => {
+  return patchQuote(id, (doc) => {
     doc.estimatorBonusSplit = normalizeSplit(split);
-    if (doc.status === "won" && doc.bonusRecord) {
-      const before = doc.bonusRecord.packageBonusCost;
-      rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
-      cost.after = doc.bonusRecord?.packageBonusCost ?? before;
-      cost.rebuilt = true;
-    }
+    if (doc.status === "won" && doc.bonusRecord) rebuildBonusRecord(doc, doc.bonusRecord.alternatesTaken, users);
   });
-  // Every rebuild syncs (the sync skips a no-op write), so a pool a failed
-  // earlier sync left stale is repaired here too.
-  if (out && cost.rebuilt) await syncProjectBonusPool(id, cost.after);
-  return out;
 }
 
 /**
@@ -2566,11 +2239,11 @@ export async function setEstimatorBonusSplit(id: string, split: BonusSplit): Pro
  * write failed) gets one built here — `wonAt` = its last move into Won. Returns
  * null when the quote doesn't exist, "not-won" when it isn't won and
  * "no-bonus-lines" when it is won but has nothing to record (nothing written
- * either way). Every rebuild syncs the install project's pool (no-op skipped).
+ * either way).
  */
 export async function setBonusAlternatesTaken(id: string, ids: string[]): Promise<Quote | null | "not-won" | "no-bonus-lines"> {
   const users = await bonusUserList();
-  const st: { refused: "not-won" | "no-bonus-lines" | null; after: number; rebuilt: boolean } = { refused: null, after: 0, rebuilt: false };
+  const st: { refused: "not-won" | "no-bonus-lines" | null } = { refused: null };
   const out = await patchQuote(id, (doc) => {
     if (doc.status !== "won") {
       st.refused = "not-won";
@@ -2584,29 +2257,14 @@ export async function setBonusAlternatesTaken(id: string, ids: string[]): Promis
     const alts = new Set(secs.filter((x) => x.alternate === true).map((x) => x.id));
     const taken = (Array.isArray(ids) ? ids : []).filter((aid) => alts.has(aid));
     if (doc.bonusRecord) {
-      const before = doc.bonusRecord.packageBonusCost;
       rebuildBonusRecord(doc, taken, users);
-      st.after = doc.bonusRecord?.packageBonusCost ?? before;
     } else {
       const intoWon = (doc.history || []).filter((h) => h.to === "won").pop();
       doc.bonusRecord = buildBonusRecord({ sections: secs, owner: doc.owner, preparedBy: doc.preparedBy, split: doc.estimatorBonusSplit, alternatesTaken: taken, users, wonAt: intoWon?.at ?? Date.now() });
-      st.after = doc.bonusRecord.packageBonusCost;
     }
-    st.rebuilt = true;
   });
   if (out && st.refused) return st.refused;
-  if (out && st.rebuilt) await syncProjectBonusPool(id, st.after);
   return out;
-}
-
-/** #282 phase 2: post the quote's Rewards ledger entries; log, never throw. */
-async function reconcileRewardsSafely(q: Quote, by?: string | null, opts: { deleted?: boolean } = {}): Promise<void> {
-  try {
-    const { reconcileQuoteLedger } = await import("./reward-ledger");
-    await reconcileQuoteLedger(q, by || DEFAULT_ACTOR, opts);
-  } catch (e) {
-    console.error("[rewards] ledger post failed for quote", q.id, e);
-  }
 }
 
 /** #293 slice 2: the system library indexes sent/won quotes — a real status
@@ -2778,7 +2436,6 @@ export async function setQuotePeople(
 export async function remove(id: string, by?: string | null): Promise<void> {
   const q = await getDoc<Quote>("quotes", id);
   await softDeleteDoc("quotes", id);
-  if (q) await reconcileRewardsSafely(q, by, { deleted: true });
   await invalidateSystemLibrarySafely();
 }
 

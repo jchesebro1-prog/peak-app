@@ -10,10 +10,7 @@ import { verifyPrintToken } from "@/lib/quote-pdf/token";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getSettings } from "@/lib/settings";
-import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { documentAddressee } from "@/lib/parties/addressee-server";
-import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
-import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoDataUris, loadKeyProductModels } from "@/lib/narrative/photos";
 import { normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { quoteAsOfRevision } from "@/lib/quote-share/view";
@@ -91,13 +88,11 @@ export default async function PrintQuotePage({
     origin = "origin" in where ? where.origin : "";
     if ("error" in where) console.warn("[quote-pdf] no print origin — the PDF has no datasheet links", id, where.error);
   }
-  const [addressee, cust, settings, perks, cutSheets, links] = await Promise.all([
+  const [addressee, cust, settings, cutSheets, links] = await Promise.all([
     // Strict: an explicit bidder that is no longer a live bidder on this quote (deleted since signing) is a 404, never the awarded default.
     bidder ? documentAddressee(src, bidder, { strict: true }) : documentAddressee(q),
     getCustomer(src.customerId),
     getSettings(),
-    // #282 perks+points — the customer's purchase perks line (program on only).
-    purchasePerksForCompany(src.customerId),
     // #292 — Client-style cut sheets after the estimate, only when the quote asks for them. A failure or a slow load (8 s) drops them, never the PDF — and says so in the server log.
     !bomLayout && part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets ? settleWithin(loadCutSheets(id, { images: "data" }), CUT_SHEET_APPEND_LOAD_MS, `[cutsheets] estimate PDF ${id}`) : null,
     // Spec 2026-10-16 §5 — the datasheet links: the customer PDF only (never a bidder's), never in the "main" part.
@@ -116,7 +111,7 @@ export default async function PrintQuotePage({
         <style>{QUOTE_PRINT_CSS}</style>
         {/* The BOM tab's own layout (web: no title page, the investment band kept) — Jeff, 2026-10-20. */}
         <style>{QUOTE_WEB_EMBED_CSS}</style>
-        <QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout="web" rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+        <QuoteDocument {...bomViewProps(doc)} bomModelParts={bomModelParts} layout="web" />
       </main>
     );
   }
@@ -132,7 +127,7 @@ export default async function PrintQuotePage({
       <style>{QUOTE_PRINT_CSS}</style>
       {part !== "tail" && (
         <>
-          <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} keyProductModels={keyProductModels} rewardsLine={rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : ""} />
+          <QuoteDocument {...doc} keyProductPhotos={keyProductPhotos} keyProductModels={keyProductModels} />
           {/* #292 — its own page after the estimate; the Client resets (width/padding) ride along. */}
           {cutSheets?.ok && cutSheets.models.client.length > 0 && (
             <div style={{ breakBefore: "page" }}>

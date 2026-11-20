@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
-import { PartPicker } from "@/app/(app)/design/grid/settings/equipment-map/part-picker";
+import { PartPicker } from "@/components/part-picker";
 import {
   DEFAULT_CABLE_ALLOWANCE_FT, LINESET_ROLES, LINESET_ROLE_NAMES, LINESET_ROLE_NOTES, RIGGING_LIMITS, isFootUnit, linesetTypeProblems, sanitizeLinesetType,
   type LinesetRole, type LinesetSource, type LinesetType,

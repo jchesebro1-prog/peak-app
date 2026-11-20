@@ -10,8 +10,7 @@ import { logPriceListAction } from "../actions";
 
 /**
  * #122 — Price lists: the ledger (received, effective, note, logged by) and
- * the "Log price list" form. Saving re-evaluates the status and the owner
- * task server-side (logPriceListAction → ensureVendorAssignments) and
+ * the "Log price list" form. Saving re-evaluates the status server-side and
  * router.refresh() re-renders the header chip. Date rule only — no file.
  */
 
@@ -86,7 +85,6 @@ export default function PriceListsTab({
           <button type="button" className="pk-btn-accent" disabled={pending} onClick={submit} style={{ opacity: pending ? 0.55 : 1 }}>
             {pending ? "Logging…" : "Log price list"}
           </button>
-          <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>Logging a list newer than the catalog creates the catalog owner’s task right away.</span>
           {err && <span style={{ fontSize: 12, color: "#b4543a" }}>{err}</span>}
         </div>
       </div>

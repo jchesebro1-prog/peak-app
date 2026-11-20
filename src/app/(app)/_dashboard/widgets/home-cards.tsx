@@ -5,66 +5,22 @@
  * through ctx.data so a store loads once per request however many widgets
  * share it.
  */
-import { Suspense, type ComponentProps } from "react";
-import { after } from "next/server";
-import { savePlanPins } from "@/lib/task-plan/load";
-import { todayRows } from "@/lib/task-plan/today";
-import { designBudgetLabel, designNeedsPart, designRefreshHint } from "@/lib/design/scope-targets";
-import { designOpenHref } from "@/lib/design/design-links";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
-import { timeAgo as designTimeAgo } from "@/lib/stores/designs";
-import { stageMeta as surveyStageMeta, timeAgo as surveyTimeAgo } from "@/lib/stores/surveys";
 import {
   followUpInfo, sla as leadSla, sourceMeta, stageMeta as leadStageMeta, dueLabel, dateLabel,
   timeAgo as leadTimeAgo, type LeadRecord,
 } from "@/lib/stores/leads";
-import { boxMeta, waitingSince, waitLabel as commWaitLabel } from "@/lib/stores/comms";
 import { priceBooks } from "@/lib/catalog-books";
-import { queueCardCounts, queueDueLabel } from "@/lib/queue";
-import { taskHref } from "@/lib/calendar-tasks";
-import { MEETINGS_BASE_HREF, meetingsHref } from "@/app/(app)/inbox/meetings/format";
-import { recordableParentIds } from "@/app/(app)/recordings/data";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor, shortMoney } from "@/lib/dashboard/home-metrics";
 import { tile } from "./tile";
-import HomeToday from "../../home-today";
-import HomeQueue, { type QueueRow } from "../../home-queue";
-import HomeInbox from "../../home-inbox";
 import HomeMyLeads, { type LeadGroup, type LeadRow } from "../../home-my-leads";
-import HomeMyDesigns, { type DesignCard } from "../../home-my-designs";
-import { estimateLinksForDesigns } from "@/lib/design/estimate-links-server";
 import HomePipeline, { type PipelineRow } from "../../home-pipeline";
 import HomeCatalog from "../../home-catalog";
-import HomeCalendar from "../../home-calendar";
-import HomeVenueAssessments, { type SurveyCard } from "../../home-venue-assessments";
 import HomeTeamActivity, { type TeamActivityRow } from "../../home-team-activity";
 import HomeNeedsAttention from "../../home-needs-attention";
 
 const stats = async (ctx: WidgetCtx) => myQuoteStats(await ctx.data.quotes(), ctx.user.name);
-
-/** The Today card's body. An async child of a Suspense boundary so Home's other cards paint without waiting on the
- *  Google read; because the boundary swallows nothing for us (Home has no error.tsx and WidgetHost's try/catch no
- *  longer covers a streamed child), it catches its own failure. `ctx.data.taskPlan()` is `once()`d — one plan per render. */
-async function TodayPlanCard({ ctx }: { ctx: WidgetCtx }) {
-  let props: ComponentProps<typeof HomeToday> = { rows: [], atRiskCount: 0, note: null, failed: true };
-  try {
-    const state = await ctx.data.taskPlan();
-    if (state.status === "none") props = { rows: [], atRiskCount: 0, note: null };
-    else if (state.status === "ok") {
-      const { plan } = state;
-      // The owner's own view: the only kind that locks this person's started pins (D797).
-      after(() => savePlanPins([plan], { persistStartedFor: ctx.user.id }));
-      props = { rows: todayRows(plan.result, ctx.now), atRiskCount: plan.result.atRisk.length, note: plan.note ?? null };
-    }
-  } catch (err) {
-    console.error("[task-plan] Today card failed", err);
-  }
-  return <HomeToday {...props} />;
-}
-
-const TODAY_FALLBACK = (
-  <div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Planning today…</div>
-);
 
 export const HOME_RENDERERS = {
   /* ---- stat tiles (page.tsx 213-218) ---- */
@@ -85,52 +41,6 @@ export const HOME_RENDERERS = {
     return tile("Avg quote", shortMoney(s.avg), `${s.myQuotes.length} total`);
   },
 
-  /* ---- my queue (page.tsx 186-197) — `now` is the host's single read ---- */
-  "my-queue": async (ctx) => {
-    const [items, waitingTasks] = await Promise.all([ctx.data.queueItems(), ctx.data.waitingOnOthers()]);
-    const { open, overdue } = queueCardCounts(items, ctx.now);
-    const rows: QueueRow[] = items.slice(0, 5).map((it) => ({
-      key: it.key, title: it.title, context: it.context, dueLabel: queueDueLabel(it.due, ctx.now).text, href: it.href,
-    }));
-    // #323 — "Waiting on customer" nudges, grouped apart from my own to-dos
-    const waiting: QueueRow[] = waitingTasks.slice(0, 5).map((t) => ({
-      key: "waiting:" + t.id,
-      title: t.title,
-      context: `Waiting on ${t.waitingOn?.name || "customer"}`,
-      dueLabel: t.dueAt ? queueDueLabel(t.dueAt, ctx.now).text : "",
-      href: t.meetingId ? meetingsHref(MEETINGS_BASE_HREF, "filed", t.meetingId) : taskHref(t) || "/calendar",
-    }));
-    return <HomeQueue open={open} overdue={overdue} rows={rows} waiting={waiting} waitingTotal={waitingTasks.length} />;
-  },
-
-  /* ---- Today (spec 2026-10-09 auto task calendar) — computing the plan
-     saves its new started pins after the response, like /calendar ---- */
-  "today-plan": async (ctx) => (
-    <Suspense fallback={TODAY_FALLBACK}>
-      <TodayPlanCard ctx={ctx} />
-    </Suspense>
-  ),
-
-  /* ---- inbox (page.tsx 476-501) ---- */
-  inbox: async (ctx) => {
-    const [needsThreads, inboxUnread, boxCountsArr] = await Promise.all([
-      ctx.data.needsThreads(), ctx.data.inboxUnread(), ctx.data.boxCounts(),
-    ]);
-    const inboxItems = needsThreads.slice(0, 4).map((t) => {
-      const bm = boxMeta(t.mailbox || "info", t.mailboxUser || undefined, { userColor: ctx.user.color });
-      return {
-        id: t.id, href: `/inbox?thread=${encodeURIComponent(t.id)}`,
-        customer: t.customer || t.contactName || "Customer", subject: t.subject || "(no subject)",
-        wait: commWaitLabel(waitingSince(t)), unread: !!t.unread, channel: t.channel,
-        boxTag: bm?.label || "", boxColor: bm?.color || "#8c919c",
-      };
-    });
-    const inboxBoxes = ctx.data.boxes.map((b, i) => ({
-      id: b.id, label: b.kind === "personal" ? "My inbox" : b.label, color: b.color,
-      href: `/inbox?box=${b.id}`, waiting: boxCountsArr[i]?.waiting || 0,
-    }));
-    return <HomeInbox inboxNeedsCount={needsThreads.length} inboxUnread={inboxUnread} inboxItems={inboxItems} inboxBoxes={inboxBoxes} />;
-  },
 
   /* ---- my leads (page.tsx 363-425) — leadChip/leadSub resolved into rows ---- */
   "my-leads": async (ctx) => {
@@ -177,31 +87,6 @@ export const HOME_RENDERERS = {
     return <HomeMyLeads myFollowCount={myFollowUps.length} leadGroups={leadGroups} />;
   },
 
-  /* ---- my designs (page.tsx 427-441) ---- */
-  "my-designs": async (ctx) => {
-    const designsAll = await ctx.data.designs();
-    const mine = designsAll.filter((d) => d.owner === ctx.user.name);
-    // #316: a design that draws an Estimator quote offers "Open estimate →", not Add to Quotes (one batched read).
-    const estimateLinks = await estimateLinksForDesigns(mine);
-    const cards: DesignCard[] = mine.map((d) => ({
-      estimate: estimateLinks[d.id] ? { number: estimateLinks[d.id].number, href: estimateLinks[d.id].href } : undefined,
-      id: d.id, venue: d.venue || "—", name: d.name,
-      tier: (d.tier || "better").replace(/^./, (c) => c.toUpperCase()),
-      // #211 final review I1: the shared label — "Incomplete" while any line
-      // of the saved tier still needs a part, never a partial dollar figure.
-      budget: designBudgetLabel(d, shortMoney),
-      incomplete: designNeedsPart(d) > 0,
-      // #211 wave 2 (M5): an incomplete Quick design's stored price is from
-      // its last save — say how to refresh it once the rows are mapped.
-      hint: designRefreshHint(d) || undefined,
-      meta: `${d.id} · ${d.width || "?"}' × ${d.depth || "?"}' × ${d.grid || "?"}'`,
-      systemsLabel: `${(d.systems || []).length} systems`, edited: designTimeAgo(d.updatedAt),
-      // #211 final review I2: a Grid (manual-layout) design opens in The Grid.
-      openHref: designOpenHref(d),
-    }));
-    return <HomeMyDesigns cards={cards} />;
-  },
-
   /* ---- my pipeline (page.tsx 220-244) — ?pipe stays URL state ---- */
   "my-pipeline": async (ctx) => {
     const s = await stats(ctx);
@@ -220,39 +105,12 @@ export const HOME_RENDERERS = {
     return <HomeCatalog books={priceBooks(parts, await ctx.data.settings())} partCount={parts.length} />;
   },
 
-  /* ---- calendar (D77) ---- */
-  calendar: async (ctx) => {
-    const { gmailOn, calendarOn, items } = await ctx.data.agenda();
-    let recordVisitIds: string[] = [];
-    try {
-      recordVisitIds = await recordableParentIds("site_visit", items.filter((item) => item.source === "visit").map((item) => item.id));
-    } catch {
-      recordVisitIds = [];
-    }
-    return <HomeCalendar items={items} calendarOn={calendarOn} gmailOn={gmailOn} recordVisitIds={recordVisitIds} />;
-  },
-
-  /* ---- venue assessments (page.tsx 459-474) ---- */
-  "venue-assessments": async (ctx) => {
-    const surveysAll = await ctx.data.surveys();
-    const surveyCards: SurveyCard[] = surveysAll.slice(0, 3).map((s) => ({
-      id: s.id, mono: (s.customer || "FS").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "FS",
-      customer: s.customer || "Untitled survey", sub: `${s.id} · ${s.venueType || "—"} · ${surveyTimeAgo(s.updatedAt)}`,
-      href: `/venue-assessments?id=${encodeURIComponent(s.id)}`, stage: surveyStageMeta(s.stage || "requested"),
-    }));
-    const surveyPendingCount = surveysAll.filter((s) => s.syncState === "pending" || s.syncState === "syncing").length;
-    return <HomeVenueAssessments surveyCards={surveyCards} surveyPendingCount={surveyPendingCount} />;
-  },
-
   /* ---- team activity (page.tsx 179-181, 443-457) ---- */
   "team-activity": async (ctx) => {
     const me = ctx.user.name;
-    const [quotesAll, designsAll, roster] = await Promise.all([ctx.data.quotes(), ctx.data.designs(), ctx.data.roster()]);
+    const [quotesAll, roster] = await Promise.all([ctx.data.quotes(), ctx.data.roster()]);
     const ident = new Map(roster.map((u) => [u.name, { initials: u.initials, color: u.color }]));
-    const rows: TeamActivityRow[] = [
-      ...quotesAll.filter((q) => q.owner !== me).map((q) => ({ ts: q.updatedAt, who: q.owner, kind: "Quote", verb: "updated", name: q.name })),
-      ...designsAll.filter((d) => d.owner !== me).map((d) => ({ ts: d.updatedAt, who: d.owner, kind: "Design", verb: "designed", name: d.name })),
-    ]
+    const rows: TeamActivityRow[] = quotesAll.filter((q) => q.owner !== me).map((q) => ({ ts: q.updatedAt, who: q.owner, kind: "Quote", verb: "updated", name: q.name }))
       .sort((a, b) => (b.ts || 0) - (a.ts || 0))
       .slice(0, 5)
       .map((t) => ({ ...t, initials: ident.get(t.who)?.initials || deriveInitials(t.who), color: ident.get(t.who)?.color || fallbackColor(t.who) }));
@@ -261,8 +119,8 @@ export const HOME_RENDERERS = {
 
   /* ---- needs attention (page.tsx 246-335) ---- */
   "needs-attention": async (ctx) => {
-    const [quotesAll, designsAll] = await Promise.all([ctx.data.quotes(), ctx.data.designs()]);
-    const { alerts } = homeAlerts(quotesAll, designsAll, ctx.user.name, ctx.now, sheetHrefFor(resolvePipe(ctx.sp.pipe)), can("approve", ctx.user.roles));
+    const quotesAll = await ctx.data.quotes();
+    const { alerts } = homeAlerts(quotesAll, ctx.user.name, ctx.now, sheetHrefFor(resolvePipe(ctx.sp.pipe)), can("approve", ctx.user.roles));
     return <HomeNeedsAttention alerts={alerts} />;
   },
 } satisfies Record<string, WidgetRenderer>;

@@ -111,10 +111,6 @@ export function ownerConflict(existing: readonly Party[], input: Pick<PartyInput
  *  system's new estimate) copies every row without a bid state — bidders are per estimate. Nothing else carries. */
 export function carriesTo(from: PartyRecordType, to: PartyRecordType, p: Pick<Party, "role"> & { bid?: unknown }): boolean {
   if (from === "lead" && to === "quote") return p.role !== "gc" && p.role !== "ec";
-  if (from === "quote" && to === "project") {
-    const r = (p.bid as BidderState | null | undefined)?.result;
-    return r !== "lost" && r !== "withdrew" && r !== "no_bid";
-  }
   if (from === "quote" && to === "quote") return p.bid == null;
   return false;
 }

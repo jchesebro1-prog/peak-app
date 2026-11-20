@@ -6,7 +6,6 @@ import {
   clearDemoDataAction,
   geocodeBatchAction,
   saveSettingsAction,
-  setRecordingsBetaUsersAction,
   travelCoverageAction,
 } from "../actions";
 import AddressesToVerify from "../addresses-to-verify";
@@ -15,22 +14,19 @@ import { DocumentCategoriesCard } from "../document-categories-card";
 import type { DocumentCategory } from "@/lib/document-categories";
 import { GROUP_LINKS } from "../settings-sections";
 import { inputStyle, labelStyle, LinkTiles, Toggle, type Run } from "./shared";
-import type { AssistVM, CompanySettingsVM, UserVM } from "./types";
-import { AssistPilotCard } from "./assist-pilot";
+import type { CompanySettingsVM, UserVM } from "./types";
 
 /**
  * Settings → Data & Tools (settings cleanup): the Import / Export, Task
  * Templates and Grid Settings shortcut row, Document categories, and the Beta
- * card (demo data, travel-time geocode, go-live Clear demo data, Recordings
- * pilot, feedback email). Moved verbatim from the old settings-client.tsx
+ * card (demo data, travel-time geocode, go-live Clear demo data, feedback
+ * email). Moved verbatim from the old settings-client.tsx
  * Admin section.
  */
 export function DataGroup({
   settings,
   users,
   documentCategories,
-  recordingsBetaUsers,
-  assist,
   run,
   setError,
 }: {
@@ -38,10 +34,6 @@ export function DataGroup({
   users: UserVM[];
   /** #218 — resolved, archived included. */
   documentCategories: DocumentCategory[];
-  /** Recordings pilot gate (spec §1.3) — user ids allowed to see Record. */
-  recordingsBetaUsers: string[];
-  /** #334 Assist pilot card + report; null while another group is open. */
-  assist: AssistVM | null;
   run: Run;
   setError: (msg: string | null) => void;
 }) {
@@ -49,10 +41,6 @@ export function DataGroup({
   const [, startTransition] = useTransition();
   const saveSetting = (patch: Parameters<typeof saveSettingsAction>[0]) =>
     run(() => saveSettingsAction(patch));
-  const [betaUsers, setBetaUsers] = useState<string[]>(recordingsBetaUsers);
-  const betaDirty =
-    [...betaUsers].sort().join(",") !== [...recordingsBetaUsers].sort().join(",");
-
   // ---- Go-live: clear demo data ----
   const [clearOpen, setClearOpen] = useState(false);
 
@@ -248,10 +236,10 @@ export function DataGroup({
             <div>
               <div style={{ fontSize: 13.5, fontWeight: 600 }}>Clear demo data (go-live)</div>
               <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2, maxWidth: 460 }}>
-                Permanently removes every demo customer, lead, quote, project,
-                flame test, inspection, survey and catalog part so you can
+                Permanently removes every demo customer, lead, quote and
+                catalog part so you can
                 import your real data into a clean database. Keeps your team,
-                company settings, estimating rates and mailbox connections.
+                company settings and estimating rates.
                 This cannot be undone — export a backup first.
               </div>
             </div>
@@ -318,53 +306,6 @@ export function DataGroup({
             </div>
           )}
         </div>
-
-        {/* Recordings pilot gate (spec §1.3 / §7) */}
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7" }}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontSize: 13.5, fontWeight: 600 }}>Recordings pilot</div>
-              <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2, maxWidth: 460 }}>
-                Who sees the Record button on site visits, surveys, inspections and jobs.
-                Nobody checked = everyone with a Krisp key.
-              </div>
-            </div>
-            <button
-              className="pk-btn-accent"
-              disabled={!betaDirty}
-              style={!betaDirty ? { opacity: 0.5, cursor: "not-allowed", whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}
-              onClick={() => run(() => setRecordingsBetaUsersAction(betaUsers))}
-            >
-              Save
-            </button>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
-            {users
-              .filter((u) => u.status === "active")
-              .map((u) => {
-                const on = betaUsers.includes(u.id);
-                return (
-                  <label
-                    key={u.id}
-                    style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: "pointer" }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={(e) =>
-                        setBetaUsers((prev) =>
-                          e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
-                        )
-                      }
-                    />
-                    {u.name}
-                  </label>
-                );
-              })}
-          </div>
-        </div>
-
-        {assist && <AssistPilotCard key={assist.month} assist={assist} users={users} run={run} />}
 
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f7", maxWidth: 380 }}>
           <label style={labelStyle}>Feedback email</label>

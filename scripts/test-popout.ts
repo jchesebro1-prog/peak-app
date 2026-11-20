@@ -45,12 +45,11 @@ import {
   geoFromWindow,
   isPopoutClick,
   parseSavedGeo,
-  threadPopUrl,
 } from "@/lib/popout/click";
 import { handlePopoutClick, openPopout, savePopGeometry } from "@/lib/popout/open";
 import { NAV_POPOUT } from "@/components/nav/nav-data";
 import { readFileSync, existsSync } from "node:fs";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 
 function memStorage(seed: Record<string, string> = {}): IdStorage & { data: Record<string, string> } {
   const data = { ...seed };
@@ -76,18 +75,16 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(!!p && p.kind === kind && p.id === "abc-1", `popout: ${kind} name round-trips`);
     ok(isPopName(n), `popout: isPopName(${kind})`);
   }
-  const colon = parsePopName(popName("thread", "gmail:18f:3"));
-  ok(!!colon && colon.kind === "thread" && colon.id === "gmail:18f:3", "popout: an id containing colons round-trips");
-  ok(parsePopName("peak-pop:inbox:box")?.id === "box", "popout: the whole-Inbox window id is \"box\"");
+  const colon = parsePopName(popName("estimate", "gmail:18f:3"));
+  ok(!!colon && colon.kind === "estimate" && colon.id === "gmail:18f:3", "popout: an id containing colons round-trips");
   ok(parsePopName("") === null && parsePopName(null) === null && parsePopName(undefined) === null, "popout: empty / null names parse to null");
   ok(parsePopName("peak-pop:bogus:1") === null, "popout: an unknown kind parses to null");
-  ok(parsePopName("peak-pop:thread") === null && parsePopName("peak-pop:thread:") === null && parsePopName("peak-pop::x") === null, "popout: a malformed name parses to null");
+  ok(parsePopName("peak-pop:thread") === null && parsePopName("peak-pop:estimate:") === null && parsePopName("peak-pop::x") === null, "popout: a malformed name parses to null");
   ok(parsePopName("other:thread:1") === null && !isPopName("other:thread:1") && !isPopName("") && !isPopName(null), "popout: a non-pop name is not a pop name");
 
   /* geometry */
   ok(DEFAULT_GEO.estimate.width === 1100 && DEFAULT_GEO.estimate.height === 800, "popout: estimate default is 1100x800");
   ok(DEFAULT_GEO.customer.width === 900 && DEFAULT_GEO.customer.height === 800, "popout: customer default is 900x800");
-  ok(DEFAULT_GEO.thread.width === 760 && DEFAULT_GEO.inbox.width === 760 && DEFAULT_GEO.thread.height === 800 && DEFAULT_GEO.inbox.height === 800, "popout: thread and inbox defaults are 760x800");
   ok(geoKey("estimate") === "peak-pop-geo:estimate", "popout: geoKey is peak-pop-geo:<kind>");
 
   const dflt = clampGeo(null, SCREEN, "estimate");
@@ -95,34 +92,34 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   ok(dflt.left === Math.round((1440 - 1100) / 2) && dflt.top === Math.round(25 + (875 - 800) / 2), "popout: the default is centred on the screen");
   const bad = clampGeo({ left: NaN, top: 5, width: 0, height: -3 }, SCREEN, "customer");
   ok(bad.width === 900 && bad.height === 800, "popout: unusable saved sizes fall back to the default");
-  const kept = clampGeo({ left: 100, top: 100, width: 700, height: 600 }, SCREEN, "thread");
+  const kept = clampGeo({ left: 100, top: 100, width: 700, height: 600 }, SCREEN, "estimate");
   ok(kept.left === 100 && kept.top === 100 && kept.width === 700 && kept.height === 600, "popout: an on-screen saved geometry is kept");
-  const offRight = clampGeo({ left: 5000, top: 100, width: 700, height: 600 }, SCREEN, "thread");
+  const offRight = clampGeo({ left: 5000, top: 100, width: 700, height: 600 }, SCREEN, "estimate");
   ok(offRight.left === 1440 - 100, "popout: a window saved off the right edge keeps 100px visible");
-  const offLeft = clampGeo({ left: -3000, top: 100, width: 700, height: 600 }, SCREEN, "thread");
+  const offLeft = clampGeo({ left: -3000, top: 100, width: 700, height: 600 }, SCREEN, "estimate");
   ok(offLeft.left + offLeft.width === 100, "popout: a window saved off the left edge keeps 100px visible");
-  const offBelow = clampGeo({ left: 100, top: 9000, width: 700, height: 600 }, SCREEN, "thread");
+  const offBelow = clampGeo({ left: 100, top: 9000, width: 700, height: 600 }, SCREEN, "estimate");
   ok(offBelow.top === 25 + 875 - 100, "popout: a window saved below the screen keeps 100px visible");
-  const offAbove = clampGeo({ left: 100, top: -500, width: 700, height: 600 }, SCREEN, "thread");
+  const offAbove = clampGeo({ left: 100, top: -500, width: 700, height: 600 }, SCREEN, "estimate");
   ok(offAbove.top === 25, "popout: a window saved above the screen top is pulled to the top");
   const big = clampGeo({ left: 0, top: 0, width: 5000, height: 4000 }, SCREEN, "estimate");
   ok(big.width === 1440 && big.height === 875, "popout: an oversized saved window is capped to the screen");
-  const second = clampGeo({ left: 3000, top: 100, width: 700, height: 600 }, { availLeft: 1440, availTop: 0, availWidth: 1920, availHeight: 1080 }, "thread");
+  const second = clampGeo({ left: 3000, top: 100, width: 700, height: 600 }, { availLeft: 1440, availTop: 0, availWidth: 1920, availHeight: 1080 }, "estimate");
   ok(second.left === 3000, "popout: a window on a second screen to the right is kept");
   const small = clampGeo(null, { availLeft: 0, availTop: 0, availWidth: 600, availHeight: 500 }, "estimate");
   ok(small.width === 600 && small.height === 500 && small.left === 0 && small.top === 0, "popout: the default shrinks to a small screen and fills it");
   const LEFT_SCREEN = { availLeft: -1920, availTop: 0, availWidth: 1920, availHeight: 1080 };
-  const onLeft = clampGeo({ left: -1500, top: 100, width: 700, height: 600 }, LEFT_SCREEN, "thread");
+  const onLeft = clampGeo({ left: -1500, top: 100, width: 700, height: 600 }, LEFT_SCREEN, "estimate");
   ok(onLeft.left === -1500 && onLeft.top === 100, "popout: a window on a screen left of the primary (negative origin) is kept");
-  const pastLeft = clampGeo({ left: -9000, top: 100, width: 700, height: 600 }, LEFT_SCREEN, "thread");
+  const pastLeft = clampGeo({ left: -9000, top: 100, width: 700, height: 600 }, LEFT_SCREEN, "estimate");
   ok(pastLeft.left === -1920 + 100 - 700, "popout: negative origin — saved past the left edge keeps 100px visible");
-  const pastRight = clampGeo({ left: 500, top: 100, width: 700, height: 600 }, LEFT_SCREEN, "thread");
+  const pastRight = clampGeo({ left: 500, top: 100, width: 700, height: 600 }, LEFT_SCREEN, "estimate");
   ok(pastRight.left === -100, "popout: negative origin — saved past that screen's right edge keeps 100px visible");
   const centredLeft = clampGeo(null, LEFT_SCREEN, "customer");
   ok(centredLeft.left === -1920 + (1920 - 900) / 2, "popout: negative origin — the default centres on that screen");
-  const tiny = clampGeo({ left: 100, top: 100, width: 50, height: 40 }, SCREEN, "thread");
+  const tiny = clampGeo({ left: 100, top: 100, width: 50, height: 40 }, SCREEN, "estimate");
   ok(tiny.width === 320 && tiny.height === 240, "popout: a saved size below 320x240 reopens at 320x240");
-  const tinyScreen = clampGeo({ left: 0, top: 0, width: 50, height: 40 }, { availLeft: 0, availTop: 0, availWidth: 300, availHeight: 200 }, "thread");
+  const tinyScreen = clampGeo({ left: 0, top: 0, width: 50, height: 40 }, { availLeft: 0, availTop: 0, availWidth: 300, availHeight: 200 }, "estimate");
   ok(tinyScreen.width === 300 && tinyScreen.height === 200, "popout: the 320x240 minimum is still capped to a smaller screen");
   ok(featuresFor({ left: 10, top: 20, width: 760, height: 800 }) === "popup=yes,left=10,top=20,width=760,height=800", "popout: featuresFor builds the window.open features string");
 
@@ -237,9 +234,9 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(windowIdFor("", s) === main, "popout: the same window (same name) keeps its id across reloads");
     // A pop-out opened from main: sessionStorage copied from the opener, but window.name is peak-pop:…
     const popStore = memStorage({ [WINDOW_ID_KEY]: JSON.stringify({ id: main, name: "" }) });
-    const pop = windowIdFor("peak-pop:thread:T-1", popStore);
+    const pop = windowIdFor("peak-pop:estimate:T-1", popStore);
     ok(pop !== main, "popout: a pop-out whose storage was copied from main (main's id pre-seeded) gets a different id");
-    ok(JSON.parse(popStore.data[WINDOW_ID_KEY]).name === "peak-pop:thread:T-1" && windowIdFor("peak-pop:thread:T-1", popStore) === pop, "popout: the pop-out's own id is then stable across its reloads");
+    ok(JSON.parse(popStore.data[WINDOW_ID_KEY]).name === "peak-pop:estimate:T-1" && windowIdFor("peak-pop:estimate:T-1", popStore) === pop, "popout: the pop-out's own id is then stable across its reloads");
     // Documented, accepted: a duplicated unnamed tab copies {id, name:""} and keeps main's id.
     const dupStore = memStorage({ [WINDOW_ID_KEY]: JSON.stringify({ id: main, name: "" }) });
     ok(windowIdFor("", dupStore) === main, "popout: a duplicated unnamed tab keeps the same id (documented: the pair ignore each other's posts; focus refresh covers them)");
@@ -268,7 +265,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   ok(!isEditableTarget({ tagName: "INPUT", type: "checkbox" }) && !isEditableTarget({ tagName: "INPUT", type: "button" }) && !isEditableTarget({ tagName: "BUTTON" }) && !isEditableTarget(null), "popout: checkboxes, buttons and nothing are not editable");
   ok(!isEditableTarget({ tagName: "INPUT", type: "text", readOnly: true }) && !isEditableTarget({ tagName: "TEXTAREA", disabled: true }), "popout: read-only and disabled fields are not editable");
   const ORIGIN = "https://app.example.test";
-  ok(toAppPath(`${ORIGIN}/inbox?thread=T-1#m2`, ORIGIN) === "/inbox?thread=T-1#m2", "popout: open-in-main keeps path, query and hash");
+  ok(toAppPath(`${ORIGIN}/estimator?id=T-1#m2`, ORIGIN) === "/estimator?id=T-1#m2", "popout: open-in-main keeps path, query and hash");
   ok(toAppPath("/estimator?id=Q-1", ORIGIN) === "/estimator?id=Q-1", "popout: a relative open-in-main URL resolves on this origin");
   ok(toAppPath("https://evil.example/x", ORIGIN) === null && toAppPath("javascript:alert(1)", ORIGIN) === null, "popout: open-in-main never navigates off this origin");
   ok(shouldAnswerOpenInMain("w1", null) && shouldAnswerOpenInMain("w1", "{bad") && shouldAnswerOpenInMain("w1", JSON.stringify({ at: 1 })), "popout: with no (readable) last-focused record every main window answers");
@@ -285,7 +282,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   ok((appLayout.match(/<PopHeader \/>/g) || []).length === 1 && (appLayout.match(/<LiveSync \/>/g) || []).length === 1, "popout: PopHeader and LiveSync are mounted exactly once in the (app) layout");
   ok(/<PopHeader \/>\s*<main className="pk-main">/.test(appLayout), "popout: PopHeader sits above pk-main inside the shell");
   ok(!existsSync("src/components/inbox-changed-listener.tsx"), "popout: the old inbox-changed listener is removed");
-  ok(!readSrc("src/app/(app)/page.tsx").includes("InboxChangedListener") && !readSrc("src/app/(app)/inbox/inbox-shell.tsx").includes("InboxChangedListener"), "popout: Home and the Inbox shell no longer mount the old listener");
+  ok(!readSrc("src/app/(app)/page.tsx").includes("InboxChangedListener"), "popout: Home and the Inbox shell no longer mount the old listener");
   const live = readSrc("src/components/popout/live-sync.tsx");
   const header = readSrc("src/components/popout/pop-header.tsx");
   ok(live.startsWith('"use client";') && header.startsWith('"use client";'), "popout: LiveSync and PopHeader are client components");
@@ -310,16 +307,13 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
   ok(/@media \(max-width: 899px\) \{\s*\.pk-popout-affordance \{\s*display: none !important;/.test(css) && /html\.pk-native \.pk-popout-affordance \{\s*display: none !important;/.test(css), "popout: pop-out affordances hide below 900 px and in the native shell");
   ok(/@media \(hover: none\) \{\s*\.pk-nav-pop \{\s*opacity: 1;/.test(css), "popout: the nav ⧉ stays visible on touch screens (no hover)");
 
-  const legacy = parseMessage({ type: "inbox-changed", threadId: "T-1" });
-  ok(!!legacy && legacy.type === "changed" && legacy.entity === "thread" && legacy.id === "T-1", "popout: legacy inbox-changed maps to changed/thread");
-  const legacyAll = parseMessage({ type: "inbox-changed", threadId: "" });
-  ok(!!legacyAll && legacyAll.type === "changed" && legacyAll.entity === "inbox" && legacyAll.id === undefined, "popout: legacy inbox-changed with no thread maps to changed/inbox");
+  ok(parseMessage({ type: "inbox-changed", threadId: "T-1" }) === null, "popout: the retired inbox-changed message is ignored");
   ok(parseMessage({ type: "changed", entity: "quote", id: "Q-1", from: "w" })?.type === "changed", "popout: a well-formed changed message parses");
   ok(parseMessage({ type: "changed", entity: "nope", from: "w" }) === null, "popout: an unknown entity is dropped");
   ok(parseMessage({ type: "changed", entity: "quote" }) === null, "popout: a changed message with no from is dropped");
-  const oim = parseMessage({ type: "open-in-main", url: "/inbox", from: "w" });
-  ok(!!oim && oim.type === "open-in-main" && oim.url === "/inbox", "popout: open-in-main parses");
-  ok(parseMessage({ type: "main-ack", url: "/inbox", from: "w" })?.type === "main-ack", "popout: main-ack parses");
+  const oim = parseMessage({ type: "open-in-main", url: "/quotes", from: "w" });
+  ok(!!oim && oim.type === "open-in-main" && oim.url === "/quotes", "popout: open-in-main parses");
+  ok(parseMessage({ type: "main-ack", url: "/quotes", from: "w" })?.type === "main-ack", "popout: main-ack parses");
   ok(parseMessage(null) === null && parseMessage("x") === null && parseMessage({ type: "zzz", from: "w" }) === null, "popout: junk is dropped");
 
   /* Task 3 — ways to open (spec §1, §3, §4) */
@@ -331,16 +325,15 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(!isPopoutClick(ev({ shiftKey: true, metaKey: true })) && !isPopoutClick(ev({ shiftKey: true, ctrlKey: true })), "popout: Shift with Cmd or Ctrl is not a pop-out click");
     ok(!isPopoutClick(ev({ shiftKey: true, button: 1 })) && !isPopoutClick(ev({ shiftKey: true, button: 2 })), "popout: Shift with the middle or right button is not a pop-out click");
     ok(POP_AFFORDANCE_LABEL === "Open in its own window" && POP_BLOCKED_MESSAGE === "Your browser blocked the window — allow pop-ups for this site." && POP_BLOCKED_MS === 6000, "popout: affordance label, blocked message and 6 s notice");
-    ok(threadPopUrl("gmail:18f/3") === "/inbox?thread=gmail%3A18f%2F3" && customerPopUrl("C 1") === "/companies/C%201", "popout: thread and customer pop-out URLs are encoded");
+    ok(customerPopUrl("C 1") === "/companies/C%201", "popout: thread and customer pop-out URLs are encoded");
     ok(JSON.stringify(parseSavedGeo(JSON.stringify({ left: 1, top: 2, width: 3, height: 4, x: 9 }))) === JSON.stringify({ left: 1, top: 2, width: 3, height: 4 }), "popout: a saved geometry parses its four numbers only");
     ok(parseSavedGeo(null) === null && parseSavedGeo("{bad") === null && parseSavedGeo("[]") === null && parseSavedGeo(JSON.stringify({ left: "1" })) === null, "popout: missing or junk saved geometry parses to null");
     const g = geoFromWindow({ screenX: 10.4, screenY: -20, innerWidth: 800, innerHeight: 600 });
     ok(!!g && g.left === 10 && g.top === -20 && g.width === 800 && g.height === 600, "popout: geoFromWindow saves screen position + inner size (negative origins kept)");
     ok(geoFromWindow({ screenX: 0, screenY: 0, innerWidth: 0, innerHeight: 600 }) === null && geoFromWindow({ screenX: NaN, screenY: 0, innerWidth: 1, innerHeight: 1 }) === null, "popout: an empty or junk frame is not saved");
-    ok(NAV_POPOUT.inbox.kind === "inbox" && NAV_POPOUT.inbox.id === "box" && NAV_POPOUT.inbox.url === "/inbox", "popout: nav Inbox ⧉ opens inbox:box at /inbox");
     ok(NAV_POPOUT.estimator.kind === "estimate" && NAV_POPOUT.estimator.id === "new" && NAV_POPOUT.estimator.url === "/estimator", "popout: nav Estimator ⧉ opens estimate:new at /estimator");
     ok(NAV_POPOUT.companies.kind === "customer" && NAV_POPOUT.companies.id === "list" && NAV_POPOUT.companies.url === "/companies", "popout: nav Customers ⧉ opens customer:list at /companies");
-    ok(Object.keys(NAV_POPOUT).length === 3, "popout: exactly three nav rows carry a ⧉");
+    ok(Object.keys(NAV_POPOUT).length === 2, "popout: exactly two nav rows carry a ⧉");
 
     /* openPopout / handlePopoutClick / savePopGeometry against a fake browser */
     const g0 = globalThis as unknown as Record<string, unknown>;
@@ -394,7 +387,7 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
       openPopout("customer", "C-1", "/companies/C-1");
       ok(calls[2].features === "popup=yes,left=270,top=63,width=900,height=800", "popout: no saved geometry opens the kind's default, centred");
       blockAll = true;
-      ok(openPopout("thread", "T-1", "/inbox?thread=T-1") === false && blocked === 1, "popout: a blocked window returns false and raises the blocked notice");
+      ok(openPopout("estimate", "T-1", "/estimator?id=T-1") === false && blocked === 1, "popout: a blocked window returns false and raises the blocked notice");
       blockAll = false;
 
       let prevented = 0;
@@ -405,33 +398,33 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
         stopPropagation: () => { stopped++; },
       });
       const before = calls.length;
-      ok(!handlePopoutClick(click({}), "thread", "T-2", "/inbox?thread=T-2") && !handlePopoutClick(click({ metaKey: true }), "thread", "T-2", "/x") && !handlePopoutClick(click({ ctrlKey: true }), "thread", "T-2", "/x"), "popout: plain, Cmd and Ctrl clicks are left alone");
+      ok(!handlePopoutClick(click({}), "estimate", "T-2", "/estimator?id=T-2") && !handlePopoutClick(click({ metaKey: true }), "estimate", "T-2", "/x") && !handlePopoutClick(click({ ctrlKey: true }), "estimate", "T-2", "/x"), "popout: plain, Cmd and Ctrl clicks are left alone");
       ok(prevented === 0 && stopped === 0 && calls.length === before, "popout: a click that is left alone is not prevented and opens nothing");
-      ok(handlePopoutClick(click({ shiftKey: true }), "thread", "T-2", "/inbox?thread=T-2") && prevented === 1 && stopped === 1 && calls[calls.length - 1].name === "peak-pop:thread:T-2", "popout: Shift-click prevents the default and opens the pop-out");
+      ok(handlePopoutClick(click({ shiftKey: true }), "estimate", "T-2", "/estimator?id=T-2") && prevented === 1 && stopped === 1 && calls[calls.length - 1].name === "peak-pop:estimate:T-2", "popout: Shift-click prevents the default and opens the pop-out");
       fakeWindow.innerWidth = 800;
-      ok(!handlePopoutClick(click({ shiftKey: true }), "thread", "T-3", "/x") && prevented === 1, "popout: below 900 px Shift-click stays an ordinary click");
+      ok(!handlePopoutClick(click({ shiftKey: true }), "estimate", "T-3", "/x") && prevented === 1, "popout: below 900 px Shift-click stays an ordinary click");
       fakeWindow.innerWidth = 1200;
       classes = ["pk-native"];
-      ok(!handlePopoutClick(click({ shiftKey: true }), "thread", "T-3", "/x") && prevented === 1, "popout: in the native shell Shift-click stays an ordinary click");
+      ok(!handlePopoutClick(click({ shiftKey: true }), "estimate", "T-3", "/x") && prevented === 1, "popout: in the native shell Shift-click stays an ordinary click");
       classes = [];
 
       savePopGeometry();
-      ok(!("peak-pop-geo:thread" in store.data) && Object.keys(store.data).length === 1, "popout: a main window saves no geometry");
-      fakeWindow.name = "peak-pop:thread:T-9";
+      ok(!("peak-pop-geo:customer" in store.data) && Object.keys(store.data).length === 1, "popout: a main window saves no geometry");
+      fakeWindow.name = "peak-pop:customer:T-9";
       savePopGeometry();
-      ok(store.data["peak-pop-geo:thread"] === JSON.stringify({ left: 30, top: 40, width: 1200, height: 700 }), "popout: a pop-out saves its screen position + INNER size (not the outer frame) under its own kind");
+      ok(store.data["peak-pop-geo:customer"] === JSON.stringify({ left: 30, top: 40, width: 1200, height: 700 }), "popout: a pop-out saves its screen position + INNER size (not the outer frame) under its own kind");
       // Round trip: window.open's width/height set the inner size, so reopening
       // with the saved inner size gives back exactly that size — it never grows.
-      openPopout("thread", "T-9", "/inbox?thread=T-9");
+      openPopout("customer", "T-9", "/companies/T-9");
       ok(calls[calls.length - 1].features === "popup=yes,left=30,top=40,width=1200,height=700", "popout: a saved inner size round-trips into window.open unchanged (no growth by the chrome)");
       fakeWindow.innerWidth = 1200;
       fakeWindow.innerHeight = 700;
       savePopGeometry();
-      openPopout("thread", "T-9", "/inbox?thread=T-9");
-      ok(store.data["peak-pop-geo:thread"] === JSON.stringify({ left: 30, top: 40, width: 1200, height: 700 }) && calls[calls.length - 1].features.endsWith("width=1200,height=700"), "popout: save → reopen → save keeps the same size");
+      openPopout("customer", "T-9", "/companies/T-9");
+      ok(store.data["peak-pop-geo:customer"] === JSON.stringify({ left: 30, top: 40, width: 1200, height: 700 }) && calls[calls.length - 1].features.endsWith("width=1200,height=700"), "popout: save → reopen → save keeps the same size");
       g0.localStorage = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
       savePopGeometry();
-      ok(openPopout("inbox", "box", "/inbox") === true && calls[calls.length - 1].features === "popup=yes,left=340,top=63,width=760,height=800", "popout: blocked storage falls back to the defaults without throwing");
+      ok(openPopout("estimate", "new", "/estimator") === true && calls[calls.length - 1].features === "popup=yes,left=170,top=63,width=1100,height=800", "popout: blocked storage falls back to the defaults without throwing");
     } finally {
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete g0[k];
@@ -455,11 +448,6 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(/try \{\s*const features = featuresFor\(clampGeo\(savedGeo\(kind\), openerScreen\(\), kind\)\);\s*w = window\.open\("", name, features\);\s*\} catch/.test(openSrc), "popout: window.open sits in try/catch");
     ok(/try \{\s*return parseSavedGeo\(localStorage\.getItem\(geoKey\(kind\)\)\);\s*\} catch/.test(openSrc) && /try \{[\s\S]*?localStorage\.setItem\(geoKey\(p\.kind\)[\s\S]*?\} catch/.test(openSrc), "popout: geometry localStorage reads and writes sit in try/catch");
 
-    const shell = readSrc("src/app/(app)/inbox/inbox-shell.tsx");
-    ok(/<PopoutButton kind="inbox" id="box" url=\{`\/inbox\?\$\{baseQuery\}`\}/.test(shell), "popout: the Inbox shell header pops the whole box (current box URL)");
-    ok(!/\{!sideCollapsed && \(\s*<PopoutButton kind="inbox"/.test(shell) && shell.includes('flexDirection: sideCollapsed ? "column-reverse" : "row"'), "popout: the whole-box ⧉ also shows in the collapsed sidebar rail (stacked under the toggle)");
-    const reader = readSrc("src/app/(app)/inbox/thread-reader.tsx");
-    ok(reader.includes('<PopoutButton kind="thread" id={vm.id} url={threadPopUrl(vm.id)} />'), "popout: the thread reader header pops that thread");
     const estHeader = readSrc("src/app/(app)/estimator/estimator-header.tsx");
     ok(/\{loadedId && \(\s*<PopoutButton kind="estimate" id=\{loadedId\} url=\{quoteBuilderHref\(\{ id: loadedId \}\)\} tone="dark" \/>\s*\)\}/.test(estHeader), "popout: the Estimator header pops the estimate — only once it has an id");
     const custPage = readSrc("src/app/(app)/companies/[id]/page.tsx");
@@ -467,9 +455,6 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     const nav = readSrc("src/components/nav/Nav.tsx");
     ok(/const pop = NAV_POPOUT\[c\.key\];\s*if \(!pop\) return item;/.test(nav) && /<PopoutButton\s+kind=\{pop\.kind\}\s+id=\{pop\.id\}\s+url=\{pop\.url\}\s+className="pk-nav-pop"\s+onOpen=\{closeAll\}/.test(nav), "popout: the nav dropdown rows for Inbox/Estimator/Companies carry a hover ⧉");
 
-    const list = readSrc("src/app/(app)/inbox/thread-list.tsx");
-    ok(list.includes('if (!r.isDraft && handlePopoutClick(e, "thread", r.id, threadPopUrl(r.id))) return;'), "popout: Shift-click on an Inbox thread row pops the thread (drafts excluded)");
-    ok(/if \(handlePopoutClick\(e, "thread", r\.id, threadPopUrl\(r\.id\)\)\) return;\s*onOpen\(r\.id\);/.test(list), "popout: Shift-click on an Inbox search result pops the thread");
     const hub = readSrc("src/app/(app)/quotes/page.tsx");
     ok(/<PopLink\s+href=\{hrefFor\(\{ id: selected \? null : q\.id, page: paged\.page \}\)\}\s+popKind="estimate"\s+popId=\{q\.id\}\s+popUrl=\{quoteBuilderHref\(q\)\}/.test(hub), "popout: Shift-click on a Quotes hub row pops the estimate");
     ok(/<PopLink\s+href=\{editHrefFor\(q\)\.href\}\s+popKind="estimate"\s+popId=\{q\.id\}/.test(hub), "popout: Shift-click on the hub's Open link pops the estimate");
@@ -496,65 +481,9 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
 
   /* Task 4 — posters: each client site posts `changed` after its action succeeds (spec §5) */
   {
-    // [file, entity, minimum number of postChanged("<entity>", ...) calls]
-    const POSTERS: Array<[string, "quote" | "customer" | "task" | "thread", number]> = [
-      ["src/app/(app)/estimator/use-estimator-state.ts", "quote", 11], // save, status, stage, pipeline, meta, selection, people, bonus split + alternates, move + copy target
-      ["src/components/quote-review/quote-next-step.tsx", "quote", 1], // submit / withdraw / approve / send back / attest / send
-      ["src/app/(app)/estimator/steps/review-sidebar.tsx", "quote", 2], // send back with comments, review comments
-      ["src/app/(app)/estimator/steps/send-composer.tsx", "quote", 2], // send, open in Inbox
-      ["src/app/(app)/estimator/steps/send-activity.tsx", "thread", 2], // reply, mark read
-      ["src/app/(app)/estimator/package-staff-panel.tsx", "quote", 5], // add / remove file, Peak header, drawings, Grid link
-      ["src/app/(app)/estimator/client-link-panel.tsx", "quote", 1],
-      ["src/app/(app)/estimator/comment-pins.tsx", "quote", 1],
-      ["src/app/(app)/estimator/portal-panel.tsx", "quote", 1],
-      ["src/app/(app)/companies/edit-modal.tsx", "customer", 2], // save, delete
-      ["src/app/(app)/companies/venue-dialog.tsx", "customer", 1],
-      ["src/app/(app)/companies/delete-company-button.tsx", "customer", 1],
-      ["src/app/(app)/companies/[id]/activity-composer.tsx", "customer", 1],
-      ["src/app/(app)/companies/[id]/note-delete-button.tsx", "customer", 1],
-      ["src/app/(app)/companies/[id]/portal-access.tsx", "customer", 2],
-      ["src/app/(app)/companies/[id]/logo-card.tsx", "customer", 2],
-      ["src/app/(app)/people/edit-modal.tsx", "customer", 2],
-      ["src/components/documents/documents-card-client.tsx", "customer", 3], // upload, delete, edit
-      ["src/app/(app)/inbox/task-dialog.tsx", "task", 1],
-      ["src/app/(app)/inbox/task-dialog.tsx", "thread", 1],
-      ["src/app/(app)/inbox/assist-tasks-dialog.tsx", "task", 1],
-      ["src/app/(app)/inbox/assist-tasks-dialog.tsx", "thread", 1],
-      ["src/app/(app)/inbox/thread-tasks-card.tsx", "task", 1],
-      ["src/app/(app)/inbox/thread-reader.tsx", "task", 1], // Mark done on reply
-      ["src/app/(app)/inbox/organize/reader-org.tsx", "task", 1], // promise-task undo
-      ["src/app/(app)/queue/view.tsx", "task", 5], // assign, done, delete, reopen, delete done
-      ["src/app/(app)/calendar/task-chip.tsx", "task", 2],
-      ["src/app/(app)/calendar/task-block-popover.tsx", "task", 1],
-      ["src/app/(app)/calendar/at-risk-panel.tsx", "task", 1],
-      ["src/components/tasks-card.tsx", "task", 5], // chips, add, status select, assignee/due select
-    ];
-    for (const [file, entity, min] of POSTERS) {
-      const src = readSrc(file);
-      const n = (src.match(new RegExp(`postChanged\\("${entity}"`, "g")) || []).length;
-      ok(
-        /import \{[^}]*\bpostChanged\b[^}]*\} from "@\/lib\/popout\/channel";/.test(src) && n >= min,
-        `popout: ${file} imports postChanged and posts "${entity}" (${n}/${min})`
-      );
-    }
     // TasksCard's status and assignee selects submit through <form action>; each action is wrapped so a pop-out posts after the write
     {
-      const tc = readSrc("src/components/tasks-card.tsx");
-      ok(
-        /action=\{async \(fd\) => \{\s*await setStatusAction\(fd\);\s*postChanged\("task", t\.id\);/.test(tc) &&
-          /action=\{async \(fd\) => \{\s*await updateAction\(fd\);\s*postChanged\("task", t\.id\);/.test(tc),
-        "popout: TasksCard status + assignee form actions post a task change after the write"
-      );
-      ok(
-        !/<form action=\{(setStatusAction|updateAction)\}/.test(tc) && (tc.match(/requestSubmit\(\)/g) || []).length >= 3,
-        "popout: TasksCard no longer passes a bare action to <form> and still auto-submits on change"
-      );
     }
-    // a poster never fires from render: the only top-level call shapes are inside handlers (indented 4+ spaces)
-    ok(
-      POSTERS.every(([file]) => !/^postChanged\(/m.test(readSrc(file))),
-      "popout: no poster site calls postChanged at module top level"
-    );
   }
 
   /* real BroadcastChannel round trip (Node has one): own posts are ignored, another window's arrive */
@@ -564,13 +493,11 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     postChanged("quote", "Q-9"); // this window's own post: another channel instance in the same context receives it, but the id filter drops it
     const foreign = new BroadcastChannel("peak");
     foreign.postMessage({ type: "changed", entity: "customer", id: "C-1", from: "some-other-window" });
-    foreign.postMessage({ type: "inbox-changed", threadId: "T-7" });
     await new Promise((r) => setTimeout(r, 150));
     foreign.close();
     off();
     ok(!got.some((m) => m.type === "changed" && m.entity === "quote"), "popout: a window's own postChanged is not delivered to its own listener");
     ok(got.some((m) => m.type === "changed" && m.entity === "customer" && m.id === "C-1"), "popout: another window's changed message is delivered");
-    ok(got.some((m) => m.type === "changed" && m.entity === "thread" && m.id === "T-7"), "popout: a legacy inbox-changed message is delivered as changed/thread");
   }
 }
 

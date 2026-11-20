@@ -31,15 +31,6 @@ import { batchOutbox, pushRecordSize, PUSH_MAX_BYTES, PUSH_MAX_RECORDS, PUSH_TOO
 // push endpoint rejects any collection not in that allowlist, so adding one
 // here without adding it there means its pushes are silently dropped.
 export const FIELD_COLLECTIONS = [
-  "surveys",
-  "inspections",
-  "flame_jobs",
-  "repair_jobs",
-  "projects",
-  "tasks",
-  "recordings",
-  "assessments",
-  "findings",
   "booth_captures",
 ] as const;
 

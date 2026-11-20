@@ -1,7 +1,6 @@
 import type { WidgetId } from "@/lib/dashboard/registry";
 import type { WidgetRenderer } from "@/lib/dashboard/context";
 import { HOME_RENDERERS } from "./widgets/home-cards";
-import { INSTALLS_RENDERERS } from "./widgets/installs";
 import { SALES_RENDERERS } from "./widgets/sales";
 import { BACKWARD_RENDERERS } from "./widgets/backward";
 import { BIDS_RENDERERS } from "./widgets/bids";
@@ -10,7 +9,6 @@ import { BIDS_RENDERERS } from "./widgets/bids";
 export const RENDERERS: Record<WidgetId, WidgetRenderer> = {
   ...HOME_RENDERERS,
   ...SALES_RENDERERS,
-  ...INSTALLS_RENDERERS,
   ...BACKWARD_RENDERERS,
   ...BIDS_RENDERERS,
 };

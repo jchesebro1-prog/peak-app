@@ -4,13 +4,12 @@ import type { BonusRecord, BonusSplit } from "@/lib/estimate-bonus/record";
 import type { RackPartFacts } from "@/lib/rack/types";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
-import type { TaskRecord } from "@/lib/stores/tasks";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
-import type { CurtainRequest } from "@/lib/portal-cart-types";
+import type { CurtainRequest } from "@/lib/curtain-request";
 import type { CategoryOption } from "@/lib/system-categories";
 import type { SystemGroup } from "@/lib/estimate-groups/groups";
 import type { PackageDoc } from "@/lib/package-doc/types";
@@ -18,9 +17,6 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import type { TrackConfig } from "@/lib/track-engine";
 import type { TrackMounting, TrackOperation, TrackSeries } from "@/lib/track-series";
 import type { SystemIntro } from "@/lib/narrative/intros";
-import type { EstimateSuggestionView, SuggestionParts } from "@/lib/assist/features/suggestion-panel";
-import type { VendorPdfExtraction } from "@/lib/vendor-pdf/extraction";
-import type { VendorPdfReadUi } from "@/lib/vendor-pdf/fill";
 import type { ProjectDiscounts } from "@/lib/project-discounts/rules";
 import type { RepricedOnRevise } from "@/lib/estimate-reprice/rules";
 import type { LinesetType, PipeType, RiggingConfig } from "@/lib/rigging-config/types";
@@ -78,7 +74,7 @@ export type SpecItem = {
   /** #250: a portal curtain line priced live (Estimator curtain math, tier
    *  markup) that still needs Peak to confirm measurements + fabric — stays
    *  set through Save; only sending the quote (or staff replacing the line)
-   *  resolves it (clearPricedPor's `anyConfirm`, portal-quote-mode.ts). */
+   *  resolves it (clearPricedPor's `anyConfirm`, portal-legacy.ts). */
   portalConfirm?: boolean;
   /** optional-scope item — excluded from totals (prototype carried the flag) */
   option?: boolean;
@@ -135,11 +131,8 @@ export type SpecItem = {
   noFreight?: boolean;
   /** #245: customer-requested line still waiting on a Peak price. */
   por?: boolean;
-  /** Spec records design §6 — a system record's match key, set at the
-   *  source (the custom-part form, the curtain add, and the Spec select on a
-   *  custom/curtain line — spec-key-select.tsx) so
-   *  `bomFromQuote`/`record-match.ts` can match this line with no catalog
-   *  part number. */
+  /** A spec-record match key the removed Specs module set on a custom or
+   *  curtain line. Nothing sets or reads it now; a stored one rides along. */
   specKey?: string;
   /** #245 Task 13 — the fixture record this line was configured from, and the
    *  add-on quantities chosen (keyed `slot:sku`, as on a portal cart line).
@@ -206,12 +199,7 @@ export type VendorQuoteLine = {
   qty: number;
   unit: string;
   amount: number;
-  /** #348 slice 5 — index into extracted.data.lines this line was filled from (absent = typed). */
-  extractedIndex?: number;
 };
-
-/** #348 slice 5 — the Read-the-PDF result a saved vendor quote keeps (server-verified at save). */
-export type VendorQuoteExtracted = { runId: string; model: string; at: number; data: VendorPdfExtraction };
 
 /**
  * A vendor's quote imported into an estimate. Persisted TOP-LEVEL on the
@@ -244,10 +232,6 @@ export type VendorQuote = {
   vendorCompanyId?: string | null;
   /** #348 slice 4 — first saved (server-stamped; absent on quotes saved before slice 4). */
   addedAt?: number;
-  /** #348 slice 4 — the email thread this quote came from (Add as vendor quote…). */
-  fromThreadId?: string | null;
-  /** #348 slice 5 — what Read the PDF read from this quote's file (absent = never read). */
-  extracted?: VendorQuoteExtracted | null;
 };
 
 /** Data-URL characters the estimate's vendor attachments already spend of
@@ -431,8 +415,6 @@ export type VendorLineDraft = {
   qty: string;
   unit: string;
   amount: string;
-  /** #348 slice 5 — the extracted line this row was filled from (absent = typed). */
-  fromRead?: number;
 };
 
 export type VendorDraft = {
@@ -465,12 +447,8 @@ export type VendorDraft = {
   total: string;
   includesFreight: boolean;
   display: "single" | "itemized";
-  /** #348 slice 4 — the picked vendor company (null = typed name only) and the email the quote came from. */
+  /** #348 slice 4 — the picked vendor company (null = typed name only). */
   vendorCompanyId: string | null;
-  fromThreadId: string | null;
-  /** #348 slice 5 — the read this form keeps (saved with the quote) and the banner state (never persisted). */
-  extracted: VendorQuoteExtracted | null;
-  pdfRead: VendorPdfReadUi | null;
 };
 
 export type FixtureDraft = {
@@ -582,35 +560,12 @@ export type TravelLite = {
 };
 
 /**
- * The staff Portal panel's data (#245 Task 13, spec §5) — present only for a
- * loaded quote with `source === "portal-catalog"`; null otherwise (a fresh
- * estimate, or any other quote type/source never renders the panel).
- * `porItems` is a point-in-time read of the loaded spec's `por` lines (the
- * next Save recomputes what remains — see `clearPricedPor`). `confirmItems`
- * (#250) is the same read of `portalConfirm` lines — priced curtains still
- * awaiting Peak's confirmation.
+ * A loaded quote the removed customer portal created (`source === "portal-catalog"`), or null for every other
+ * quote. Only what still changes behaviour: its prices are left exact on load and its document prints the stored
+ * "Valid until" date.
  */
-export type PortalPanelData = {
-  quoteId: string;
+export type PortalLegacyInfo = {
   portalFirm: { generatedAt: number; validUntil: number } | null;
-  portalReview: { requestedAt: number; reasons: string[] } | null;
-  portalAcceptance: {
-    at: number;
-    by: string;
-    byEmail: string;
-    purchaseMethod?: "po" | "card" | "check" | "other";
-    notes?: string;
-    poDocumentId?: string | null;
-    /** Jeff 2026-10-15 #15 — the signer and PO # typed at Accept. */
-    signerName?: string;
-    signerTitle?: string;
-    poNumber?: string;
-  } | null;
-  portalDecline: { at: number; by: string; note: string } | null;
-  porItems: Array<{ desc: string; qty: number }>;
-  confirmItems: Array<{ desc: string; qty: number }>;
-  /** Where the Approve (→ won) status button redirects back to on refusal. */
-  back: string;
 };
 
 export type InitialQuote = {
@@ -676,8 +631,8 @@ export type InitialQuote = {
   pdfOptions: QuotePdfOptions;
   /** The saved PDF's state (#222) — null for a new or never-rendered estimate. */
   pdf: QuotePdfView | null;
-  /** #245 Task 13 — set only for a loaded `source === "portal-catalog"` quote. */
-  portal: PortalPanelData | null;
+  /** Set only for a loaded `source === "portal-catalog"` quote (stored quotes of the removed portal). */
+  portal: PortalLegacyInfo | null;
   /** Estimator bonuses — the loaded quote's source / quoteType (a new
    *  estimate reads "estimator" / "system"); feeds `bonusRulesApply`. */
   bonusSource: string;
@@ -695,31 +650,8 @@ export type InitialQuote = {
   boxSale: boolean;
 };
 
-/**
- * The venue-assessment / inspection this quote is drafting from (Phase 8, D4).
- * Resolved server-side in page.tsx from ?surveyId= / ?inspectionId= and passed
- * in only when the AI gate is on. `null` → no source linked (button hidden).
- */
-export type AiSource = {
-  kind: "survey" | "inspection";
-  id: string;
-  /** Human label for the button/modal (venue or customer, falls back to id). */
-  label: string;
-};
-
-/** #334 (D877) — what the Build banner shows for an Assist-drafted estimate:
- *  the source email, the model's notes, and why each still-present line was picked. */
-export type AssistDraftView = {
-  quoteId: string;
-  threadId: string;
-  notes: string;
-  reasons: { desc: string; reason: string }[];
-};
-
 export type EstimatorProps = {
   initial: InitialQuote;
-  /** #348 slice 4 — ?vq= hand-off ref (validated shape), else null. */
-  vendorFromThread?: string | null;
   /** Settings → Pipelines (Task 6) — the Daylite stage bar reads the loaded
    *  quote's pipeline from here; loaded once server-side (loadPipelines()). */
   pipelines: Pipelines;
@@ -760,34 +692,15 @@ export type EstimatorProps = {
    *  quote). Replaces the review bar's reviewers / me / canApprove props and
    *  carries the #242 review-limit chip as its strip. */
   next: QuoteNextStepView | null;
-  /** Linked survey/inspection to assemble the scope from, or null
-   *  (S12/D83 — rules-based, no AI gate). */
-  aiSource: AiSource | null;
   /** Active roster for the quote Tasks card's assignee picker (PUNCHLIST #17 remainder). */
   people: { id: string; name: string }[];
-  /** This quote's rows from the shared tasks collection, keyed by loadedId —
-   *  empty for a quote that's never been saved (no id to attach tasks to yet). */
-  quoteTasks: TaskRecord[];
-  /** Reusable task-template sets applicable to quotes (D149, #118), for the
-   *  "Apply template" control next to the Tasks card. */
-  templateSets: { id: string; name: string }[];
   /** #245: the freight-by-distance rule (Estimating Rules), loaded server-side
    *  via loadFreightRule() — plain numbers, client-safe. */
   freightRule: FreightRule;
-  /** Company-managed checked assumptions shared with consulting proposals. */
+  /** Company-managed checked assumptions (Settings → Sales → Assumptions library). */
   assumptionLibrary: string[];
-  /** #245 Task 13 — a Portal panel Approve refusal's message (?statusError=
-   *  from the Quotes-hub status action), or null. */
-  portalStatusError: string | null;
-  /** #334 (D877) — the Build banner for an estimate Assist drafted from an
-   *  email (null when not an Assist draft, or once dismissed). */
-  assistDraft: AssistDraftView | null;
   /** #368 — what the last Revise re-priced to today's catalog (null when nothing / never). Absent = null. */
   repricedOnRevise?: RepricedOnRevise | null;
-  /** Spec records design §6 — the Spec select's options: every non-archived
-   *  system record's match key (`systemMatchKeys`), read on the server so the
-   *  client never imports the records store. */
-  specKeys: string[];
   /** #282 phase 2 — may this user apply Rewards credit (`create`)? */
   canApplyCredit: boolean;
   /** #287 task B — the signed-in user's name (the one Lead estimator they may always pick). */
@@ -808,23 +721,4 @@ export type EstimatorProps = {
   narrativeIntros: SystemIntro[];
   /** #301 — Settings → Estimate output: the default Not included list (Reset to default). */
   notIncludedDefault: string;
-  /** Estimate suggestion (spec 2026-10-13 §2) — the Suggested BOM panel's view:
-   *  from `?suggestion=` on a new estimate, or the suggestion a saved quote was
-   *  built from; null/absent = no panel. */
-  suggestion?: EstimateSuggestionView | null;
-  /** The live catalog part behind each suggestion sku, keyed by the
-   *  suggestion's own sku (a rename resolves to the new part); a sku missing
-   *  here lands as an unpriced custom line. */
-  suggestionParts?: SuggestionParts;
-  /** #348 slice 5 — Read the PDF is offered: `vendorPdfGateFor` passed on the server (a pilot user, the feature on,
-   *  the kill switch off, and a Claude key). Never derived from assistUiFlags, which reports true under the local
-   *  provider with no key. */
-  vendorPdfEnabled: boolean;
-};
-
-/** #348 slice 5 — the vendor form's Read the PDF state (transient; reset whenever the form or its file changes).
- *  `error.hard` = the failed attempt was a Try harder, so it isn't offered again. */
-export type VendorPdfFormState = {
-  busy: null | "read" | "hard";
-  error: { text: string; tooLarge: boolean; hard: boolean } | null;
 };

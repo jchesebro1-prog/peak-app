@@ -1,39 +1,15 @@
 import Link from "next/link";
 import { money } from "@/lib/format";
-import { fmtDate, type ProjectRecord } from "@/lib/stores/projects";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { dashHref } from "@/lib/dashboard/registry";
-import { backlogProjects, equipmentSold, openProjects, periodBounds, projectedProfit, salesMetrics } from "@/lib/dashboard/metrics";
-import { formatJobValue } from "@/lib/job-value";
-import { ChartCard, MonoBadge, initialsOf } from "../charts";
+import { equipmentSold, periodBounds, salesMetrics } from "@/lib/dashboard/metrics";
+import { ChartCard } from "../charts";
 import { tile } from "./tile";
 
 /** #43 spec task 4 — the first backward widgets. */
 
 const base = (ctx: WidgetCtx) => (ctx.surface === "home" ? "/" : "/reports");
 const keep = (ctx: WidgetCtx) => ({ range: ctx.sp.range, customize: ctx.sp.customize });
-
-function ProjectList({ title, sub, rows, empty }: { title: string; sub: string; rows: ProjectRecord[]; empty: string }) {
-  return (
-    <div className="pk-card" style={{ overflow: "hidden" }}>
-      <div style={{ padding: "15px 18px 12px", borderBottom: "1px solid #f0f1f4" }}>
-        <div style={{ fontSize: 14.5, fontWeight: 600 }}>{title}</div>
-        <div style={{ fontSize: 12, color: "#8c919c", marginTop: 2 }}>{sub}</div>
-      </div>
-      {rows.slice(0, 8).map((p) => (
-        <Link key={p.id} href={`/projects?id=${encodeURIComponent(p.id)}`} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}>
-          <MonoBadge>{initialsOf(p.customer)}</MonoBadge>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
-            <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>{p.customer} · {p.targetDate ? `target ${fmtDate(p.targetDate)}` : "no target"}</div>
-          </div>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600 }}>{formatJobValue(p, money)}</span>
-        </Link>
-      ))}
-      {rows.length === 0 && <div style={{ padding: "22px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>{empty}</div>}
-    </div>
-  );
-}
 
 export const BACKWARD_RENDERERS = {
   "avg-margin": async (ctx) => {
@@ -44,20 +20,6 @@ export const BACKWARD_RENDERERS = {
     const pt = Math.round((cur.avgMarkup - prior.avgMarkup) * 100);
     return tile("Avg. markup", `${Math.round(cur.avgMarkup * 100)}%`, `${pt >= 0 ? "+" : ""}${pt}pt vs. prior · quotes created`);
   },
-
-  "projected-profit": async (ctx) => {
-    const pp = projectedProfit(await ctx.data.projects());
-    const sub = `${Math.round(pp.markup * 100)}% of ${money(pp.value)} open book` + (pp.unknownCount ? ` · ${pp.unknownCount} with unknown value` : "");
-    return tile("Projected profit", money(pp.profit), sub, "green");
-  },
-
-  "open-projects": async (ctx) => (
-    <ProjectList title="Open projects" sub="Crews scheduled or on site" rows={openProjects(await ctx.data.projects())} empty="Nothing on site right now." />
-  ),
-
-  backlog: async (ctx) => (
-    <ProjectList title="Backlog" sub="Sold — in backlog stages" rows={backlogProjects(await ctx.data.projects())} empty="No sold work waiting on materials." />
-  ),
 
   "equipment-sold": async (ctx) => {
     const [quotes, parts] = await Promise.all([ctx.data.quotes(), ctx.data.catalogParts()]);

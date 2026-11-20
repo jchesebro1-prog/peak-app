@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { createDocument, getDocument } from "@/lib/stores/part-documents";
 import { listManufacturers, removeManufacturerImage, setManufacturerImage } from "@/lib/stores/manufacturers";
 import { canonicalKeyMap } from "@/lib/manufacturer-aliases";
@@ -14,9 +13,7 @@ import { mfrKey } from "@/lib/catalog-books";
 type Res = { ok: true } | { ok: false; error: string };
 
 function refresh() {
-  invalidatePortalIndex();
   revalidatePath("/catalog/manufacturers");
-  revalidatePath("/portal/catalog");
 }
 
 /** The browser uploaded the file straight to Blob (putFile); check the bytes, shrink, record an UNLINKED image document, point the manufacturer at it. */

@@ -152,7 +152,7 @@ function layoutDriftWarning(curtains: CutSheetCurtain[], trackSeries: readonly T
 }
 
 export function collectCurtainTypes(input: CollectInput): CollectResult {
-  const read = readCurtains(input.quote.spec, input.fabrics, input.trackSeries, input.grid?.project ?? null, input.quote.id);
+  const read = readCurtains(input.quote.spec, input.fabrics, input.trackSeries, null);
   const groups = new Map<string, CutSheetCurtain[]>();
   for (const c of read.curtains) {
     const k = curtainTypeKey(c);

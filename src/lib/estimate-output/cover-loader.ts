@@ -1,8 +1,5 @@
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
-import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
-import { rewardsVisibleFor } from "@/lib/parties/addressee";
-import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { allUsers } from "@/lib/users";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import { documentAddressee } from "@/lib/parties/addressee-server";
@@ -26,15 +23,14 @@ export async function loadCoverDocumentProps(
   opts: { origin: string | null; letterheadSrc: string; now?: number }
 ): Promise<CoverDocumentProps> {
   const now = opts.now ?? Date.now();
-  const [cust, settings, perks, users, defaults] = await Promise.all([
+  const [cust, settings, users, defaults] = await Promise.all([
     getCustomer(q.customerId),
     getSettings(),
-    purchasePerksForCompany(q.customerId),
     allUsers(),
     getEstimateOutputDefaults(),
   ]);
   const addressee = await documentAddressee(q);
-  const doc = { ...quoteDocumentDataFor(q, cust, settings, addressee), rewardsLine: rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : "" };
+  const doc = quoteDocumentDataFor(q, cust, settings, addressee);
   const link = shareLinkView(q, shareSecret(), now);
   return coverDocumentPropsFor({
     doc,

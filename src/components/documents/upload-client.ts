@@ -2,10 +2,9 @@ import { upload } from "@vercel/blob/client";
 import { checkDocumentName, documentBlobPath, newUploadKey } from "@/lib/document-files";
 
 /**
- * Browser half of a document upload (#218), shared by the team card and the
- * portal: preflight the name/size, mint an upload key, send the bytes
- * straight to private Blob through a token route (`/api/documents/upload`
- * for the team, `/portal/documents/upload` for a customer). The caller then
+ * Browser half of a document upload (#218): preflight the name/size, mint
+ * an upload key, send the bytes straight to private Blob through the token
+ * route (`/api/documents/upload`). The caller then
  * calls its finalize action with the returned key + pathname — the server
  * re-checks everything. Imported only by client components; everything it
  * imports is client-safe.

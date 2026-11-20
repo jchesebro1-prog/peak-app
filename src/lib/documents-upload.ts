@@ -1,7 +1,7 @@
 import { deleteBlob, getBlobHead } from "@/lib/blob";
 import { getCompany } from "@/lib/identity/companies";
 import { docLocId, sitesForCompany } from "@/lib/identity/sites";
-import { getProject } from "@/lib/stores/projects";
+import { getDoc } from "@/db/doc-store";
 import { createDocument, documentCategories, documentsUnderUploadKey, removeDocument } from "@/lib/stores/documents";
 import { uploadCategory, type DocumentCategory } from "@/lib/document-categories";
 import {
@@ -18,20 +18,19 @@ import {
   cleanMime,
   cleanNotes,
   cleanTitle,
-  isVisibility,
   resolveDocumentScope,
   type DocumentRecord,
   type DocumentScopeFacts,
 } from "@/lib/document-rules";
 
 /**
- * Documents (#218) — the ONE place an uploaded blob becomes a document, for
- * the team and the portal alike. Server-only.
+ * Documents (#218) — the ONE place an uploaded blob becomes a document.
+ * Server-only. (The customer-portal uploader was removed; only the team uploads.)
  *
  * The browser uploaded straight to private Blob under
  * `documents/<customer>/<uploadKey>/…` (a token route checked that path
  * first). Here, in order:
- *   1. the company comes from the actor for a portal user (never the input),
+ *   1. the company comes from the input (a signed-in team member),
  *   2. the client-supplied path must sit under that company's upload key,
  *   3. a path already recorded on a document — or any document already
  *      recorded under the same upload key — is refused, and never deleted,
@@ -55,13 +54,12 @@ export type FinalizeDocumentInput = {
   mime?: string;
   title?: string;
   category?: string;
-  visibility?: string;
   siteId?: string | null;
   projectId?: string | null;
   notes?: string;
 };
 
-export type DocumentActor = { kind: "team"; name: string } | { kind: "customer"; name: string; customerId: string };
+export type DocumentActor = { kind: "team"; name: string };
 
 export type FinalizeResult = { ok: true; document: DocumentRecord } | { ok: false; error: string };
 
@@ -77,12 +75,13 @@ export async function documentScopeFacts(customerId: string, projectId: string |
   const [co, sites, project] = await Promise.all([
     getCompany(customerId),
     sitesForCompany(customerId),
-    projectId ? getProject(projectId) : Promise.resolve(null),
+    // Projects were removed from the app; a document filed on one before then keeps its link (the table stays).
+    projectId ? getDoc<{ id: string; customerId?: string | null; locationId?: string | null }>("projects", projectId) : Promise.resolve(null),
   ]);
   return {
     customerExists: !!co,
     siteIds: sites.map(docLocId),
-    project: project ? { id: project.id, customerId: project.customerId, locationId: project.locationId } : null,
+    project: project ? { id: project.id, customerId: project.customerId ?? null, locationId: project.locationId ?? null } : null,
   };
 }
 
@@ -108,7 +107,7 @@ export async function finalizeDocumentUpload(
 ): Promise<FinalizeResult> {
   // A server action's argument is whatever the browser sent — never trust its shape.
   const inp = (input && typeof input === "object" ? input : {}) as Partial<FinalizeDocumentInput>;
-  const customerId = actor.kind === "customer" ? actor.customerId : String(inp.customerId ?? "").trim();
+  const customerId = String(inp.customerId ?? "").trim();
   if (!customerId) return { ok: false, error: "Pick a company first." };
   const uploadKey = inp.uploadKey;
   if (!isUploadKey(uploadKey) || !blobPathInScope(inp.blobPath, customerId, uploadKey)) {
@@ -133,7 +132,7 @@ export async function finalizeDocumentUpload(
     return { ok: false, error };
   };
 
-  const projectId = actor.kind === "customer" ? null : String(inp.projectId ?? "").trim() || null;
+  const projectId = String(inp.projectId ?? "").trim() || null;
   const scope = resolveDocumentScope({ siteId: inp.siteId, projectId }, customerId, await deps.facts(customerId, projectId));
   if (!scope.ok) return refuse(scope.error);
 
@@ -162,13 +161,14 @@ export async function finalizeDocumentUpload(
     size: head.size,
     blobPath,
     category: uploadCategory(categories, inp.category),
-    visibility: actor.kind === "customer" ? "shared" : isVisibility(inp.visibility) ? inp.visibility : "internal",
-    source: actor.kind === "customer" ? "customer" : "team",
+    // Stored fields of the removed portal sharing: every new document is internal and from the team.
+    visibility: "internal",
+    source: "team",
     customerId,
     siteId: scope.siteId,
     projectId: scope.projectId,
     notes: cleanNotes(inp.notes),
-    uploadedBy: actor.name || (actor.kind === "customer" ? "Customer" : "Team"),
+    uploadedBy: actor.name || "Team",
   });
 
   // Two finalizes of one upload (a double-click, a retried request) can both

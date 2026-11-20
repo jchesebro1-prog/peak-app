@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Typeahead } from "@/components/search/typeahead";
-import { searchLinkTargetsAction } from "@/app/(app)/inbox/link-popup-actions";
-import type { LinkTargetHit } from "@/lib/inbox-link-targets";
+import { searchLinkTargetsAction } from "@/app/(app)/companies/link-target-actions";
+import type { LinkTargetHit } from "@/lib/search/link-targets";
 
 /** #348 — debounced company search (the Inbox link sidebar's #121 pattern, companies only). */
 const keyOf = (h: LinkTargetHit) => h.id;

@@ -237,3 +237,6 @@ export function sheetDriveClaims(docs: readonly Pick<SheetImage, "source" | "sou
   }
   return out;
 }
+
+/** A file in a Google Drive listing (Drive is no longer read; the type stays for the plan's injectable lister). */
+export type DriveListedPhoto = { id: string; name: string; mimeType: string; md5: string; size: number; webViewLink: string };

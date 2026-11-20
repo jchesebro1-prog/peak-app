@@ -4,7 +4,7 @@ import { keyProductsNeedingText, scopesWithoutGoals } from "@/lib/estimate-outpu
 import { docGaps } from "@/lib/package-doc/gaps";
 import { documentApplies } from "@/lib/package-doc/print";
 import type { PackageDoc } from "@/lib/package-doc/types";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { needsRequote } from "@/lib/narrative/old-vendor-line";
 import type { NextStepTone } from "@/lib/quote-next-step";
 import type { QuoteStatus } from "@/lib/stores/quotes";

@@ -46,8 +46,6 @@ export type LiveBomInput = {
   customers: CustomerLite[];
   companyName: string;
   logoDark: string | null;
-  /** The customer's purchase-perks doc line ("" when none / not this customer). */
-  rewardsLine: string;
 };
 
 export function liveBomDocumentProps(i: LiveBomInput): QuoteDocumentProps {
@@ -74,5 +72,5 @@ export function liveBomDocumentProps(i: LiveBomInput): QuoteDocumentProps {
     companyName: i.companyName,
     logoDark: i.logoDark,
   });
-  return bomViewProps({ ...doc, revNum: i.revNum, revDateMs: i.revDateMs, rewardsLine: i.rewardsLine });
+  return bomViewProps({ ...doc, revNum: i.revNum, revDateMs: i.revDateMs });
 }

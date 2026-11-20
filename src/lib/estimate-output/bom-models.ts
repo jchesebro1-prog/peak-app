@@ -1,8 +1,8 @@
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { lineModel, lineOwnModel } from "@/lib/catalog-rename/sku";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
-import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isRewardCreditItem } from "@/lib/credit-line";
+import { isPlaceholderSku } from "@/lib/quote-line-ids";
 
 /**
  * #365 (Jeff 2026-10-22) — the model number on a BOM quote line: "Model —

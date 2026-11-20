@@ -8,10 +8,9 @@ import { HOME_TABS } from "@/app/(app)/home-tabs-keys";
 import type { PopKind } from "@/lib/popout/names";
 
 /** Pop-out windows (spec §3): nav rows with a hover ⧉ that opens the
- *  section's landing page in its own window — Inbox (`inbox:box`), Estimator
+ *  section's landing page in its own window — Estimator
  *  (`estimate:new`) and Customers (the Companies directory, `customer:list`). */
 export const NAV_POPOUT: Record<string, { kind: PopKind; id: string; url: string }> = {
-  inbox: { kind: "inbox", id: "box", url: "/inbox" },
   estimator: { kind: "estimate", id: "new", url: "/estimator" },
   companies: { kind: "customer", id: "list", url: "/companies" },
 };
@@ -23,7 +22,7 @@ export type NavEntry =
 
 export const NAV: NavEntry[] = [
   /* Q-6 rebrand (D117): the header reads like the brand lockup —
-   * [Q6 mark = Home] Estimating · Projects · Customers · Design · Knowledge. Home left the tab row (the
+   * [Q6 mark = Home] Estimating · Customers · Knowledge. Home left the tab row (the
    * mark is the link); Quotes/Estimator/Reviews split out of Sales into
    * EST; the rest of Sales became CRM; Operations became PM. Routes are
    * untouched — only group keys/labels moved. */
@@ -44,8 +43,6 @@ export const NAV: NavEntry[] = [
     mobileLabel: "EST",
     children: [
       { key: "quotes", label: "Quotes", href: "/quotes" },
-      /* #288 (spec §1.7): the staff work queue of customer-built portal quotes. */
-      { key: "portal-quotes", label: "Portal quotes", href: "/quotes/portal" },
       /* #22 Mine/All nav children — querystring hrefs render verbatim.
        * KNOWN cosmetic limitations (accepted, logged in PUNCHLIST #22):
        * activeKeyFor is pathname-only, so a My-X child never lights its own
@@ -61,22 +58,13 @@ export const NAV: NavEntry[] = [
        * Settings → Company "Catalog" link stays as a second door; /catalog
        * gates its own admin parts, so no permission check here. */
       { key: "catalog", label: "Catalog", href: "/catalog" },
-    ],
-  },
-  {
-    kind: "group",
-    key: "pm",
-    label: "Projects",
-    mobileLabel: "PM",
-    children: [
-      { key: "projects", label: "Projects", href: "/projects" },
-      { key: "myprojects", label: "My Projects", href: "/projects?who=mine" }, // #22 — see the EST note
-      { key: "schedule", label: "Schedule", href: "/schedule" },
-      { key: "fieldwork", label: "Field Work", href: "/field-work" },
-      { key: "flametests", label: "Flame Tests", href: "/flame-tests" },
-      { key: "inspections", label: "Rigging Inspections", href: "/inspections" },
-      { key: "repairs", label: "Repairs", href: "/repairs" },
-      { key: "rentals", label: "Rentals", href: "/rentals" },
+      /* The builders that feed the Estimator. They were the Design group's
+       * last three children; the rest of Design (Overview, Consulting, The
+       * Grid, Specs, Grid Settings) is a separate program now. Routes are
+       * unchanged (/design/assemblies, /design/lineset, /design/motors). */
+      { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
+      { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
+      { key: "motors", label: "Motor Library", href: "/design/motors" },
     ],
   },
   {
@@ -89,38 +77,14 @@ export const NAV: NavEntry[] = [
       { key: "leads", label: "Leads", href: "/leads" },
       { key: "myleads", label: "My Leads", href: "/leads?who=mine" }, // #22 — see the EST note
       { key: "companies", label: "Companies", href: "/companies" },
-      { key: "rewards", label: "Rewards", href: "/rewards" }, // #282 — customer rewards (levels, tier suggestions)
       { key: "vendors", label: "Vendors", href: "/vendors" }, // #122 — vendor companies + price-list ledger
       { key: "people", label: "People", href: "/people" },
       { key: "venues", label: "Venues", href: "/venues" },
-      { key: "field", label: "Venue Assessments", href: "/venue-assessments" },
-      { key: "assessments", label: "Assessments", href: "/assessments" }, // #340 — the assessments engine
-    ],
-  },
-  {
-    kind: "group",
-    key: "design",
-    label: "Design",
-    mobileLabel: "Design",
-    children: [
-      { key: "designoverview", label: "Overview", href: "/design" },
-      { key: "engagements", label: "Consulting", href: "/design/engagements" },
-      /* Rebranded "The Grid" (D-grid-merge): still the budgetary design
-       * sandbox at the same URL, but a design's editor is now either the
-       * Quick Design canvas or The Grid's plan-sheet/catalog-device painter
-       * (D108), chosen at creation. The standalone Grid index is gone — a
-       * Grid project can no longer exist independent of a design record. */
-      { key: "designs", label: "The Grid", href: "/design/designs" },
-      { key: "specs", label: "Specs", href: "/design/specs" },
-      { key: "gridsettings", label: "Grid Settings", href: "/design/grid/settings" },
-      { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
-      { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
-      { key: "motors", label: "Motor Library", href: "/design/motors" },
     ],
   },
   /* #136: Knowledge & Information — reference tools and, later (#56), the
    * company doctrine/rules/tiers. Steel Calculator and Fixture Cross-Ref
-   * moved here from DESIGN; their old /design/* routes redirect. */
+   * moved here from the old Design group; their old /design/* routes redirect. */
   {
     kind: "group",
     key: "knowledge",
@@ -141,53 +105,27 @@ export function activeKeyFor(pathname: string): string {
    * CHILD keys: returning "home" (the group's own key) lit nothing, which is
    * why the Home tab looked dead before the entry existed. */
   if (pathname === "/") return "dashboard";
-  // #130: both builders live on /design/assemblies (Subassemblies is a tab;
-  // the old path redirects), so both light the Assembly Builder child.
-  if (pathname.startsWith("/design/assemblies") || pathname.startsWith("/design/subassemblies")) return "assemblies";
-  // Grid settings — like assemblies above, this needs its OWN key before the
-  // generic "/design" → designoverview fallback below, which every other
-  // /design/* route (including /design/grid/<id>, the editor) still uses.
-  if (pathname.startsWith("/design/grid/settings")) return "gridsettings";
-  // Specs (#205): same reason as the two exceptions above — the generic
-  // /design → designoverview fallback below would otherwise light every
-  // /design/specs/* route as the Design overview tab.
-  if (pathname.startsWith("/design/specs")) return "specs";
-  // #288: the Portal quotes queue — before the "/quotes" segment map below,
-  // which would otherwise light every /quotes/* route as Quotes.
-  if (pathname === "/quotes/portal" || pathname.startsWith("/quotes/portal/")) return "portal-quotes";
+  // The three kept builders light their own Estimating child; any other
+  // /design/* path (a redirect stub) lights the Assembly Builder.
+  if (pathname.startsWith("/design/lineset")) return "lineset";
+  if (pathname.startsWith("/design/motors")) return "motors";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
-    "/queue": "queue",
-    "/triage": "dashboard", // Morning triage — "See more" from Home's Start here card
-    "/calendar": "calendar",
-    "/inbox": "inbox",
     "/leads": "leads",
     "/opportunities": "opportunities",
     "/quotes": "quotes",
     "/estimator": "estimator",
-    "/design": "designoverview",
+    "/design": "assemblies",
     "/knowledge": "knowledgeoverview", // #136 — every /knowledge/* route lights the KNOWLEDGE pill
     "/reviews": "reviews",
-    "/projects": "projects",
-    "/schedule": "schedule",
-    "/field-work": "fieldwork",
-    "/flame-tests": "flametests",
-    "/inspections": "inspections",
-    "/repairs": "repairs",
-    "/rentals": "rentals",
     "/companies": "companies",
-    "/rewards": "rewards", // #282
     "/vendors": "vendors",
     "/people": "people",
     "/venues": "venues",
     "/customers": "companies", // legacy route redirects to /companies (D85)
-    "/venue-assessments": "field",
-    "/assessments": "assessments", // #340 — every /assessments/* route lights the Assessments child
     "/catalog": "catalog", // #213 — lights the Catalog child of Estimating
     "/reports": "reports",
-    "/templates": "settings",
     "/estimating-rules": "settings",
-    "/task-templates": "settings",
     "/import": "settings",
     "/settings": "settings",
     "/account": "account",

@@ -1,5 +1,5 @@
 import { computeLabor, lineExtSellOf, round2, type RateFn } from "@/app/(app)/estimator/pricing";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 
 /**

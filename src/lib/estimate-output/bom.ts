@@ -1,7 +1,7 @@
 import type { SpecItem, SpecSection, VendorQuote } from "@/app/(app)/estimator/types";
 import { customerLines } from "@/app/(app)/estimator/pricing";
 import { systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
-import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isPlaceholderSku } from "@/lib/quote-line-ids";
 import { lineModel } from "@/lib/catalog-rename/sku";
 
 /**

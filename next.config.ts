@@ -18,43 +18,31 @@ const nextConfig: NextConfig = {
   // #222: @sparticuz/chromium reads its brotli'd binary from bin/ at run time,
   // which file tracing can't see — ship it with EVERY route whose server
   // actions can (transitively) reach scheduleQuotePdf/generateQuotePdf
-  // (src/lib/quote-pdf/**), and nowhere else (~60 MB each). That's the three
-  // service quote builders + the Estimator + the portal's self-serve
-  // estimate (all of which render/retry directly); the Quotes hub (status
-  // changes + revision restore schedule a re-render); Home, the Designs
-  // dashboard and Quick Design (promoting a Quick-layout design schedules
-  // one); The Grid's project editor (creating/re-promoting a draft quote
-  // schedules one); and the Flame Tests / Inspections dashboards (one-click
-  // renewal outreach re-prices and re-renders a quote before it's mailed),
-  // plus #296's rack submittal download (renders its three sheets).
+  // (src/lib/quote-pdf/**), and nowhere else (~60 MB each). That's the
+  // Estimator (renders/retries directly); the Quotes hub and Home's stage
+  // sheet (status changes + revision restore schedule a re-render); plus
+  // #296's rack submittal download (renders its three sheets). (The service
+  // quote builders, the Flame Tests / Inspections dashboards, the portal
+  // estimate, the Designs dashboard, Quick Design and the Grid were removed.)
   // Routes that only call markQuotePdfStale (the CSV importer) or
   // copySentRevisionPdf (a send stamping a quote sent) never invoke Chrome
   // themselves, so they're deliberately left out.
   outputFileTracingIncludes: {
     "/catalog/documents": ["./data/davinci-extract.json"],
     "/estimator": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/flame-tests/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/repairs/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/inspections/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/portal/estimate": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/quotes": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/design/designs": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/design/quick": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/design/grid/[id]": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/flame-tests": ["./node_modules/@sparticuz/chromium/bin/**"],
-    "/inspections": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/api/racks/[id]/submittal": ["./node_modules/@sparticuz/chromium/bin/**"],
     // Grid notes #9: the baked Peak letterhead (src/lib/letterhead-server.ts)
-    // is read with fs at run time by every document that prints it — specs,
-    // client packages, renewal/rental letters — which file tracing can't see.
+    // is read with fs at run time by every document that prints it — client
+    // packages, estimates — which file tracing can't see.
     // 120 KB; shipped with every function rather than a list that drifts.
     // Path shared with the reader: src/lib/letterhead-path.ts.
     "/**": [BAKED_LETTERHEAD_TRACE_GLOB],
   },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy
-  // needs to be tuned against Leaflet/Three/inline styles and verified in a
+  // needs to be tuned against Leaflet/inline styles and verified in a
   // real build before it's turned on). HSTS only takes effect over HTTPS, so
   // it is inert on the LAN/localhost dev origins.
   async headers() {
@@ -86,12 +74,6 @@ const nextConfig: NextConfig = {
         source: "/api/quotes/:id/pdf",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
-      // #245: the portal part sidebar opens a datasheet inline in a
-      // same-origin viewer (the route itself gates who may read which doc).
-      {
-        source: "/portal/catalog/doc/:id",
-        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
-      },
       // Estimator Phase 4: the Customer review step frames the staff preview
       // of the saved estimate (package page, BOM, cut sheets) — this path
       // only. Staff-only, so never indexed and no Referer beyond the origin.
@@ -112,15 +94,6 @@ const nextConfig: NextConfig = {
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
         ],
       },
-    ];
-  },
-  // The Field Survey module was renamed Venue Assessments (route moved from
-  // /field-survey to /venue-assessments). Old links/bookmarks keep working;
-  // Next preserves the query string, so ?id=FS-1053 survives the hop.
-  async redirects() {
-    return [
-      { source: "/field-survey", destination: "/venue-assessments", permanent: true },
-      { source: "/field-survey/:path*", destination: "/venue-assessments/:path*", permanent: true },
     ];
   },
   // #356 review — browsers that ask for /favicon.ico get the Branding-logo

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
-import { PartPicker } from "@/app/(app)/design/grid/settings/equipment-map/part-picker";
+import { PartPicker } from "@/components/part-picker";
 import { DEFAULT_PIPE_SPACING_FT, RIGGING_LIMITS, isFootUnit, pipeTypeProblems, sanitizePipeType, type PipeType } from "@/lib/rigging-config/types";
 import { BTN, INPUT, LABEL, PRIMARY, PartLine, ROW, StatusChip, UnitWarning, day, type PartInfo } from "../rigging-ui";
 import { deletePipeTypeAction, savePipeTypeAction } from "./actions";

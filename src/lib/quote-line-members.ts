@@ -34,8 +34,8 @@
  * primary member is the light engine (component role "fixture"), else the
  * first included member.
  */
-import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
-import { isLaborSku } from "@/lib/design/wire-labor";
+import { gridSpecBomRows, parseVirtualPartId } from "@/lib/quote-line-ids";
+import { isLaborSku } from "@/lib/quote-line-ids";
 import type { FixtureResolvable } from "@/lib/fixture-assemblies";
 
 /** The fields a member read looks at — any saved line shape (estimator item, Grid line, raw JSON). */

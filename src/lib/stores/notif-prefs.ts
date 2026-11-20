@@ -2,7 +2,6 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { notifPrefs } from "@/db/schema";
 import type { DashboardOverride } from "@/lib/dashboard-layout";
-import { BRIEF_REMINDERS_PREF_KEY } from "@/lib/brief/reminders";
 
 /* ============================================================
    NotifPrefs — server port of app/notifprefs.js (localStorage
@@ -30,22 +29,9 @@ const DEFAULT_USER = "Jeff Chesebro";
  * 'repairs' group ("Repairs awaiting scheduling"), included here per spec.
  */
 export const CATEGORIES = [
-  { key: "comms",       label: "Customers waiting on a reply", desc: "Emails and threads in your mailboxes waiting on a reply from us." },
   { key: "reviews",     label: "Needs your approval",          desc: "Quotes waiting for any approver (and designs assigned to you)." },
   { key: "reviewBack",  label: "Back from review",             desc: "Your quotes that were approved and are ready to send, or sent back for changes." },
-  { key: "surveys",     label: "Survey requests to schedule",  desc: "Field-survey requests waiting to be booked." },
-  { key: "visits",      label: "Site visit requests",          desc: "Open site-visit requests to claim, plus your claimed visits waiting on a schedule." },
-  { key: "inspections", label: "Inspections to schedule",      desc: "Rigging-inspection requests waiting to be booked." },
-  { key: "projects",    label: "Projects need attention",      desc: "Active installs flagged as at-risk." },
-  { key: "flame",       label: "Flame tests due for renewal",  desc: "Annual flame-test renewals coming due or overdue." },
-  { key: "repairs",     label: "Repairs awaiting scheduling",  desc: "Approved repair jobs and open inspection findings waiting to be scheduled." },
   { key: "leads",       label: "Leads needing follow-up",      desc: "New and open leads overdue for a first response or follow-up." },
-  { key: "portal",      label: "Portal acceptances to confirm", desc: "Quotes a customer accepted in the portal — approve or decline in the quote." },
-  { key: "portalReview", label: "Portal quotes to review",      desc: "Customer quotes with items waiting on a Peak price or confirmation." },
-  { key: "portalNew",   label: "New portal quotes",             desc: "Firm quotes customers generated in the last 3 days." },
-  { key: "tasks",       label: "Tasks assigned to you or overdue", desc: "Open tasks assigned to you, plus any task past its due date." },
-  { key: "documents",   label: "New documents from customers", desc: "Files customers sent through the portal that nobody on the team has opened yet." },
-  { key: "perks",       label: "Perks to fulfil",              desc: "Rewards perks customers (or staff) redeemed that nobody has marked fulfilled yet." },
 ] as const;
 
 export type NotifCategoryKey = (typeof CATEGORIES)[number]["key"];
@@ -142,37 +128,6 @@ export async function setAll(
 }
 
 /* ---- per-user flags OUTSIDE the bell categories --------------------------- */
-
-/** D76-A: whether this user wants .ics calendar-invite emails for site
- *  visits assigned to them. Default ON. Lives in the same per-user prefs row
- *  but deliberately NOT in CATEGORIES — it has nothing to do with the nav
- *  bell, so it gets its own accessors instead of a dead bell toggle. */
-export const INVITE_PREF_KEY = "site_visit_invites";
-
-export async function invitesOn(user: string): Promise<boolean> {
-  const stored = await readRow(user);
-  return stored[INVITE_PREF_KEY] !== false;
-}
-
-export async function setInvitesOn(on: boolean, user: string): Promise<void> {
-  const mine = { ...(await readRow(user)) };
-  mine[INVITE_PREF_KEY] = !!on;
-  await writeRow(user, mine);
-}
-
-/** AI daily brief (spec §5): "Brief reminders on this phone" — whether the
- *  native app schedules the two daily 6:45 / 1:45 notifications. Default ON
- *  (a missing key reads as on), same sparse row, NOT a bell category. */
-export async function briefRemindersOn(user: string): Promise<boolean> {
-  const stored = await readRow(user);
-  return stored[BRIEF_REMINDERS_PREF_KEY] !== false;
-}
-
-export async function setBriefRemindersOn(on: boolean, user: string): Promise<void> {
-  const mine = { ...(await readRow(user)) };
-  mine[BRIEF_REMINDERS_PREF_KEY] = !!on;
-  await writeRow(user, mine);
-}
 
 /* ---- Inbox/CRM mode (punch #42) — same sparse row, non-category key ---- */
 

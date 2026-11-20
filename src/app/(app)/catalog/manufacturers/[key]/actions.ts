@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { mfrKey } from "@/lib/catalog-books";
 import { canonicalNameFor } from "@/lib/manufacturer-page-vm";
 import { list as listCatalog } from "@/lib/stores/catalog";
@@ -24,11 +23,9 @@ type Res = { ok: true } | { ok: false; error: string };
 
 const FAIL = "Couldn't save that — please try again.";
 
-function refresh(portal = false) {
-  if (portal) invalidatePortalIndex();
+function refresh() {
   revalidatePath("/catalog/manufacturers");
   revalidatePath("/catalog/manufacturers/[key]", "page");
-  if (portal) revalidatePath("/portal/catalog");
 }
 
 const UNKNOWN = "That manufacturer isn't in the catalog.";
@@ -64,7 +61,7 @@ export async function mergeManufacturerAction(sourceKey: string, targetKey: stri
     if (!s || !t) return { ok: false, error: UNKNOWN };
     const r = await mergeManufacturer(s, t, user.name);
     if (!r.ok) return r;
-    refresh(true);
+    refresh();
     return { ok: true };
   } catch (err) {
     console.error("mergeManufacturerAction", err);
@@ -79,7 +76,7 @@ export async function unmergeManufacturerAction(aliasKey: string): Promise<Res> 
     if (!(await isKnown(aliasKey))) return { ok: false, error: UNKNOWN };
     const r = await unmergeManufacturer(mfrKey(aliasKey), user.name);
     if (!r.ok) return r;
-    refresh(true);
+    refresh();
     return { ok: true };
   } catch (err) {
     console.error("unmergeManufacturerAction", err);

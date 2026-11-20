@@ -1,7 +1,5 @@
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAllProjects } from "@/lib/stores/projects";
-import { isDone } from "@/lib/pipelines";
 import { coordsOf, estimate, fmtMiles, fmtTime, officesFromSettings } from "@/lib/geo";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
@@ -41,13 +39,6 @@ export type CompanySummaryQuote = {
   href: string;
 };
 
-export type CompanySummaryProject = {
-  id: string;
-  name: string;
-  stageLabel: string;
-  href: string;
-};
-
 export type CompanySummaryActivity = {
   id: string;
   title: string;
@@ -69,7 +60,6 @@ export type CompanySummary = {
   openValueLabel: string;
   openCount: number;
   recentQuotes: CompanySummaryQuote[];
-  activeProjects: CompanySummaryProject[];
   recentActivity: CompanySummaryActivity[];
 };
 
@@ -79,27 +69,24 @@ export async function getCompanySummary(id: string): Promise<CompanySummary | nu
   const cust = await getCustomer(custId);
   if (!cust) return null;
 
-  const [quotes, projects, offices, feedRows] = await Promise.all([
+  const [quotes, offices, feedRows] = await Promise.all([
     getAllQuotes(),
-    getAllProjects(),
     officesFromSettings(),
     loadCustomerFeed({ id: cust.id, name: cust.name }),
   ]);
 
   // Same canonical-id / denormalized-name fallback as the detail page.
   const custQuotes = quotes.filter((qt) => (qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name));
-  const custProjects = projects.filter((p) => p.customerId === cust.id);
 
   const openQuotes = custQuotes.filter((qt) => qt.status === "draft" || qt.status === "sent");
   const openValue = openQuotes.reduce((a, qt) => a + (qt.value || 0), 0);
 
-  // A stored owner wins; else derive from the newest quote/project owner —
+  // A stored owner wins; else derive from the newest quote owner —
   // the same fallback the directory rollup and the detail page use.
   let owner = cust.owner || "";
   if (!owner) {
     const acts = [
       ...custQuotes.map((qt) => ({ at: qt.updatedAt || 0, owner: qt.owner || "" })),
-      ...custProjects.map((p) => ({ at: p.updatedAt || 0, owner: p.owner || "" })),
     ].filter((r) => r.owner);
     acts.sort((a, b) => b.at - a.at);
     owner = acts[0]?.owner || "";
@@ -137,17 +124,6 @@ export async function getCompanySummary(id: string): Promise<CompanySummary | nu
       href: quoteBuilderHref(qt),
     }));
 
-  const activeProjects: CompanySummaryProject[] = custProjects
-    .filter((p) => !isDone(p))
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-    .slice(0, 5)
-    .map((p) => ({
-      id: p.id,
-      name: p.name || p.id,
-      stageLabel: p.stageMeta?.label ?? p.stage,
-      href: `/projects?id=${encodeURIComponent(p.id)}`,
-    }));
-
   // loadCustomerFeed already returns ts-desc, capped rows.
   const recentActivity: CompanySummaryActivity[] = feedRows.slice(0, 5).map((r) => ({
     id: r.id,
@@ -170,7 +146,6 @@ export async function getCompanySummary(id: string): Promise<CompanySummary | nu
     openValueLabel: openValue > 0 ? moneyDash(openValue) : "—",
     openCount: openQuotes.length,
     recentQuotes,
-    activeProjects,
     recentActivity,
   };
 }

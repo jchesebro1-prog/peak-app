@@ -22,15 +22,15 @@
  * Pure — the loader hands in quotes, parts, fixtures and the rate.
  */
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { mfrKey } from "@/lib/catalog-books";
-import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/design/grid-virtual-parts";
-import { CUSTOM_ITEM_PREFIX } from "@/lib/design/grid-custom-items";
-import { isLaborSku } from "@/lib/design/wire-labor";
+import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/quote-line-ids";
+import { CUSTOM_ITEM_PREFIX } from "@/lib/quote-line-ids";
+import { isLaborSku } from "@/lib/quote-line-ids";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { expandLine, type FixtureLookup } from "@/lib/quote-line-members";
 import { partModel } from "@/lib/catalog-rename/sku";
-import { toCsv } from "@/lib/assessments/csv";
+import { toCsv } from "@/lib/csv";
 
 export type SourcingQuote = { id: string; status: string; spec?: unknown; updatedAt?: number; createdAt?: number };
 export type SourcingPart = {

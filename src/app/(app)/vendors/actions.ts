@@ -12,7 +12,7 @@ import { requirePerm, requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { setSettings } from "@/lib/settings";
 import { allCompanies, getCompany } from "@/lib/identity/companies";
-import { rankLinkTargets, type LinkTargetHit } from "@/lib/inbox-link-targets";
+import { rankLinkTargets, type LinkTargetHit } from "@/lib/search/link-targets";
 import { isVendorPickerType } from "@/lib/vendor-quotes/rules";
 import { isVendorType } from "@/lib/identity/config";
 import { getContact } from "@/lib/identity/contacts";
@@ -28,7 +28,6 @@ import {
   vendorCompanyNamed,
 } from "@/lib/stores/vendors";
 import type { VendorDiscounts, VendorRegistration } from "@/lib/vendor-status";
-import { ensureVendorAssignments } from "@/lib/vendor-tasks";
 import { parseLedgerDates } from "./dates";
 
 type R = { ok: true } | { ok: false; error: string };
@@ -176,15 +175,6 @@ export async function logPriceListAction(
   } catch (err) {
     console.error("logPriceListAction", err);
     return { ok: false, error: "Couldn't log that price list — please try again." };
-  }
-  // The ledger entry has LANDED by here, so a failed task check must not
-  // report failure: the user would re-submit and append a duplicate entry.
-  // The task is the cron's job too (ensureVendorAssignments runs daily and is
-  // exactly-once by `source`), so the next run makes it good.
-  try {
-    await ensureVendorAssignments(vendorId, me.name);
-  } catch (err) {
-    console.error("logPriceListAction: owner task deferred to the daily cron", err);
   }
   revalidate();
   return { ok: true };

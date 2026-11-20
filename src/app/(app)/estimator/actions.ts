@@ -7,8 +7,6 @@ import { canonicalBonusSections } from "@/lib/estimate-bonus/canonical";
 import { loadBonusRates } from "@/lib/stores/pricing";
 import { settleBonusRemovals, stripBonusLines } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, discountsForSections, mergeDiscountsForSave, sanitizeProjectDiscounts, type ProjectDiscounts } from "@/lib/project-discounts/rules";
-import { readTierSize } from "@/lib/task-plan/fields";
-import { can } from "@/lib/team";
 import {
   create,
   get,
@@ -33,19 +31,11 @@ import {
 } from "@/lib/stores/quotes";
 import { reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { travelForId } from "@/lib/stores/customers";
-import { clearPricedPor, sourceForSave } from "@/lib/portal-quote-mode";
-import { declinePortalAcceptance } from "@/lib/portal-quotes";
+import { clearPricedPor, sourceForSave } from "@/lib/portal-legacy";
 import type { QuoteLite, TravelLite } from "./types";
 import { rankCatalogParts } from "./catalog-rank";
 import { withSanitizedKeyProducts } from "./narrative";
 import { COVER_SUMMARY_MAX, NOT_INCLUDED_MAX, cleanPlainText, withSanitizedOutputFields } from "@/lib/estimate-output/fields";
-import type { DraftedLine } from "./ai-scope-modal";
-import { get as getSurvey } from "@/lib/stores/surveys";
-import { kv, recordLines, surveyFindings } from "@/lib/survey-findings";
-import {
-  get as getInspection,
-  type InspectionRecord,
-} from "@/lib/stores/inspections";
 import { get as catalogGet, list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import { loadBomModelParts } from "@/lib/estimate-output/bom-models-server";
 import type { BomModelParts } from "@/lib/estimate-output/bom-models";
@@ -64,21 +54,18 @@ import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { reconcileEstimatorValue, sanitizeSystemSell, totals } from "./pricing";
 import {
-  maxApplicableCredit,
   quoteRewardCredit,
   rewardCreditOf,
   sanitizeRewardCredit,
   withoutRewardCredit,
   withRewardCredit,
-} from "@/lib/rewards/credit-line";
-import { companyCredit } from "@/lib/stores/reward-ledger";
+} from "@/lib/credit-line";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { markQuotePdfStale, scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { limitToLivePatch, liveSaveRefusal } from "@/lib/estimate-live-save/rules";
 import { liveKey } from "@/lib/estimate-live-save/live-key";
 import { pdfAppendixKey } from "@/lib/quote-pdf/appendix-key";
 import { documentRevStamp, type QuotePdfView } from "@/lib/quote-pdf/state";
-import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 import { PRICING_TIER_LABEL } from "@/lib/identity/config";
 import { quoteNextStepFor } from "@/lib/quote-next-step-server";
@@ -86,9 +73,8 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { rackFactsOrUndefined } from "@/lib/rack/part-facts";
 import { setQuotePeopleAs } from "@/lib/quote-people";
 import { addVendorPartiesForSave, prepareVendorQuotesForSave } from "@/lib/stores/vendor-quotes";
-import { recordVendorPdfOutcomes, verifyVendorPdfExtractions } from "@/lib/vendor-pdf/save-server";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
-import { leadIdForCreate, linkSavedQuoteToSuggestion } from "@/lib/assist/suggestion-save";
+import { leadIdForCreate } from "@/lib/lead-for-create";
 import { boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 import { deriveEstimatorSections } from "@/lib/estimate-reprice/derive";
@@ -134,15 +120,6 @@ export async function saveEstimatorCustomPartAction(input: {
   revalidatePath("/catalog");
   return { ok: true, sku };
 }
-import {
-  createTask,
-  setTaskStatus as setTaskStatusStore,
-  updateTask as updateTaskStore,
-  removeTask as removeTaskStore,
-  STATUSES as TASK_STATUSES,
-  type TaskStatus,
-} from "@/lib/stores/tasks";
-import { applyTaskTemplate } from "@/lib/stores/task-templates";
 
 /**
  * Estimator server actions — thin, session-gated wrappers over the quotes
@@ -223,12 +200,9 @@ export type SavePayload = {
      built before a newer tick but processed after it can't revert the tick. */
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
-  /** Estimate suggestion (spec 2026-10-13 §2) — the lead a NEW quote is for
+  /** The lead a NEW quote is for
    *  (create only; checked against the leads; an update never touches it). */
   leadId?: string;
-  /** The `ES-…` suggestion the estimate was opened from: every successful
-   *  save links the saved quote to it (idempotent; unknown ids ignored). */
-  suggestionId?: string;
   /** Box goods sale (spec 2026-10-21) — absent (an older caller) keeps the stored flag; dropped on any
    *  non-system quote (boxSaleForSave). A box sale with any labor line refuses the whole save. */
   boxSale?: boolean;
@@ -273,9 +247,6 @@ export type SaveResult = {
   /** #282 phase 2 — the Rewards credit actually stored (after the server's
    *  clamp), so the builder can match its credit line to it. */
   rewardCredit?: number;
-  /** Estimate suggestion — true when this save linked the quote to the
-   *  posted `suggestionId` (the builder stops sending it). */
-  suggestionLinked?: boolean;
   /** #355 review M2 — this save's status move reopened a won estimate at the
    *  version that won; the open document holds the edits, so reload. */
   reopenedAtWon?: boolean;
@@ -466,6 +437,22 @@ function refusedSave(prior: Quote | null, error: string): SaveResult {
   };
 }
 
+/** Read the PDF is gone: a posted vendor quote never stores a read (`extracted`) or a line's `extractedIndex`. */
+function withoutPdfReads<T extends VendorQuote>(vqs: readonly T[]): T[] {
+  return vqs.map((v) => {
+    const { extracted: _e, ...rest } = v as T & { extracted?: unknown };
+    void _e;
+    const lines = Array.isArray(rest.lines)
+      ? rest.lines.map((l) => {
+          const { extractedIndex: _i, ...line } = l as typeof l & { extractedIndex?: unknown };
+          void _i;
+          return line;
+        })
+      : rest.lines;
+    return { ...rest, lines } as unknown as T;
+  });
+}
+
 /**
  * Save — port of the prototype's doSave(): update when a quote is loaded,
  * create otherwise. spec = { sections, mobs } (sections round-trip the
@@ -476,12 +463,8 @@ export async function saveQuoteAction(
   payload: SavePayload
 ): Promise<SaveResult> {
   const user = await requireUser();
-  // Read before the patch is built: a portal-catalog quote's `source` must
-  // survive a plain Estimator save (#245 Task 13) — staff price its
-  // price-on-request lines right here before sending, and a save that
-  // silently reclassified it to "estimator" would drop the Portal panel,
-  // the customer's "in review" copy and every portal-only rule for good.
-  // Every other quote keeps the prior unconditional "estimator" stamp.
+  // Read before the patch is built: a quote the removed customer portal created keeps its stored `source`
+  // (portal-legacy.ts); every other quote takes the "estimator" stamp.
   const prior = loadedId ? await get(loadedId) : null;
   const live = payload.live === true;
   const renderPdf = !live || payload.renderPdf === true;
@@ -490,10 +473,6 @@ export async function saveQuoteAction(
     const refusal = liveSaveRefusal(prior);
     if (refusal) return { ...refusedSave(prior, refusal), notLive: true };
   }
-  // #248 Task 4: source stamping goes through the shared sourceForSave —
-  // portal-catalog (the only portal source the Estimator ever loads; a
-  // portal-service quote redirects to its own builder before reaching here)
-  // keeps its source across this save exactly like before.
   const savedSource = sourceForSave(prior?.source, "estimator");
   // Estimator Phase 5: the package document is decided first — a posted one
   // over the caps refuses the WHOLE save (nothing written), so a too-large
@@ -505,12 +484,8 @@ export async function saveQuoteAction(
   const boxSale = boxSaleForSave(prior, payload.boxSale);
   const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);
   if (boxProblem) return refusedSave(prior, boxProblem);
-  // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
-  // item staff have now priced; `portalReview` clears once none remain —
-  // scoped to a portal-catalog quote so no other save's behavior changes.
-  // #250 (design pick 5): a priced curtain line (`portalConfirm`) also holds
-  // `portalReview` open on Save — it clears only when the quote is sent
-  // (setStatus already does that unconditionally), never here.
+  // A stored portal-catalog quote: `por` clears on any item staff have now priced, and `portalReview` clears once
+  // no price-on-request or curtain-confirm line remains. No other save's behaviour changes.
   const isPortalCatalog = savedSource === "portal-catalog";
   // #267: a system's typed sell / $25 rounding is only kept when valid
   // (sellOverride finite, > 0, ≤ $10M; priceRound exactly 25) — dropped
@@ -549,10 +524,9 @@ export async function saveQuoteAction(
   const sellSanitized = Array.isArray(sellNormalizedRaw)
     ? deriveEstimatorSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalizedRaw, discounts, await loadBonusRates())
     : sellNormalizedRaw;
-  // #282 phase 2: a negative price only on the Rewards credit line, and that
-  // line clamped to what the customer can spend here — refused, not stored,
-  // when any other line carries one.
-  const credit = await settleRewardCredit(sellSanitized, prior, live && prior ? prior.customerId || null : payload.customerId || null, loadedId, can("create", user.roles));
+  // A negative price only on a stored credit line, never more than the quote
+  // already carried — refused, not stored, when any other line carries one.
+  const credit = settleRewardCredit(sellSanitized, prior, live && prior ? prior.customerId || null : payload.customerId || null);
   if (!credit.ok) {
     return {
       ok: false,
@@ -640,7 +614,7 @@ export async function saveQuoteAction(
   let reopenedAtWon = false;
   // #368: set when this save's status move was a revise that re-priced lines.
   let repriced = false;
-  let statusNotice: string | undefined = credit.notice;
+  let statusNotice: string | undefined;
   let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
      system, or moving one to another estimate, would otherwise strand its
@@ -668,10 +642,7 @@ export async function saveQuoteAction(
   // #348 slice 4: server-stamp addedAt and keep only a live vendor company; the vendor party is added after the write.
   const priorVq = vendorQuoteRows(prior?.vendorQuotes);
   storedVendorQuotes = await prepareVendorQuotesForSave(priorVq, storedVendorQuotes, Date.now());
-  // #348 slice 5: a Read-the-PDF result is kept only when its run row vouches for it (model + time from the row);
-  // a run first kept by this save is scored once, after the write.
-  const vpdf = await verifyVendorPdfExtractions(priorVq, storedVendorQuotes);
-  storedVendorQuotes = vpdf.vendorQuotes;
+  storedVendorQuotes = withoutPdfReads(storedVendorQuotes);
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
     const written = await updateCheckingLiveKey(loadedId, payload.baseKey, { ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy: savedBy } as QuotePatch, { live });
@@ -680,7 +651,6 @@ export async function saveQuoteAction(
     if (written.conflict) return { ...refusedSave(prior, "This estimate changed somewhere else — nothing was written."), conflict: written.conflict };
     q = written.quote;
     liveKeyOut = written.liveKey;
-    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, loadedId);
     // #348 slice 4 — a vendor quote's company joins the estimate as a vendor party, once (D-next-2). Never fails the save.
     if (q) {
       try { await withSavepoint(() => addVendorPartiesForSave({ type: "quote", id: loadedId }, priorVq, storedVendorQuotes, user.id)); }
@@ -740,7 +710,7 @@ export async function saveQuoteAction(
     // it must come back as a typed message, not a raw 500. The sibling
     // setStatus call below already does this; create() was the one gap.
     let created: Quote;
-    // Estimate suggestion: the lead rides the create only (an existing lead, else none).
+    // The lead rides the create only (an existing lead, else none).
     const leadId = await leadIdForCreate(payload.leadId);
     try {
       created = await create({ ...patch, owner: user.name, ...(leadId ? { leadId } : {}) });
@@ -789,7 +759,6 @@ export async function saveQuoteAction(
       pdfOptions: normalizePdfOptions(payload.pdfOptions),
       lastSavedBy: savedBy,
     } as QuotePatch);
-    if (q && vpdf.fresh.length) await recordVendorPdfOutcomes(vpdf.fresh, storedVendorQuotes, created.id);
     // #222: same ordering as the update branch.
     if (q && renderPdf) pdfState = await scheduleQuotePdf(created.id);
     if (!live && payload.status !== "draft") {
@@ -816,10 +785,6 @@ export async function saveQuoteAction(
     // D205: the replaced draft goes only once its replacement exists.
     await retireReplacedDraftSafely(payload.replaces, created.id, "estimator");
   }
-  // Estimate suggestion: link the saved quote to the suggestion it came from
-  // (first save indexes it; later saves are no-ops). Never fails the save.
-  // An update links only when the page's unlinkedRetryAllowed rule holds (server-side guard).
-  const suggestionLinked = q?.id && payload.suggestionId ? await linkSavedQuoteToSuggestion(payload.suggestionId, q, !loadedId) : false;
   if (!live) refresh();
   return {
     ok: !!q && !statusError,
@@ -838,73 +803,39 @@ export async function saveQuoteAction(
     // Read back from the store: the key must match what the next check will read.
     liveKey: liveKeyOut ?? (q?.id ? liveKey((await get(q.id)) ?? q) : undefined),
     next: q ? await quoteNextStepFor(q, user) : null,
-    // #282 follow-up: a save that moved the quote to Lost cleared its credit.
-    rewardCredit: q?.status === "lost" ? quoteRewardCredit(q) : credit.credit,
+    rewardCredit: credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
-    ...(suggestionLinked ? { suggestionLinked: true } : {}),
     ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
     ...(repriced ? { repriced: true } : {}),
   };
 }
 
 /**
- * #282 phase 2 — the Rewards credit a save may store (spec §5):
- * - a negative price/qty on any line but the credit line refuses the save;
- * - a won quote keeps the credit it had (its redeem is on the ledger — the
- *   builder can't move it; the credit follows the status);
- * - a lost quote carries none (#282 follow-up: going Lost clears the credit
- *   and a save can't put one back — the locked branch re-homes the stored
- *   amount, which is 0);
- * - no customer drops it (the builder also drops it when the customer
- *   changes; the clamp below is always against the customer being saved);
- * - otherwise it is clamped to that company's available credit (balance −
- *   credit on its OTHER open quotes) and the quote's pre-credit total, in
- *   whole dollars rounded down (#282 points follow-up — 1 point = $1);
- * - without `create` the credit can't grow past what the quote already had.
+ * The credit a save may store. The Rewards program is gone, so nothing applies
+ * a new credit; a quote saved while it existed keeps the one it has:
+ * - a negative price/qty on any line but a stored credit line refuses the save;
+ * - a won or lost quote keeps exactly the credit it had;
+ * - otherwise the credit can't grow past what this quote already carried for
+ *   the same customer, or past the quote's pre-credit total.
  */
-async function settleRewardCredit(
+function settleRewardCredit(
   sections: SpecSection[],
   prior: Quote | null,
-  customerId: string | null,
-  loadedId: string | null,
-  mayApply: boolean
-): Promise<{ ok: true; sections: SpecSection[]; credit: number; notice?: string } | { ok: false; error: string }> {
+  customerId: string | null
+): { ok: true; sections: SpecSection[]; credit: number } | { ok: false; error: string } {
   if (!Array.isArray(sections)) return { ok: true, sections, credit: 0 };
-  const posted = rewardCreditOf(sections);
-  let max: number;
   if (prior && (prior.status === "won" || prior.status === "lost")) {
     // Locked: re-home the stored amount (the negative-line check still runs).
     const locked = quoteRewardCredit(prior);
-    const check = sanitizeRewardCredit(sections, Number.POSITIVE_INFINITY);
+    const check = sanitizeRewardCredit(sections, 0);
     if (!check.ok) return check;
     const maxId = sections.reduce((m, s) => Math.max(m, ...(s?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
     const out = withRewardCredit(check.sections, locked, maxId + 1);
     return { ok: true, sections: out, credit: rewardCreditOf(out) };
   }
-  if (!customerId || !(posted > 0)) max = 0;
-  else {
-    const { available } = await companyCredit(customerId, loadedId);
-    max = maxApplicableCredit(available, totals(withoutRewardCredit(sections), 0).grand);
-    if (!mayApply) max = Math.min(max, prior && (prior.customerId || null) === customerId ? quoteRewardCredit(prior) : 0);
-  }
-  const res = sanitizeRewardCredit(sections, max);
-  if (!res.ok) return res;
-  // #282 points follow-up: the credit is whole dollars (points); a legacy
-  // cents credit is rounded down on its next save and says so.
-  const notice =
-    res.rounded && res.credit > 0
-      ? `Rewards credit rounded down to whole dollars (${fmtMoney(res.credit)}) — credit applies as whole points.`
-      : res.clamped && res.credit > 0
-      ? `Rewards credit reduced to ${fmtMoney(res.credit)} — that's what this customer has available.`
-      : res.clamped
-      ? "Rewards credit removed — this customer has no credit available for this quote."
-      : undefined;
-  return { ok: true, sections: res.sections, credit: res.credit, ...(notice ? { notice } : {}) };
-}
-
-function fmtMoney(n: number): string {
-  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const had = prior && customerId && (prior.customerId || null) === customerId ? quoteRewardCredit(prior) : 0;
+  return sanitizeRewardCredit(sections, Math.min(had, Math.max(0, totals(withoutRewardCredit(sections), 0).grand)));
 }
 
 /** The stored change key, re-read after a status move (a Lost move can clear the Rewards credit from the spec). */
@@ -1008,9 +939,8 @@ export async function moveSystemToEstimateAction(
     by: user.id,
     projectDiscounts,
     // #348 slice 3: only a Move into a NEW estimate splits off the source's lead and companies.
-    // #348 slice 6: and a new estimate inherits Scope only from its source (scopeOnlyFrom).
     ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId
-      ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id }, scopeOnlyFrom: sourceQuoteId }
+      ? { splitFrom: { quoteId: sourceQuoteId, userId: user.id } }
       : {}),
   });
   if (!placed.ok) return placed;
@@ -1051,9 +981,9 @@ async function placeSystemInEstimate(
     tier?: { pricingTier: string; tierMargin: number };
     /** #348 slice 3 — Move into a NEW estimate: the stored source quote lends its lead and non-bidder companies. */
     splitFrom?: { quoteId: string; userId: string };
-    /** #348 slice 6 — Move or Copy into a NEW estimate: the stored source quote whose "Scope only" the new estimate
-     *  inherits (same customer only; newEstimateScopeOnly). Ignored for an existing target. */
-    scopeOnlyFrom?: string;
+    /** Copy into a NEW estimate: the stored source quote (its box-sale flag and project discounts carry). Ignored
+     *  for an existing target. */
+    copiedFrom?: string;
   }
 ): Promise<{ ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string }> {
   const placedIds = vendorIdsInSections([placed]);
@@ -1098,9 +1028,7 @@ async function placeSystemInEstimate(
     const t = totals(mergedSections, 0);
     // The browser supplies these rows: stamp addedAt and drop any company that isn't a live vendor company BEFORE storing / adding parties.
     const priorTargetVq = vendorQuoteRows(existing.vendorQuotes);
-    // #348 slice 5: a moved / copied vendor quote's read is re-verified like a save (these rows come from the
-    // browser) but never scored here — a read is scored once, at the first save that keeps it.
-    const preparedVq = (await verifyVendorPdfExtractions(priorTargetVq, await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now()))).vendorQuotes;
+    const preparedVq = withoutPdfReads(await prepareVendorQuotesForSave(priorTargetVq, placedVq, Date.now()));
     const carried = preparedVq.length
       ? await storeVendorQuotes(target.quoteId, preparedVq)
       : [];
@@ -1135,15 +1063,13 @@ async function placeSystemInEstimate(
   // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
   // simply has none. The id only says which stored quote to read.
   // A read failure only skips the carry; a deleted lead isn't carried.
-  // The stored source quote (Move → New: lead + companies + Scope only; Copy → New: Scope only). Never the client's copy.
-  const sourceId = opts.splitFrom?.quoteId || opts.scopeOnlyFrom || null;
+  // The stored source quote (Move → New: lead + companies; both: box-sale flag + discounts). Never the client's copy.
+  const sourceId = opts.splitFrom?.quoteId || opts.copiedFrom || null;
   let sourceQuote: Quote | null = null;
-  let sourceReadFailed = false;
   if (sourceId) {
     try {
       sourceQuote = await get(sourceId);
     } catch (e) {
-      sourceReadFailed = true;
       console.error("placeSystemInEstimate: reading the source quote failed", sourceId, e);
     }
   }
@@ -1158,11 +1084,6 @@ async function placeSystemInEstimate(
   const t = totals(newSpecSections, 0);
   const splitSource: Quote | null = opts.splitFrom ? sourceQuote : null;
   const splitLeadId = splitSource ? await leadIdForCreate(splitSource.leadId) : null;
-  // #348 slice 6 (Jeff 2026-10-15): a new estimate made off a Scope-only estimate (its stamp, or bidders now or ever)
-  // for the same customer is Scope only too — stamped at create, in the same insert. An existing target changes nothing.
-  const scopeOnly = sourceId
-    ? await (await import("@/lib/parties/portal-bid-server")).newEstimateScopeOnly(sourceQuote, sourceReadFailed, opts.sourceContext.customerId)
-    : { stamp: false, failedClosed: false };
   let created: Quote;
   try {
     created = await create({
@@ -1181,7 +1102,7 @@ async function placeSystemInEstimate(
       // Box goods sale (spec 2026-10-21): Move / Copy → New estimate copies the STORED source's flag (an unsaved
       // source has none). The labor rule applies at the new estimate's next save.
       ...(boxSaleOf(sourceQuote) ? { boxSale: true } : {}),
-    }, { bidScopeOnly: scopeOnly.stamp });
+    });
   } catch (e) {
     return {
       ok: false,
@@ -1190,9 +1111,6 @@ async function placeSystemInEstimate(
           ? e.message
           : "Could not create the new estimate — please try again.",
     };
-  }
-  if (scopeOnly.failedClosed) {
-    console.error("placeSystemInEstimate: the source couldn't be checked — the new estimate was stamped Scope only (fail closed)", { source: sourceId, created: created.id });
   }
   // #348 slice 3: the split estimate starts with the source's companies (never its bidders).
   if (splitSource && opts.splitFrom) {
@@ -1206,8 +1124,7 @@ async function placeSystemInEstimate(
     }
   }
   // The browser supplies these rows: stamp addedAt and drop any non-vendor company before storing / adding parties.
-  // #348 slice 5: reads re-verified like a save, never scored here (see the existing-target branch).
-  const preparedNewVq = (await verifyVendorPdfExtractions([], await prepareVendorQuotesForSave([], placedVq, Date.now()))).vendorQuotes;
+  const preparedNewVq = withoutPdfReads(await prepareVendorQuotesForSave([], placedVq, Date.now()));
   // create() promotes only the declared Quote columns — contactName rides
   // along on the doc like it does for saveQuoteAction's fresh-create path.
   const withContact = await update(created.id, {
@@ -1352,8 +1269,7 @@ export async function copySystemToEstimateAction(
     by: user.id,
     projectDiscounts,
     tier: stamp,
-    // #348 slice 6: a Copy into a NEW estimate inherits Scope only from the stored source (same customer only).
-    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { scopeOnlyFrom: sourceQuoteId } : {}),
+    ...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { copiedFrom: sourceQuoteId } : {}),
   });
   if (!placed.ok) return placed;
   return {
@@ -1602,23 +1518,6 @@ export async function saveBonusAlternatesAction(id: string, ids: string[]): Prom
 }
 
 /**
- * Staff Decline (#245 Task 13, spec §4.4/§5) — the Portal panel's inline
- * textarea + button, no browser confirm(). Same session gate as the
- * Quotes-hub status action (`requireUser()` only — the panel's Approve
- * button reuses that action directly for the mirror-image "won" case).
- */
-export async function declinePortalAcceptanceAction(
-  quoteId: string,
-  note: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await requireUser();
-  if (!quoteId) return { ok: false, error: "Couldn't decline this quote — try again." };
-  const r = await declinePortalAcceptance(quoteId, user.name, note);
-  if (r.ok) refresh();
-  return r;
-}
-
-/**
  * Move a system quote to a pipeline stage from the estimator header's Daylite
  * stage bar (Task 6). Thin wrapper — all the real logic (approval gate on a
  * status-changing move, history, revision-on-send, spawn) lives in
@@ -1694,101 +1593,6 @@ export async function setQuotePipelineAction(id: string, pipelineId: string): Pr
   }
   refresh();
   return stageSyncOf(id, user);
-}
-
-/* ============================================================
-   D4 — Draft quote scope + line items from a survey / inspection
-   ============================================================
-
-   The AI only DRAFTS a scope paragraph and suggested line items (description /
-   qty / unit — NEVER a price; pricing is the estimator's job, guardrail D6).
-   Nothing is persisted here; the client renders the draft for the estimator to
-   review, then inserts the scope / adds lines (price blank) via the estimator's
-   own add-line path. This action just reads the source and calls the AI fn. */
-
-export type DraftScopeResult =
-  | { ok: true; scope: string; lines: DraftedLine[] }
-  | { ok: false; error: string };
-
-/** Flatten an inspection report (findings/logs + measurements) into plain text. */
-function inspectionFindings(ins: InspectionRecord): string {
-  const parts: string[] = [
-    kv("Venue type", ins.venueType),
-    kv("Overall condition", ins.condition),
-    kv("Scope", ins.scope),
-    kv("Narrative", ins.narrative),
-  ];
-  if (ins.logs?.length) {
-    const issues = ins.logs.map((lg, i) => {
-      const bits = [`[${lg.severity}] ${lg.problem}`.trim()];
-      if (lg.location) bits.push(`location: ${lg.location}`);
-      if (lg.explanation) bits.push(lg.explanation);
-      if (lg.solution) bits.push(`recommended: ${lg.solution}`);
-      if (lg.standards?.length) bits.push(`standards: ${lg.standards.join(", ")}`);
-      return `  ${i + 1}. ${bits.join(" — ")}`;
-    });
-    parts.push("Issues found:\n" + issues.join("\n"));
-  }
-  const facts = recordLines(ins.venueInfo);
-  if (facts) parts.push("Venue facts:\n" + facts);
-  const meas = recordLines(ins.measurements);
-  if (meas) parts.push("Measurements:\n" + meas);
-  return parts.filter(Boolean).join("\n");
-}
-
-export async function draftQuoteScopeAction(input: {
-  surveyId?: string;
-  inspectionId?: string;
-}): Promise<DraftScopeResult> {
-  await requireUser();
-
-  try {
-    let sourceLabel: string;
-    let customerName: string | undefined;
-    let venue: string | undefined;
-    let findings: string;
-
-    if (input.surveyId) {
-      const s = await getSurvey(input.surveyId);
-      if (!s) return { ok: false, error: "That field survey could not be found." };
-      sourceLabel = "field survey";
-      customerName = s.customer || undefined;
-      venue = s.venue || undefined;
-      findings = surveyFindings(s);
-    } else if (input.inspectionId) {
-      const ins = await getInspection(input.inspectionId);
-      if (!ins) return { ok: false, error: "That inspection could not be found." };
-      sourceLabel = "inspection";
-      customerName = ins.customer || undefined;
-      venue = ins.venue || undefined;
-      findings = inspectionFindings(ins);
-    } else {
-      return { ok: false, error: "No survey or inspection was specified." };
-    }
-
-    if (!findings.trim()) {
-      return {
-        ok: false,
-        error: "That " + sourceLabel + " has no findings to draft from yet.",
-      };
-    }
-
-    // Rules-based scope assembly (S12/D83 — Jeff: "it should just generate
-    // estimate scopes, that is it"; items stay manual, no model call). The
-    // scope is the record's own captured fields, standard-labeled: the
-    // field-captured scope/narrative first, then the context an estimator
-    // needs while pricing. Deterministic — same record, same text.
-    const header =
-      "Scope of work — from " +
-      sourceLabel +
-      (venue ? " at " + venue : "") +
-      (customerName ? " (" + customerName + ")" : "") +
-      ":";
-    const scope = header + "\n\n" + findings;
-    return { ok: true, scope, lines: [] };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
 }
 
 /**
@@ -1923,99 +1727,3 @@ export async function travelForSelectionAction(
   };
 }
 
-/* ---------------- quote tasks (PUNCHLIST #17 remainder) ----------------
-   Thin wrappers over the shared tasks store, mirroring projects/actions.ts's
-   addTaskAction/setTaskStatusAction/updateTaskAction — same store, same
-   shape, kept as separate action functions per-route (each route owns its
-   own "use server" file in this app) rather than importing across routes.
-   setTaskStatusAction/updateTaskAction there are already parent-agnostic
-   (they only ever touch taskId), so only "add" needs a quote-specific
-   version — it writes quoteId instead of projectId. */
-
-export async function addQuoteTaskAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
-  const me = await requireUser();
-  const quoteId = String(formData.get("quoteId") || "");
-  const title = String(formData.get("title") || "").trim();
-  const section = String(formData.get("section") || "Review");
-  const assigneeUserId = String(formData.get("assigneeUserId") || "") || null;
-  const due = String(formData.get("dueAt") || "");
-  if (!quoteId || !title) return;
-  const assigneeName = assigneeUserId
-    ? (await activeUsers()).find((u) => u.id === assigneeUserId)?.name || ""
-    : "";
-  try {
-    await createTask(
-      {
-        title,
-        section,
-        quoteId,
-        assigneeUserId,
-        assigneeName,
-        dueAt: due ? new Date(due + "T12:00:00").getTime() : null,
-        ...readTierSize(formData),
-      },
-      me
-    );
-  } catch (error) {
-    console.error("addQuoteTaskAction: task mint failed", error);
-    return { ok: false, error: "Couldn’t add that task — please try again." };
-  }
-  revalidatePath("/", "layout");
-}
-
-export async function setQuoteTaskStatusAction(formData: FormData) {
-  await requireUser();
-  const taskId = String(formData.get("taskId") || "");
-  const status = String(formData.get("status") || "");
-  if (!taskId || !(TASK_STATUSES as readonly string[]).includes(status)) return;
-  await setTaskStatusStore(taskId, status as TaskStatus);
-  revalidatePath("/", "layout");
-}
-
-export async function updateQuoteTaskAction(formData: FormData) {
-  await requireUser();
-  const taskId = String(formData.get("taskId") || "");
-  if (!taskId) return;
-  const patch: Record<string, unknown> = {};
-  if (formData.has("assigneeUserId")) {
-    const uid = String(formData.get("assigneeUserId") || "") || null;
-    patch.assigneeUserId = uid;
-    patch.assigneeName = uid ? (await activeUsers()).find((u) => u.id === uid)?.name || "" : "";
-  }
-  if (formData.has("dueAt")) {
-    const d = String(formData.get("dueAt") || "");
-    patch.dueAt = d ? new Date(d + "T12:00:00").getTime() : null;
-  }
-  if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
-  Object.assign(patch, readTierSize(formData));
-  await updateTaskStore(taskId, patch);
-  revalidatePath("/", "layout");
-}
-
-/** Delete a quote task (soft delete). Parent-agnostic like set-status/update
- *  above — only ever touches taskId — but kept as its own per-route wrapper
- *  for the same "use server" convention as the rest of this file. */
-export async function removeQuoteTaskAction(formData: FormData) {
-  await requireUser();
-  const taskId = String(formData.get("taskId") || "");
-  if (!taskId) return;
-  await removeTaskStore(taskId);
-  revalidatePath("/", "layout");
-}
-
-/** Apply a reusable task-template set (D149, #118) to this quote — thin
- *  FormData wrapper over task-templates.ts's applyTaskTemplate(), same
- *  no-op-on-bad-input convention as addQuoteTaskAction above. */
-export async function applyQuoteTemplateAction(formData: FormData): Promise<{ ok: true } | { ok: false; error: string } | void> {
-  const me = await requireUser();
-  const quoteId = String(formData.get("quoteId") || "");
-  const setId = String(formData.get("setId") || "");
-  if (!quoteId || !setId) return;
-  try {
-    await applyTaskTemplate(setId, { kind: "quote", id: quoteId }, me);
-  } catch (error) {
-    console.error("applyQuoteTemplateAction: task template failed", error);
-    return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
-  }
-  revalidatePath("/", "layout");
-}

@@ -4,12 +4,12 @@
    Run the pure half alone with `npx tsx scripts/test-oct15-estimating.ts`. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { evaluateReviewLimit, largestAlternateTotal, reviewAmount, autoSnapshotUnchanged } from "../src/lib/review-limits";
 import { addedAddendumNos, addendumDraftNote, addendumMovesToDraft, addendumReviseConfirm } from "../src/lib/parties/bids";
 import { MAX_CLIENT_RESPONSES_TOTAL } from "../src/lib/estimate-output/responses";
 import { awardBid } from "../src/lib/stores/bids";
-import { bidderSendPlan, BID_SEND_COPY } from "../src/lib/parties/bid-send";
+import { BID_SEND_COPY } from "../src/lib/parties/bid-send";
 import { like } from "drizzle-orm";
 import { getDb } from "../src/db";
 import { companies, contacts as contactsTable } from "../src/db/schema";
@@ -18,7 +18,7 @@ import { saveCompany } from "../src/lib/identity/companies";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { buildQuote, get as getQuote, setStatus } from "../src/lib/stores/quotes";
 import { listFor } from "../src/lib/stores/parties";
-import { addBidder, setBidDetails, recordBidderSend } from "../src/lib/stores/bids";
+import { addBidder, setBidDetails } from "../src/lib/stores/bids";
 import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { documentRevStamp, maxSentRevNo, nextSendRevNo, sentRevNo } from "../src/lib/quote-pdf/state";
 import { quoteAsOfRevision, sentDocumentStamp } from "../src/lib/quote-share/view";
@@ -26,9 +26,7 @@ import { addQuoteRevision } from "../src/lib/stores/quotes";
 import { bomViewProps } from "../src/app/(app)/estimator/quote-document-view";
 import { documentLetterhead, fullDocumentLetterhead } from "../src/lib/letterhead-server";
 import { bookCoverFingerprint } from "../src/lib/part-docs/datasheet-book-cover-server";
-import { specDocumentsForQuote, specDocumentsForRevision, specDocumentsKey, uniqueDocxName, quoteSpecDocuments, revisionSpecKey, zipKeyWithSpecs } from "../src/lib/estimate-output/package-spec-docs-server";
 import { buildRevisionPackageZip } from "../src/lib/estimate-output/package-zip-server";
-import { createSpecDocument, patchSpecDocument, stampSpecDocumentDownload } from "../src/lib/stores/spec-documents";
 import { canChangeQuotePeople, quoteSentOnce, PEOPLE_LOCKED_AFTER_SEND } from "../src/lib/quote-people-lock";
 import { setQuotePeopleAs } from "../src/lib/quote-people";
 import { bonusRatesFrom, lineBonusPct, DEFAULT_BONUS_RATES } from "../src/lib/estimate-bonus/flags";
@@ -49,7 +47,6 @@ import { DEFAULT_IMAGE } from "../src/lib/package-doc/schema";
 import { walkPhotoSides } from "../src/lib/package-doc/photo-sides";
 import { onlineShowsCutSheets } from "../src/lib/curtain-cut-sheets/online";
 import { acceptanceLine, cleanPoNumber, sanitizeClientResponse, responseNoteText, responseRows, cleanClientResponses, CLIENT_ACTION_COPY } from "../src/lib/estimate-output/responses";
-import { notifyPortalAcceptance, ACCEPT_SIGNER_NAME_COPY, ACCEPT_SIGNER_TITLE_COPY, ACCEPT_PO_NUMBER_COPY } from "../src/lib/portal-quotes";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { generateQuotePdf } from "../src/lib/quote-pdf/generate";
@@ -94,13 +91,6 @@ export async function oct15PureChecks(ok: Ok) {
     const sel = rd("src/app/share/quote/[id]/[token]/scope-selection.tsx");
     ok(/aria-label=\{CLIENT_ACTION_COPY\.title\}[^>]* required /.test(sel) && sel.includes("aria-label={CLIENT_ACTION_COPY.poNumber}") && sel.includes("{ name, title, po, email"),
       "oct15 #15: the share page's Choose your scopes form requires the title and offers a PO #");
-    const dlg = rd("src/app/portal/accept-dialog.tsx");
-    ok(dlg.includes('id="pk-accept-name"') && dlg.includes('id="pk-accept-title"') && dlg.includes('id="pk-accept-po"') && dlg.includes("signerName, signerTitle, poNumber })"),
-      "oct15 #15: the portal Accept dialog asks for name, title and PO #");
-    const pq = rd("src/lib/portal-quotes.ts");
-    const acc = pq.slice(pq.indexOf("export async function acceptPortal("), pq.indexOf("export async function notifyPortalAcceptance("));
-    ok(acc.indexOf("ACCEPT_SIGNER_NAME_COPY") > 0 && acc.indexOf("ACCEPT_SIGNER_NAME_COPY") < acc.indexOf("rateLimit(") && acc.indexOf("rateLimit(") < acc.indexOf("updateQuote(") && acc.indexOf("updateQuote(") < acc.indexOf("notifyPortalAcceptance)("),
-      "oct15 #15: acceptPortal validates the signer before the rate limit and the write, then tells the Lead estimator");
   }
   /* ---- #22 — the online estimate shows cut sheets when the PDF includes them ---- */
   {
@@ -109,10 +99,6 @@ export async function oct15PureChecks(ok: Ok) {
     ok(!onlineShowsCutSheets({ pdfCutSheets: true }, 101, 100), "oct15 #22: the print route's rule — edited since the revision, the live-built sheets would disagree, so none");
     const on = rd("src/lib/curtain-cut-sheets/online.ts");
     ok(on.includes('loadCutSheets(q.id, { images: "data" })') && on.includes("CUT_SHEET_APPEND_LOAD_MS") && on.includes("loaded.models.client.length > 0"), "oct15 #22: the online pages load the Client sheets with inlined photos, capped at 8 s");
-    const share = rd("src/app/share/quote/[id]/[token]/page.tsx"), portal = rd("src/app/portal/quotes/[id]/page.tsx"), pkg = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
-    ok(share.includes("await onlineCutSheets(ok.q, ok.rev)") && portal.includes("await onlineCutSheets(q, state.rev)") && pkg.includes("await onlineCutSheets(hit.q, hit.rev)") &&
-       [share, portal, pkg].every((t) => t.includes("<OnlineCutSheets loaded={")) && rd("src/components/estimate-output/package-view.tsx").includes('{slots.cutSheets && <section data-mount="cutsheets"'),
-      "oct15 #22: the v1 share page, the portal page and the package page each show them for their sent revision");
     ok(!/["']use client["']/.test(rd("src/components/cutsheets/online-cut-sheets.tsx")), "oct15 #22: the cut-sheet block is a server component");
   }
   /* ---- #20 — narrative photos alternate right, left, right ---- */
@@ -178,24 +164,8 @@ export async function oct15PureChecks(ok: Ok) {
   {
     const doc = (id: string, quoteId: string | undefined, createdAt: number, kind = "quote") => ({ id, createdAt, updatedAt: createdAt, source: { kind, ...(quoteId ? { quoteId } : {}) } }) as never;
     const all = [doc("SP-1003", "Q-1", 30), doc("SP-1001", "Q-1", 10, "grid"), doc("SP-1002", "Q-2", 20), doc("SP-1004", undefined, 5, "scratch")];
-    ok(specDocumentsForQuote(all, "Q-1").map((d) => d.id).join() === "SP-1001,SP-1003" && specDocumentsForQuote(all, "").length === 0, "oct15 #17: an estimate's specs are those the builder opened from it (quote or Grid source), oldest first");
-    ok(specDocumentsKey([]) === "" && /^[0-9a-f]{8}$/.test(specDocumentsKey([{ id: "SP-1", updatedAt: 1 }])) && specDocumentsKey([{ id: "SP-1", updatedAt: 1 }]) !== specDocumentsKey([{ id: "SP-1", updatedAt: 2 }]),
-      "oct15 #17: the zip cache key follows each spec's last edit");
     const used = new Set<string>();
-    ok(uniqueDocxName("A.docx", used) === "A.docx" && uniqueDocxName("A.docx", used) === "A (2).docx" && uniqueDocxName("a.docx", used) === "a (3).docx", "oct15 #17: two specs with one file name don't collide");
-    ok(specDocumentsForRevision([{ downloadedAt: 50 }, { downloadedAt: 100 }, { downloadedAt: 101 }, {}] as never[], 100).length === 2,
-      "I2: a revision's zip carries only specs downloaded at or before its send (never a draft or a later one)");
-    ok(specDocumentsKey([{ id: "SP-1", updatedAt: 1, downloadedAt: 5, letterheadKey: "aa" }]) !== specDocumentsKey([{ id: "SP-1", updatedAt: 1, downloadedAt: 6, letterheadKey: "aa" }]) &&
-       specDocumentsKey([{ id: "SP-1", updatedAt: 1, downloadedAt: 5, letterheadKey: "aa" }]) !== specDocumentsKey([{ id: "SP-1", updatedAt: 1, downloadedAt: 5, letterheadKey: "bb" }]),
-      "I2: the cache key follows each spec's download and the letterhead it prints");
-    const sdm = rd("src/lib/estimate-output/package-spec-docs-server.ts");
-    ok(!sdm.includes("allSpecDocuments") && sdm.includes("specDocumentsWithQuoteSource(quoteId)") && rd("src/lib/stores/spec-documents.ts").includes('listDocsWhere<Doc>("spec_documents"'),
-      "I2/M5: the zip reads only the specs whose source quote matches, filtered in SQL");
-    ok(zipKeyWithSpecs("ab12cd34", "") === "ab12cd34" && /^[0-9a-f]{8}$/.test(zipKeyWithSpecs("ab12cd34", "0011aabb")) && zipKeyWithSpecs("ab12cd34", "0011aabb") !== "ab12cd34",
-      "oct15 #17: a zip with no SP specs keeps its cache key; with them the key folds them in");
     const zs = rd("src/lib/estimate-output/package-zip-server.ts");
-    ok(zs.includes("if (sps.files.length) files.push(...sps.files);") && zs.includes("else if (specifications) files.push({ name: SPEC_DOCX_NAME") && zs.includes("files.splice(specFileCount, 0, { name: BOOK_FILE_NAME"),
-      "oct15 #17: the SP files replace Specifications.docx (the D94 file only without them); Datasheets.pdf follows them");
   }
   /* ---- #14 — the online / package-page BOM follows the PDF's Qty switch ---- */
   {
@@ -210,28 +180,19 @@ export async function oct15PureChecks(ok: Ok) {
   {
     ok(JSON.stringify(addedAddendumNos([{ no: 1 }], [{ no: 1 }, { no: 3 }, { no: 2 }])) === "[2,3]" && addedAddendumNos(null, []).length === 0 && addedAddendumNos([{ no: 1 }, { no: 2 }], [{ no: 1 }]).length === 0,
       "oct15 #3: only new addendum numbers count (a removal adds none) — #348's addedAddendumNos");
-    ok(addendumDraftNote([2]).includes("Send revision to all bidders") && addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", [2], true),
-      "oct15 #3 / M2: the chip's note names \"Send revision to all bidders\"; an awarded bid never moves to Draft");
+    ok(addendumDraftNote([2]).includes("Mark it sent again") && addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", [2], true),
+      "oct15 #3 / M2: the chip's note says to mark it sent again; an awarded bid never moves to Draft");
     const chip0 = rd("src/app/(app)/estimator/bid-chip.tsx");
     ok(addendumReviseConfirm([2]).startsWith("Addendum 2 came in after this estimate was sent.") && chip0.includes("wasSent && !panel.awardedPartyId && added.length > 0 && !window.confirm(addendumReviseConfirm(added))"),
       "M2: the Bid chip asks before an addendum reverts a sent bid (not on an awarded one)");
     const B = (revSent: number | null) => ({ result: "pending", submitVia: "email", revSent, failed: null }) as never;
     const revs = { status: "draft", revisions: [{ rev: 1, reason: "sent" }] };
-    const plan = bidderSendPlan(revs, [{ id: "a", bid: B(1), email: "a@e.test" }, { id: "b", bid: B(null), email: "b@e.test" }]);
-    ok(plan.label === "Send revision to all bidders" && plan.label === BID_SEND_COPY.sendRevision && plan.ids.join() === "a,b", "oct15 #3: a revising bid sends the revision to every bidder (new ones too)");
     const st = rd("src/lib/stores/bids.ts");
     ok(st.includes("if (!addendumMovesToDraft(q.status, added, !!q.bid?.awardedPartyId)) return { ok: true as const, bid: saved.bid };") && st.indexOf("withQuoteRowLock(quoteId") < st.indexOf('await setStatus(quoteId, "draft"'),
       "oct15 #3: the revise is the normal setStatus(\"draft\") under the bid's row lock");
     const chip = rd("src/app/(app)/estimator/bid-chip.tsx");
     ok(chip.includes("onSync?.(r.sync);") && chip.includes('source: "chip"') && rd("src/app/(app)/estimator/steps/bidders-card.tsx").includes('detail.source === "chip"'),
       "oct15 #3: the chip tells the Bidders card and the Estimator's status to follow");
-    // #4 — already so: the first bidder send of a draft marks the estimate Sent through the normal path.
-    const ss = rd("src/lib/estimate-email/send-server.ts");
-    const mark = ss.slice(ss.indexOf("async function markAndLink("), ss.indexOf("async function attachmentsFor("));
-    ok(mark.includes('if (p.q.status === "draft")') && mark.includes("deps.sendQuote(p.q.id, actor") && ss.includes("sendQuote: (id, actor, asOf) => sendQuoteToCustomer(id, actor, asOf)")
-      && ss.slice(ss.indexOf("export function liveBidderEmailDeps("), ss.indexOf("export function liveBidderEmailDeps(") + 400).includes("...liveEstimateEmailDeps(opts)")
-      && rd("src/lib/quote-review-ops.ts").includes('const gate = await checkApprovalGate(q, "sent", actor.name);'),
-      "oct15 #4 (already so): a bidder send on a Draft runs sendQuoteToCustomer — the approval gate, then setStatus(\"sent\")");
   }
   /* ---- #2 — each bidder gets its own client-link response budget ---- */
   {
@@ -305,11 +266,11 @@ async function oct15LetterheadChecks(ok: Ok) {
   ok(bookCoverFingerprint(null, full) !== bookCoverFingerprint(null, full, ladder) && bookCoverFingerprint(null, full, undefined) === bookCoverFingerprint(null, full),
     "oct15 #12: the zip cache key folds in the spec's own letterhead only when given (old book keys unchanged)");
   const zs = rd("src/lib/estimate-output/package-zip-server.ts");
-  ok(zs.includes("bookLetterhead: loadEstimateBookLetterhead,") && zs.includes("buildSpecDocx(sp.spec, { letterhead: specLetterhead })") && zs.includes("loadEstimateBookLetterhead(peakHeader), loadDocumentLetterhead(peakHeader)"),
-    "oct15 #12: the package zip's book takes the full sheet; Specifications.docx keeps its own letterhead");
+  ok(zs.includes("bookLetterhead: loadEstimateBookLetterhead,") && !zs.includes("buildSpecDocx") && zs.includes("loadEstimateBookLetterhead(peakHeader)"),
+    "oct15 #12: the package zip's book takes the full sheet (the zip no longer carries Specifications.docx)");
   const dl = rd("src/lib/part-docs/datasheet-book-download.ts");
-  ok(dl.includes("quoteBookCover(q), loadEstimateBookLetterhead(q.packagePeakHeader)") && dl.includes("loadEstimateBookLetterhead(resolvePeakHeader(q.packagePeakHeader") && dl.includes("gridBookCover(project, { quoteId, by }), loadDocumentLetterhead(opts.peakHeader)"),
-    "oct15 #12: the staff and share-page estimate books take the full sheet; the Grid design's book is unchanged");
+  ok(dl.includes("quoteBookCover(q), loadEstimateBookLetterhead(q.packagePeakHeader)") && dl.includes("loadEstimateBookLetterhead(resolvePeakHeader(q.packagePeakHeader") && !dl.includes("gridBookCover"),
+    "oct15 #12: the staff and share-page estimate books take the full sheet (the Grid design's book is gone)");
   ok(rd("src/lib/client-package-server.ts").includes("`[package] quote ${quote.id}`, bookLetterhead, bookCover)"), "oct15 #12: the Quotes-hub client package's book takes the full sheet");
   const cs = rd("src/components/cutsheets/cut-sheet-pages.tsx");
   ok(cs.includes('className="pk-cs-letterhead" src={letterheadSrc}') && !cs.includes("m.header.logoDark") && cs.includes("<SubmittalSheet key={m.sheetNo} m={m} />"),
@@ -346,9 +307,6 @@ function oct15BonusRateChecks(ok: Ok) {
   ok(sentRe === def, "oct15 #19: re-saving a sent quote at new rates leaves its bonus lines (and price) untouched");
   ok(canonicalBonusSections({ source: "estimator", status: "won" }, def as never, r) === def && lineBonusPct({ bonus: "estimator" }) === 0.02, "oct15 #19: won / lost never re-derive; a line without bonusPct reads its default");
   const acts = rd("src/app/(app)/estimator/actions.ts");
-  // #368: the save's call is the shared deriveEstimatorSections (derive.ts → canonicalBonusSections); Move / Copy keep theirs.
-  ok((acts.match(/canonicalBonusSections\([^\n]*await loadBonusRates\(\)\)/g) || []).length === 2 && /deriveEstimatorSections\([^\n]*await loadBonusRates\(\)\)/.test(acts) && rd("src/lib/assessments/quote-from-findings.ts").includes("[section], await loadBonusRates())"),
-    "oct15 #19: every server write of an Estimator quote's sections passes the current rates");
 }
 
 /* ---- #375 — remove a bonus from a system ---- */
@@ -557,27 +515,10 @@ async function oct15ZipSpecDbChecks(ok: Ok) {
   const q = (await getQuote(qid))!;
   const rev = (q.revisions || []).find((r) => r.reason === "sent")!;
   const stub = async () => ({ files: [{ name: "Peak_Spec 11 61 43_Stage Curtains.docx", data: Buffer.from("DOCX-SP") }], skipped: ["SP-1999"] });
-  const built = await buildRevisionPackageZip(q, rev, { read: async () => null, sections: async () => [], letterhead: async () => null, bookLetterhead: async () => null, specDocFiles: stub });
+  const built = await buildRevisionPackageZip(q, rev, { read: async () => null, bookLetterhead: async () => null, });
   const has = (t: string) => !!built && built.zip.includes(Buffer.from(t, "utf8"));
-  ok(!!built && has("Peak_Spec 11 61 43_Stage Curtains.docx") && has("DOCX-SP") && !has("Specifications.docx") && built.specifications === true && has("Specification SP-1999"),
-    "oct15 #17 db: the zip carries the SP Word file (no D94 Specifications.docx) and names a spec it couldn't build");
-  const none = await buildRevisionPackageZip(q, rev, { read: async () => null, sections: async () => [], letterhead: async () => null, bookLetterhead: async () => null, specDocFiles: async () => ({ files: [], skipped: [] }) });
+  const none = await buildRevisionPackageZip(q, rev, { read: async () => null, bookLetterhead: async () => null, });
   ok(none === null, "oct15 #17 db: without SP files and with no D94 sections there is nothing to download, as before");
-  const sp = await createSpecDocument({
-    sectionId: "sec-none", header: { projectName: "O15", projectNumber: "", phase: "", issueDate: "", preparedBy: "" }, source: { kind: "quote", id: qid, quoteId: qid },
-    products: [], printQuantities: false, fillIns: {}, createdBy: "t", updatedBy: "t",
-  } as never);
-  registerFixture("spec_documents", sp.id);
-  const linked = await quoteSpecDocuments(qid);
-  ok(linked.length === 1 && linked[0].id === sp.id, "oct15 #17 db: a spec saved from the estimate is found (filtered by its source quote)");
-  ok((await revisionSpecKey(qid, rev.at)) === "", "I2 db: a spec never downloaded is a draft — not in the sent revision's zip (empty spec key)");
-  await stampSpecDocumentDownload(sp.id, {}, rev.at - 1);
-  const k1 = await revisionSpecKey(qid, rev.at);
-  ok(/^[0-9a-f]{8}$/.test(k1), "I2 db: a spec downloaded before the send is in that revision's zip");
-  await patchSpecDocument(sp.id, (d) => ({ ...d, fillIns: { "a#1": "x" } }), "t");
-  const k2 = await revisionSpecKey(qid, rev.at);
-  await stampSpecDocumentDownload(sp.id, {}, rev.at + 60_000);
-  ok(k2 !== k1 && (await revisionSpecKey(qid, rev.at)) === "", "I2 db: an edit re-keys the cache; a spec next downloaded after the send drops out of that revision's zip");
 }
 
 async function oct15PeopleDbChecks(ok: Ok) {
@@ -621,17 +562,7 @@ export async function oct15DbChecks(ok: Ok) {
       const made: Array<{ title: string; assigneeName?: string; notes?: string; quoteId?: string }> = [];
       const users = [{ id: "u-lead", name: "Lead O15", status: "active", roles: ["Estimator"] }, { id: "u-appr", name: "Appr O15", status: "active", roles: ["Admin"] }, { id: "u-mgr", name: "Mgr O15", status: "active", roles: ["Manager"] }];
       const q = { id: "Q-O15", estNo: 1015, name: "Stage", owner: "Lead O15", preparedBy: "", customerId: "C-1", quoteType: "system" } as never;
-      await notifyPortalAcceptance(q, { signerName: "Pat Doe", signerTitle: "Director", poNumber: "4481" }, Date.UTC(2026, 9, 15, 15), {
-        users: async () => users, createTask: (async (input: { title: string; assigneeName?: string; notes?: string; quoteId?: string }) => { made.push(input); return input; }) as never,
-      });
-      ok(made.length === 1 && made[0].assigneeName === "Lead O15" && made[0].title === "EST-1015 accepted online — Accepted by Pat Doe, Director — PO 4481" && made[0].quoteId === "Q-O15" && !!made[0].notes?.startsWith("Accepted by Pat Doe, Director — PO 4481."),
-        "oct15 #15 db: the Lead estimator gets one to-do: \"Accepted by <name>, <title> — PO <po>\": " + JSON.stringify(made[0]?.title));
       const none: typeof made = [];
-      await notifyPortalAcceptance({ ...(q as object), owner: "Nobody Here" } as never, { signerName: "Pat", signerTitle: "Dir", poNumber: "" }, Date.now(), {
-        users: async () => users, createTask: (async (input: { title: string }) => { none.push(input); return input; }) as never,
-      });
-      ok(none.length === 1 && none[0].assigneeName === "Appr O15" && none[0].title.endsWith("Accepted by Pat, Dir"), "oct15 #15 db / M6: no Lead estimator on the roster → the admins only (a Manager approver gets nothing)");
-      ok(ACCEPT_SIGNER_NAME_COPY.length > 0 && ACCEPT_SIGNER_TITLE_COPY.length > 0 && ACCEPT_PO_NUMBER_COPY.length > 0, "oct15 #15: refusal copy exists");
     }
     {
       const before = await loadBonusRates();
@@ -659,7 +590,6 @@ async function oct15BidDbChecks(ok: Ok) {
   const d0 = await setBidDetails(qid, { addenda: [A1] }, "Pat");
   ok(d0.ok && !d0.backToDraft && (await getQuote(qid))?.status === "draft", "oct15 #3: an addendum on a draft just saves");
   await setStatus(qid, "sent", "Pat", { bypassApprovalGate: "engine-owned-flow" });
-  await recordBidderSend(qid, a.party.id, { threadId: "C-o15", rev: 1, at: NOW, by: "Pat", to: "gc@e.test" }, { kind: "sent" }, "u1");
   const d1 = await setBidDetails(qid, { dueAt: NOW + 86_400_000 }, "Pat");
   ok(d1.ok && !d1.backToDraft && (await getQuote(qid))?.status === "sent", "oct15 #3: a due-date change on a sent bid leaves it Sent");
   const d2 = await setBidDetails(qid, { addenda: [A1, A2] }, "Pat");
@@ -667,9 +597,7 @@ async function oct15BidDbChecks(ok: Ok) {
   ok(d2.ok && JSON.stringify(d2.backToDraft) === "[2]" && q2?.status === "draft" && q2.history?.at(-1)?.from === "sent" && q2.history?.at(-1)?.to === "draft",
     "oct15 #3: a new addendum on a sent bid puts it back to Draft through setStatus (history sent → draft)");
   ok((q2?.revisions || []).filter((r) => r.reason === "sent").length === 1, "oct15 #3: the revise cuts no revision — the next send does");
-  const panel = await loadBidPanel(qid, { canEdit: true, canSend: true, canLink: true });
-  ok(panel.ok && panel.panel.plan.label === "Send revision to all bidders" && panel.panel.bidders[0]?.sendLabel === "Send revision",
-    "oct15 #3: the Bidders card then offers \"Send revision to all bidders\": " + (panel.ok ? String(panel.panel.plan.label) : panel.error));
+  const panel = await loadBidPanel(qid, { canEdit: true, canLink: true });
   const d3 = await setBidDetails(qid, { addenda: [A1, A2] }, "Pat");
   ok(d3.ok && !d3.backToDraft, "oct15 #3: re-saving the same addenda changes nothing");
   // M2: on an awarded bid an addendum is recorded and the estimate stays Sent.
@@ -725,8 +653,7 @@ export function discardConfirmChecks(ok: Ok) {
   const vqm = code("src/app/(app)/estimator/vendor-quote-modal.tsx");
   ok(vqm.includes("const closeGuard = confirmClose ? () => (uploading ? window.confirm(DISCARD_COPY.vendorUploading) : confirmClose()) : undefined;") &&
      (vqm.match(/confirmClose=\{/g) || []).length === 1, "discard pins (fix 1): the vendor form asks while its own upload is in flight, else defers to the hook (no prop → no guard)");
-  ok(!/confirmClose/.test(code("src/app/(app)/estimator/ai-scope-modal.tsx")) && !/confirmClose/.test(code("src/app/(app)/estimator/add-system-modal.tsx")) &&
-     /<AiScopeModal[\s\S]*?onClose=\{\(\) => setAiOpen\(false\)\}/.test(bs), "discard pins: AI scope and Add a system don't pass confirmClose (they close as before)");
+  ok(!/confirmClose/.test(code("src/app/(app)/estimator/add-system-modal.tsx")), "discard pins: Add a system doesn't pass confirmClose (it closes as before)");
   const hook = code("src/app/(app)/estimator/use-estimator-state.ts");
   const fn = (start: string, next: string) => hook.slice(hook.indexOf(start), hook.indexOf(next, hook.indexOf(start) + start.length));
   const closeFn = fn("const closeInput = () => {", "const openInputMethod = ");
@@ -743,12 +670,10 @@ export function discardConfirmChecks(ok: Ok) {
     ok(body.length > 0 && body.length < 900 && body.includes("if (!confirmDiscardInput()) return;"), `discard pins: ${n} asks before its close-then-seed`);
   }
   ok(/const confirmDiscardInput = \(\): boolean => \{\s*const d = openInputDirty\(\);\s*return !d \|\| window\.confirm\(discardConfirmText\(d\.kind, \{ read: d\.read \}\)\);/.test(hook) &&
-     /reading = cur\.kind === "vendor" && \(vendorPdfBusyRef\.current \|\| !!vendorPdf\.busy\)/.test(hook) &&
-     /const copying = cur\.kind === "vendor" && vendorHandoff\?\.status === "loading";\s*if \(!inputIsDirty\(\{ baseline: draftBaselineRef\.current\[cur\.kind\], current: modalDrafts\[cur\.kind\], reading, copying \}\)\) return null;/.test(hook) && /read: cur\.kind === "vendor" && \(reading \|\| !!vendorDraft\.pdfRead\)/.test(hook),
-    "discard pins: the confirm compares the open pop-up's draft (a running read counts; a read names it)");
-  ok((hook.match(/markDraftBaseline\(/g) || []).length === 2 && hook.includes('markDraftBaseline("labor");') &&
-     /draftBaselineRef\.current\.vendor = rebaseDraft<VendorDraft>\(draftBaselineRef\.current\.vendor, fill\);/.test(hook) && hook.includes("setVendorDraft(fill);"),
-    "discard pins: baselines are set in one helper — each open, the labor travel reseed — and the hand-off fill re-bases it");
+     hook.includes("if (!inputIsDirty({ baseline: draftBaselineRef.current[cur.kind], current: modalDrafts[cur.kind], reading: false, copying: false })) return null;"),
+    "discard pins: the confirm compares the open pop-up's draft");
+  ok((hook.match(/markDraftBaseline\(/g) || []).length === 2 && hook.includes('markDraftBaseline("labor");'),
+    "discard pins: baselines are set in one helper — each open, the labor travel reseed");
   ok(/if \(draftBaselineRef\.current\[k\] === null\) draftBaselineRef\.current\[k\] = stableDraftJson\(modalDrafts\[k\]\);/.test(hook) && /\}, \[draftBaselineTick, modalDrafts\]\);/.test(hook),
     "discard pins: a pending baseline snapshots the committed draft");
 }

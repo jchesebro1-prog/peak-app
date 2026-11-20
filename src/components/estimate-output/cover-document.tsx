@@ -95,7 +95,6 @@ export default function CoverDocument(p: CoverDocumentProps) {
                   <span>{p.totals.totalLabel}</span>
                   <span>{p.totals.total}</span>
                 </div>
-                {p.totals.rewardsLine && <div style={{ textAlign: "right", fontSize: "9pt", color: "#333" }}>{p.totals.rewardsLine}</div>}
                 {p.totals.standingLines.map((l, i) => (
                   <div key={`${i}-${l}`} style={{ textAlign: "right", fontSize: "9pt", color: "#333" }}>
                     {l}

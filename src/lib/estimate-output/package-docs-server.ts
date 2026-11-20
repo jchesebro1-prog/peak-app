@@ -1,5 +1,5 @@
 import { quoteBom } from "@/lib/client-package-server";
-import { internalSkuCheck } from "@/lib/design/grid-virtual-parts";
+import { internalSkuCheck } from "@/lib/quote-line-ids";
 import type { FixtureRecord } from "@/lib/fixture-assemblies";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadScopedCoverage } from "@/lib/part-docs/load";

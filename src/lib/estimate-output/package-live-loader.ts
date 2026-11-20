@@ -1,16 +1,12 @@
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
-import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
-import { rewardsVisibleFor } from "@/lib/parties/addressee";
-import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoLinks } from "@/lib/quote-pdf/document-loader";
 import { loadKeyProductModels } from "@/lib/narrative/photos";
 import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
 import { documentAddressee } from "@/lib/parties/addressee-server";
 import { latestSentRevision } from "@/lib/quote-pdf/state";
 import { getEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
-import { allSections } from "@/lib/stores/spec-sections";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import type { VisiblePackageState } from "@/lib/quote-share/package-view";
 import { packageBomSkus } from "./bom";
@@ -18,7 +14,6 @@ import { cleanPackageFiles, shownPackageFiles } from "./package-files";
 import { specPackageDocs } from "./package-docs-server";
 import { catalogFor } from "./package-loader";
 import { packageFrozenFields, packagePhotoSections, packageViewModel, type PackageViewProps } from "./package-model";
-import { specReadyFor } from "./package-spec-ready";
 import { previewHeaderLine, previewPath, staffPackageExtras, staffPartDocHref, type StaffPackageExtras } from "./package-preview";
 import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
@@ -33,9 +28,9 @@ import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 /** The customer document's props for the live saved quote (the print route's calls, no photos). */
 export async function liveQuoteDocumentProps(q: Quote): Promise<QuoteDocumentProps> {
-  const [cust, settings, perks] = await Promise.all([getCustomer(q.customerId), getSettings(), purchasePerksForCompany(q.customerId)]);
+  const [cust, settings] = await Promise.all([getCustomer(q.customerId), getSettings()]);
   const addressee = await documentAddressee(q);
-  return { ...quoteDocumentDataFor(q, cust, settings, addressee), rewardsLine: rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : "" };
+  return quoteDocumentDataFor(q, cust, settings, addressee);
 }
 
 /** An open estimate's state, so packageBanner shows nothing (the preview is "as it will read once sent"). */
@@ -50,7 +45,7 @@ async function liveExtras(q: Quote): Promise<StaffPackageExtras> {
   const files = shownPackageFiles(cleanPackageFiles(q.packageFiles), q.packageSelection);
   try {
     const docs = await specPackageDocs(q.spec, q.packageSelection ?? null);
-    return staffPackageExtras(docs, specReadyFor(docs.parts, await allSections()), files, q.id);
+    return staffPackageExtras(docs, false, files, q.id);
   } catch (e) {
     console.warn("[package-preview] documents unavailable", e instanceof Error ? e.message : e);
     return staffPackageExtras(null, false, files, q.id);

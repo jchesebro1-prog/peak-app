@@ -10,15 +10,15 @@ import type { PdfKind } from "./state";
  */
 export const PRINT_TOKEN_TTL_MS = 120_000;
 
-/** Every print route this token can gate — the four quote/letter kinds
+/** Every print route this token can gate — the quote document
  *  (`PdfKind`, unwidened: other code still switches on it exhaustively) plus
  *  #245's datasheet-thumbnail render, #292's cut sheets and #296's rack
  *  sheets and #301's estimate cover and #301 slice C's Grid drawing set
- *  (one token for the page, one per asset it draws), and #340's venue
+ *  (one token for the page, one per asset it draws),
  *  assessment report and findings-only report (id = the AS-id / the
  *  `site:<id>` | `company:<id>` scope), none of which prints a quote
  *  document. */
-export type PrintTokenKind = PdfKind | "part-thumb" | "cutsheets" | "rack" | "cover" | "grid-set" | "assessment" | "assessment-findings";
+export type PrintTokenKind = PdfKind | "part-thumb" | "cutsheets" | "rack" | "cover" | "grid-set";
 
 function mac(secret: string, kind: PrintTokenKind, id: string, exp: number): string {
   return createHmac("sha256", secret).update(`print:${kind}:${id}:${exp}`).digest("base64url");

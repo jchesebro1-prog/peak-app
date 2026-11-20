@@ -12,13 +12,13 @@
 
 export const PEAK_CHANNEL = "peak";
 
-export type ChangedEntity = "thread" | "quote" | "customer" | "task" | "inbox";
+export type ChangedEntity = "quote" | "customer" | "task";
 export type Changed = { type: "changed"; entity: ChangedEntity; id?: string; from: string };
 export type OpenInMain = { type: "open-in-main"; url: string; from: string };
 export type MainAck = { type: "main-ack"; url: string; from: string };
 export type PeakMessage = Changed | OpenInMain | MainAck;
 
-const ENTITIES: readonly string[] = ["thread", "quote", "customer", "task", "inbox"];
+const ENTITIES: readonly string[] = ["quote", "customer", "task"];
 
 let cachedId: string | null = null;
 
@@ -96,18 +96,10 @@ export function isFromOthers(msg: { from?: unknown }, myId: string): boolean {
   return typeof msg.from === "string" && msg.from !== myId;
 }
 
-/** Normalise a received payload: the current messages as-is when well-formed,
- *  the legacy `{type:"inbox-changed", threadId}` mapped to changed/thread
- *  (empty id → changed/inbox), anything else null. */
+/** Normalise a received payload: the current messages as-is when well-formed, anything else null. */
 export function parseMessage(data: unknown): PeakMessage | null {
   if (!data || typeof data !== "object") return null;
   const d = data as Record<string, unknown>;
-  if (d.type === "inbox-changed") {
-    const threadId = typeof d.threadId === "string" ? d.threadId : "";
-    return threadId
-      ? { type: "changed", entity: "thread", id: threadId, from: "legacy" }
-      : { type: "changed", entity: "inbox", from: "legacy" };
-  }
   if (typeof d.from !== "string") return null;
   if (d.type === "changed" && typeof d.entity === "string" && ENTITIES.includes(d.entity)) {
     return {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { get } from "@/lib/stores/catalog";
 import { apiEnvelope, authorizeDisplaysRequest, displaysRateHeaders, displaysRateLimit, unauthorizedMessage, publicCatalogPart } from "@/lib/displays-api";
-import type { SpecCatalogPart } from "@/lib/bid-spec";
+import type { SpecCatalogPart } from "@/lib/specs/part-spec";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { loadPartDocsState } from "@/lib/part-docs/load";

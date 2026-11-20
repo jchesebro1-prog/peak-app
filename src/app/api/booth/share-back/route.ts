@@ -7,7 +7,6 @@ import { normalizeSlug } from "@/lib/booth/shows";
 import { getUser } from "@/lib/users";
 import { INTERESTS, newCaptureId } from "@/lib/booth/capture";
 import { recordBoothCapture } from "@/lib/booth/capture-server";
-import { createShareBackDraft } from "@/lib/booth/followup-server";
 
 /**
  * Public: a visitor who tapped the NFC card sends their info back. Same
@@ -85,11 +84,6 @@ export async function POST(req: Request) {
     if (!r.ok) {
       rateLimitRefund(dedupKey);
       return NextResponse.json({ ok: false, error: r.error }, { status: r.busy ? 409 : 400 });
-    }
-    try {
-      await createShareBackDraft({ leadId: r.leadId, capture: r.capture, owner: actor });
-    } catch (e) {
-      console.error("[booth] share-back draft failed; the lead stands", r.leadId, e);
     }
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (e) {

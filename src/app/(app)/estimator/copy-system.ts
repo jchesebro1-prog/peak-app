@@ -1,6 +1,6 @@
 import { rewriteQuoteSpec, type RenameMap } from "@/lib/catalog-rename/rewrite";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { remapCurtainTrackKeys } from "@/lib/curtain-cut-sheets/track-link";
 import { syncLaborDraftMarkups } from "./labor-group";
 import { lineMarkupOf, round2 } from "./pricing";

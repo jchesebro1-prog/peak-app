@@ -17,7 +17,7 @@ import { addParty, listFor, removeParty, setPartyContact } from "@/lib/stores/pa
 export type PartyActionResult = { ok: true; parties: PartyVM[]; note?: string } | { ok: false; error: string };
 
 const COLL: Record<PartyRecordType, "leads" | "quotes" | "projects"> = { lead: "leads", quote: "quotes", project: "projects" };
-const PAGE: Record<PartyRecordType, string> = { lead: "/leads", quote: "/estimator", project: "/projects" };
+const PAGE: Record<PartyRecordType, string> = { lead: "/leads", quote: "/estimator", project: "/companies" };
 const DENIED = "You can't change who's linked here.";
 
 function isRecordType(t: unknown): t is PartyRecordType {

@@ -1,5 +1,5 @@
 import { getDoc, insertDocIfAbsent, insertWithPrefixedId, listDocs, listDocsByField, softDeleteDoc } from "@/db/doc-store";
-import type { FileRef } from "@/lib/consulting-files";
+import type { FileRef } from "@/lib/file-ref";
 import { can } from "@/lib/team";
 
 /**

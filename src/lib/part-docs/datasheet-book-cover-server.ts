@@ -4,12 +4,10 @@ import { getSettings } from "@/lib/settings";
 import { allUsers } from "@/lib/users";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getCompanyLogo } from "@/lib/stores/company-logos";
-import { getSite } from "@/lib/identity/sites";
 import { resolveCoverSigner } from "@/lib/estimate-output/cover";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
-import type { GridProject } from "@/lib/stores/grid-projects";
-import { get as getQuote, type Quote, type QuoteRevision } from "@/lib/stores/quotes";
+import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import { addressLines, coverContact, coverImageFromDataUrl, type BookCover, type BookCoverPerson } from "./datasheet-book-cover";
 
 /**
@@ -71,35 +69,6 @@ export async function quoteBookCover(q: Quote, opts: { rev?: QuoteRevision; now?
     preparedBy: peak.person,
     peakName: peak.peakName,
     date,
-  };
-}
-
-/**
- * A Grid design option's cover: the design's name and customer, its venue
- * (the linked site, else the intake's venue + address), its contact read
- * exactly, and the option's quote's lead estimator (else whoever drew the
- * design, else whoever is building).
- */
-export async function gridBookCover(project: GridProject, opts: { quoteId?: string | null; by?: string; now?: number } = {}): Promise<BookCover> {
-  const estimator = opts.quoteId ? await getQuote(opts.quoteId) : null;
-  const [cust, logo, peak, site] = await Promise.all([
-    getCustomer(project.customerId),
-    customerLogo(project.customerId),
-    preparedBy(estimator?.owner || project.createdBy || opts.by || "", estimator?.preparedBy ?? null),
-    project.siteId ? getSite(project.siteId) : Promise.resolve(null),
-  ]);
-  const intake = project.intake;
-  return {
-    jobName: project.name || project.id,
-    jobRef: `Design ${project.id}`,
-    customerName: (project.customerId && cust?.name) || project.customer || "",
-    customerLogo: logo,
-    venueName: site ? site.name || site.locationName || "" : project.siteName || intake?.venueName || "",
-    venueAddress: site ? addressLines(site) : [intake?.address || ""],
-    preparedFor: coverContact(cust?.contacts || [], project.contactName ?? "", false),
-    preparedBy: peak.person,
-    peakName: peak.peakName,
-    date: opts.now ?? Date.now(),
   };
 }
 

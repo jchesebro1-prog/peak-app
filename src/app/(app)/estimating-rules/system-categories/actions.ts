@@ -5,7 +5,7 @@ import { requirePerm } from "@/lib/session";
 import { saveSystemCategories } from "@/lib/stores/system-categories";
 import type { SystemCategory } from "@/lib/system-categories";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
-import type { EquipPartHit } from "@/app/(app)/design/grid/settings/actions";
+import type { EquipPartHit } from "@/app/(app)/estimating-rules/part-search-actions";
 
 /**
  * Estimating Rules → System categories mutations (Estimator Phase 6). Admin

@@ -564,14 +564,13 @@ export default function SectionCard(p: SectionCardProps) {
                 Customer: {(sec.presentation || "itemized") === "narrative" ? "Narrative" : "Itemized"} ↗
               </a>
               )}
-              {/* #301: which site-visit discipline this system answers — matches the
-                  survey's Client goals. Blank = inferred from the name (never stored). */}
+              {/* #301: which discipline this system answers. Blank = inferred from the name (never stored). */}
               {sec.kind !== "labor" && !p.boxSale && (
                 <select
                   value={sec.discipline || ""}
                   onChange={(e) => p.onSetDiscipline(e.target.value as ScopeDiscipline | "")}
                   aria-label="Discipline"
-                  title="The site-visit discipline this system answers"
+                  title="The discipline this system answers"
                   style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11, color: "#5b616e", background: "#fff" }}
                 >
                   <option value="">{autoDisciplineLabel(sec.name)}</option>

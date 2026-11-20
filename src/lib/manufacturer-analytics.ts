@@ -16,12 +16,12 @@
 import type { Quote } from "@/lib/stores/quotes";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
+import { isRewardCreditItem } from "@/lib/credit-line";
 import { decidedAt, wonAt } from "@/lib/dashboard/metrics";
 import { mfrKey } from "@/lib/catalog-books";
-import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/design/grid-virtual-parts";
-import { CUSTOM_ITEM_PREFIX } from "@/lib/design/grid-custom-items";
-import { isLaborSku } from "@/lib/design/wire-labor";
+import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/quote-line-ids";
+import { CUSTOM_ITEM_PREFIX } from "@/lib/quote-line-ids";
+import { isLaborSku } from "@/lib/quote-line-ids";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 export type AnalyticsQuote = Pick<Quote, "id" | "status" | "createdAt" | "updatedAt" | "history" | "spec">;

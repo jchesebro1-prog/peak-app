@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  integrationAnchor,
   resolveSettingsSection,
   settingsHref,
   SETTINGS_SECTIONS,
@@ -15,8 +14,6 @@ import type { SettingsData } from "./groups/types";
 import { CompanyGroup } from "./groups/company";
 import { SalesGroup } from "./groups/sales";
 import { FieldGroup } from "./groups/field";
-import { ConsultingGroup } from "./groups/consulting";
-import { IntegrationsGroup } from "./groups/integrations";
 import { TeamGroup } from "./groups/team";
 import { DataGroup } from "./groups/data";
 
@@ -28,22 +25,11 @@ import { DataGroup } from "./groups/data";
  * moved verbatim from this file's old Company / Admin sections.
  *
  * This shell owns what the groups share: the error banner and the `run`
- * wrapper every save goes through, the Gmail connect banner, and the
- * integration-card hash (`/settings#mailboxes` → Integrations, scrolled).
+ * wrapper every save goes through.
  * A group stays mounted (hidden) once opened, so an unsaved draft or a
  * running geocode batch survives a trip to another group — the same as when
  * every card's state lived in this one component.
  */
-
-const GMAIL_BANNER: Record<string, { msg: string; ok: boolean }> = {
-  connected: { msg: "Mailbox connected. Use “Get mail” in the Inbox to import history and receive new mail.", ok: true },
-  disabled: { msg: "Gmail isn’t enabled on this deployment yet (set GMAIL_ENABLED once the API is configured — see DEPLOY §5).", ok: false },
-  denied: { msg: "Google sign-in was cancelled — the mailbox wasn’t connected.", ok: false },
-  forbidden: { msg: "You don’t have permission to connect that mailbox.", ok: false },
-  badstate: { msg: "The connect link expired or didn’t match your session — try again.", ok: false },
-  badmailbox: { msg: "Unknown mailbox.", ok: false },
-  error: { msg: "Couldn’t finish connecting the mailbox. Please try again.", ok: false },
-};
 
 export default function SettingsClient({
   sections,
@@ -54,8 +40,6 @@ export default function SettingsClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const gmailStatus = searchParams.get("gmail");
-  const banner = gmailStatus ? GMAIL_BANNER[gmailStatus] : null;
   const sectionParam = searchParams.get("section");
   const section = resolveSettingsSection(sectionParam, { visible: sections });
   const [, startTransition] = useTransition();
@@ -73,25 +57,6 @@ export default function SettingsClient({
   const [visited, setVisited] = useState<SettingsSection[]>([section]);
   if (!visited.includes(section)) setVisited([...visited, section]);
 
-  // `/settings#mailboxes` / `#recordings` (the hash never reaches the server):
-  // open Integrations, keeping the hash and any other params (e.g. ?gmail=).
-  useEffect(() => {
-    const anchor = integrationAnchor(window.location.hash);
-    if (!anchor || sectionParam === "integrations") return;
-    const qs = new URLSearchParams(window.location.search);
-    qs.set("section", "integrations");
-    router.replace(`/settings?${qs.toString()}#${anchor}`, { scroll: false });
-  }, [sectionParam, router]);
-
-  // …then bring the named card into view once Integrations is showing.
-  useEffect(() => {
-    if (section !== "integrations") return;
-    const anchor = integrationAnchor(window.location.hash);
-    if (!anchor) return;
-    const id = setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ block: "start" }), 0);
-    return () => clearTimeout(id);
-  }, [section]);
-
   const menu = SETTINGS_SECTIONS.filter((s) => sections.includes(s.key));
 
   const renderGroup = (key: SettingsSection) => {
@@ -107,37 +72,14 @@ export default function SettingsClient({
             pipelines={data.pipelines}
             pipelineUsage={data.pipelineUsage}
             customerFieldDefs={data.customerFieldDefs}
+            assumptions={data.consultingAssumptions}
+            run={run}
           />
         );
       case "field":
         return (
           <FieldGroup
-            driveDefaults={data.driveDefaults}
-            scheduling={data.scheduling}
             venueTypes={data.venueTypes}
-            intakeCatalog={data.intakeCatalog}
-            visitReasons={data.visitReasons}
-            surveyTags={data.surveyTags}
-            run={run}
-          />
-        );
-      case "consulting":
-        return (
-          <ConsultingGroup
-            consultingPhases={data.consultingPhases}
-            consultingAssumptions={data.consultingAssumptions}
-            phaseWeights={data.phaseWeights}
-            consultingDisciplines={data.consultingDisciplines}
-            run={run}
-          />
-        );
-      case "integrations":
-        return (
-          <IntegrationsGroup
-            gmail={data.gmail}
-            recordings={data.recordings}
-            catalogPhotos={data.catalogPhotos}
-            run={run}
           />
         );
       case "team":
@@ -150,8 +92,6 @@ export default function SettingsClient({
             settings={data.settings}
             users={data.users}
             documentCategories={data.documentCategories}
-            recordingsBetaUsers={data.recordings.betaUsers}
-            assist={data.assist}
             run={run}
             setError={setError}
           />
@@ -201,23 +141,6 @@ export default function SettingsClient({
             }}
           >
             {error}
-          </div>
-        )}
-
-        {banner && (
-          <div
-            style={{
-              background: banner.ok ? "#eaf6ef" : "#f9ece8",
-              border: `1px solid ${banner.ok ? "#cce9da" : "#f0d6cd"}`,
-              color: banner.ok ? "#1f7a52" : "#b4543a",
-              borderRadius: 10,
-              padding: "10px 14px",
-              fontSize: 13,
-              fontWeight: 500,
-              marginBottom: 16,
-            }}
-          >
-            {banner.msg}
           </div>
         )}
 

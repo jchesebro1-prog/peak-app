@@ -2,7 +2,7 @@ import { get as getQuote, setRevisionPdfPath, updateQuotePdf, type Quote } from 
 import { cleanPackageFiles, MAX_PACKAGE_FILE_BYTES, shownPackageFiles, type PackageFile } from "@/lib/estimate-output/package-files";
 import { loadDatasheetLinkRows } from "@/lib/estimate-output/datasheet-links-server";
 import { readBlobCapped } from "@/lib/narrative/photos";
-import { ESTIMATE_EMAIL_ATTACH_MAX } from "@/lib/estimate-email/compose";
+import { ESTIMATE_EMAIL_ATTACH_MAX } from "@/lib/quote-pdf/file-names";
 import { APPENDIX_COPY, appendixLeftOutNote, drawingSkipNote, drawingsBudget, pdfNotesOf, planDrawings, sizeMb } from "./appendix-plan";
 import { mergeEstimateAppendices, prepareDrawings, type DrawingInput } from "./appendix-merge-server";
 import { isAppOrigin, originFrom } from "./origin";

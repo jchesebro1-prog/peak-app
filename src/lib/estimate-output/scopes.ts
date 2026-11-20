@@ -3,7 +3,7 @@ import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { fmt, lineExtSellOf, systemSellTotal } from "@/app/(app)/estimator/pricing";
 import { alternateGroupsForPrint, systemPrintsInBody } from "@/app/(app)/estimator/quote-document-view";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock, type PrintableKeyProduct } from "@/app/(app)/estimator/narrative";
-import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
+import { CREDIT_APPLIED_LABEL } from "@/lib/credit-line";
 import { COVER_TEXT_MAX, cleanPlainText, effectiveDiscipline, type ScopeDiscipline } from "./fields";
 
 /**
@@ -133,19 +133,20 @@ export function addOptions(p: Pick<QuoteDocumentProps, "sections" | "pdfOptions"
   return out;
 }
 
+/** `rewardsLine` is vestigial (the Rewards program was removed): always "", kept so stored props stay byte-identical. */
 export type CoverTotals = { credit: number; creditLabel: string | null; totalLabel: string; total: number; rewardsLine: string; standingLines: string[] };
 
 /** R1: the totals lines exactly where QuoteDocument prints them. */
-export function coverTotals(p: Pick<QuoteDocumentProps, "t" | "sections" | "isPortalCatalog" | "rewardsLine" | "standingLines">): CoverTotals {
+export function coverTotals(p: Pick<QuoteDocumentProps, "t" | "sections" | "isPortalCatalog" | "standingLines">): CoverTotals {
   const credit = p.t.credit || 0;
   // Phase 2b: an alternate's POR line never touches the Total (as the PDF).
   const anyPor = !!p.isPortalCatalog && (p.sections || []).some((sec) => sec.alternate !== true && sec.items.some((it) => !it.option && it.por));
   return {
     credit,
-    creditLabel: credit > 0 ? rewardPointsAppliedLabel(credit) : null,
+    creditLabel: credit > 0 ? CREDIT_APPLIED_LABEL : null,
     totalLabel: anyPor ? "Total (excludes items pending price)" : "Total",
     total: p.t.grand,
-    rewardsLine: (p.rewardsLine || "").trim(),
+    rewardsLine: "",
     standingLines: (p.standingLines || []).map((l) => l.trim()).filter(Boolean),
   };
 }

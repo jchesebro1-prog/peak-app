@@ -117,26 +117,6 @@ export function coverTextFromSelection(text: string): string {
   return cleanPlainText(String(text || "").replace(/\s*\n\s*/g, " "), COVER_TEXT_MAX);
 }
 
-/** From site visit: fills blank goals, appends after a blank line, never duplicates. */
-export function appendGoals(current: string | undefined, add: string): string {
-  const cur = (current || "").trim();
-  const a = cleanPlainText(add, CLIENT_GOALS_MAX);
-  if (!a) return current || "";
-  if (!cur) return a;
-  if (cur.includes(a)) return current || "";
-  return cleanPlainText(cur + "\n\n" + a, CLIENT_GOALS_MAX);
-}
-
-/** appendGoals plus whether the cap cut the pick short (cut to nothing, or the
- *  goals were already full). A duplicate is not truncation. */
-export function appendGoalsResult(current: string | undefined, add: string): { text: string; truncated: boolean } {
-  const text = appendGoals(current, add);
-  const cur = (current || "").trim();
-  const a = cleanPlainText(add, CLIENT_GOALS_MAX);
-  const full = cleanPlainText(add, Number.MAX_SAFE_INTEGER);
-  return { text, truncated: !!a && !cur.includes(a) && !text.includes(full) };
-}
-
 /** Absent (never stored) → the Settings default list; "" stays empty (D-e). */
 export function effectiveNotIncluded(stored: unknown, fallback: string): string {
   return typeof stored === "string" ? stored : fallback;

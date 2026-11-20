@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useSync } from "@/lib/sync/SyncProvider";
-import DownloadToday from "@/components/sync/download-today";
 
 /**
  * The live sync chip in the nav — replaces Phase 1's navigator.onLine-only
@@ -29,11 +28,8 @@ function chipLabel(s: {
 
 export default function SyncChip({
   variant = "bar",
-  canDownload = false,
 }: {
   variant?: "bar" | "drawer";
-  /** Batch 6 #65 — "Download today's jobs", for field roles (`create`, the #351 pull gate). */
-  canDownload?: boolean;
 }) {
   const s = useSync();
   const [open, setOpen] = useState(false);
@@ -109,7 +105,6 @@ export default function SyncChip({
             </button>
           )}
         </div>
-        {canDownload && <DownloadToday tone="dark" />}
       </div>
     );
   }
@@ -201,7 +196,6 @@ export default function SyncChip({
                 {s.syncing ? "Syncing…" : "Sync now"}
               </button>
             </div>
-            {canDownload && <DownloadToday />}
           </div>
         </>
       )}

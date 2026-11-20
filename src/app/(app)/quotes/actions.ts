@@ -1,10 +1,10 @@
 "use server";
 
+import { boxSaleSendProblem } from "@/lib/estimate-box-sale/rules";
 import { revalidatePath } from "next/cache";
 import { REOPENED_AT_WON_NOTICE, reopenedAtWonVersion } from "@/lib/quote-won-version";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
-import { can } from "@/lib/team";
 import {
   get,
   setStatus,
@@ -55,6 +55,9 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   let q: Awaited<ReturnType<typeof setStatus>>;
   // #355 review M8: read first, to say so when the move reopened a won estimate at the version that won.
   const before = await get(id);
+  // Box goods sale: one that still carries labor is never marked sent (the same rule as Send to customer).
+  const boxProblem = status === "sent" && before && before.status === "draft" ? boxSaleSendProblem(before) : null;
+  if (boxProblem) redirect(back + (back.includes("?") ? "&" : "?") + "statusError=" + encodeURIComponent(boxProblem));
   try {
     // The actor is passed through so the automatic on-send revision is
     // attributed to whoever sent it (item 24).
@@ -105,26 +108,17 @@ export async function saveQuoteRevisionAction(formData: FormData): Promise<void>
 /**
  * Recall an earlier revision. The store snapshots the current state before
  * applying, so this never discards work; it refuses outright on won quotes,
- * whose numbers are already baked into a project, and on lost quotes (#282:
- * out of the Rewards program).
+ * and on lost quotes.
  */
 export async function restoreQuoteRevisionAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") || "");
   const rev = Number(formData.get("rev") || 0);
   if (!id || !Number.isFinite(rev) || rev < 1) return;
-  // #282 phase 3: the recalled Rewards credit is re-clamped like a save —
-  // `create` is needed to grow it.
-  const res = await restoreQuoteRevision(id, rev, user.name, { mayApplyCredit: can("create", user.roles) });
+  const res = await restoreQuoteRevision(id, rev, user.name);
   // #222 fix wave 1: a recall puts an earlier document back on the quote.
   if (res.ok) await scheduleQuotePdf(id);
   revalidatePath("/", "layout");
-  // #282 phase 3: say so when the recalled credit was reduced or removed.
-  if (res.ok && res.creditNotice) {
-    const back = String(formData.get("back") || "/quotes");
-    const safe = back.startsWith("/quotes") ? back : "/quotes";
-    redirect(safe + (safe.includes("?") ? "&" : "?") + "creditNotice=" + encodeURIComponent(res.creditNotice));
-  }
 }
 
 /**

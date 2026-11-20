@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState} from "react";
 import { fmt, round2 } from "./pricing";
 import { sellAt } from "@/lib/markup";
 import { VENDOR_ATTACHMENT_BUDGET, type VendorDraft, type VendorLineDraft } from "./types";
@@ -8,8 +8,6 @@ import { parseMaterialCsv, parseMoney, readCsvFile, summarizeCsvErrors, VENDOR_C
 import { VENDOR_UPLOAD_MAX_LABEL } from "@/lib/vendor-quote-file";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 import VendorCompanyField from "@/components/vendors/vendor-company-field";
-import { VENDOR_COPY } from "@/lib/vendor-quotes/rules";
-import { VENDOR_PDF_COPY } from "@/lib/vendor-pdf/extraction";
 import { DISCARD_COPY } from "@/lib/estimate-steps/discard-confirm";
 
 /**
@@ -107,14 +105,6 @@ export default function VendorQuoteModal({
   onPickVendor,
   onTypedVendor,
   onUnlinkVendor,
-  handoff = null,
-  systems,
-  systemId,
-  onPickSystem,
-  fileActions,
-  reading = false,
-  readPanel,
-  lineHints,
 }: {
   secName: string;
   draft: VendorDraft;
@@ -153,21 +143,6 @@ export default function VendorQuoteModal({
   onPickVendor: (c: { id: string; name: string }) => void;
   onTypedVendor: (name: string) => void;
   onUnlinkVendor: () => void;
-  /** #348 slice 4 — the Inbox hand-off's copy of the email's PDF (null when the form wasn't opened from an email). */
-  handoff?: { status: "loading" | "done" | "failed"; note: string } | null;
-  /** #348 slice 4 — "Add to system", shown only on a hand-off (the form opened on a system the user didn't pick). */
-  systems?: Array<{ id: string; name: string }>;
-  /** The system the form adds to now (the open form's own system id). */
-  systemId?: string;
-  onPickSystem?: (id: string) => void;
-  /** #348 slice 4 — extra controls after Remove in the file row (slice 5's Read the PDF). */
-  fileActions?: ReactNode;
-  /** #348 slice 5 — Read the PDF is running: Add and the file input wait (like an upload). */
-  reading?: boolean;
-  /** #348 slice 5 — the read's results panel, right under the attachment + Link grid. */
-  readPanel?: ReactNode;
-  /** #348 slice 5 — line id → the read's hint under that material row (catalog match, math off, derived amount). */
-  lineHints?: Record<number, { text: string; warn: boolean }>;
 }) {
   const [fileNote, setFileNote] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -197,9 +172,7 @@ export default function VendorQuoteModal({
      save rescales just the same — the stat has to show what will land, not
      fall back to the bare cost. */
   const sell = total > 0 ? round2(sellAt(total, markup)) : total;
-  /** #348 slice 4: the email hand-off is still copying the PDF in. */
-  const copying = handoff?.status === "loading";
-  const busy = uploading || copying || reading;
+  const busy = uploading;
   /* #348 follow-up, fix round 1: a file still uploading lives only in this form's state, so the × / backdrop asks here
      first; otherwise it defers to the hook's check. No confirmClose handed in = none here either. */
   const closeGuard = confirmClose ? () => (uploading ? window.confirm(DISCARD_COPY.vendorUploading) : confirmClose()) : undefined;
@@ -414,29 +387,10 @@ export default function VendorQuoteModal({
           disabled={!valid || busy}
           style={addBtnStyle(valid && !busy)}
         >
-          {uploading ? "Uploading\u2026" : copying ? VENDOR_COPY.copying : reading ? VENDOR_PDF_COPY.reading : editing ? "Save changes" : "Add vendor quote"}
+          {uploading ? "Uploading\u2026" : editing ? "Save changes" : "Add vendor quote"}
         </button>
       }
     >
-      {/* #348 slice 4: the email hand-off opened the form on a system the user didn't pick — let them move it. */}
-      {handoff && systems && systems.length > 0 && onPickSystem && (
-        <div style={{ marginBottom: 16 }}>
-          <label style={LBL}>Add to system</label>
-          <select
-            className="est-field"
-            value={systemId ?? ""}
-            onChange={(e) => onPickSystem(e.target.value)}
-            style={FIELD}
-          >
-            {systems.map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.name || "Untitled system"}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
       {/* vendor / quote number */}
       <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 12, marginBottom: 16 }}>
         <div>
@@ -450,7 +404,6 @@ export default function VendorQuoteModal({
             onPick={onPickVendor}
             onTyped={onTypedVendor}
             onUnlink={onUnlinkVendor}
-            disabled={copying}
             inputId="vendor-quote-vendor"
           />
         </div>
@@ -542,20 +495,12 @@ export default function VendorQuoteModal({
                 >
                   Remove
                 </button>
-                {fileActions}
               </>
             )}
           </div>
           {fileNote && (
             <div style={{ marginTop: 6, fontSize: 11.5, color: "#b4543a" }}>{fileNote}</div>
           )}
-          {/* Always rendered so assistive tech registers the live region before its text changes. */}
-          <div
-            role="status"
-            style={{ marginTop: handoff?.note ? 6 : 0, fontSize: 11.5, color: copying ? "#5b616e" : "#b4543a" }}
-          >
-            {handoff?.note || ""}
-          </div>
         </div>
         <div>
           <label style={LBL}>
@@ -571,7 +516,6 @@ export default function VendorQuoteModal({
           />
         </div>
       </div>
-      {readPanel}
 
       {/* materials */}
       <div style={{ marginBottom: 16 }}>
@@ -741,20 +685,6 @@ export default function VendorQuoteModal({
                 >
                   ×
                 </button>
-                {/* #348 slice 5: the read's hint for this row, spanning the whole grid row. */}
-                {lineHints?.[line.id] && (
-                  <div
-                    style={{
-                      gridColumn: "1 / -1",
-                      marginTop: -3,
-                      fontSize: 11,
-                      lineHeight: 1.35,
-                      color: lineHints[line.id].warn ? "#8a6d1f" : "#5b616e",
-                    }}
-                  >
-                    {lineHints[line.id].text}
-                  </div>
-                )}
               </div>
             ))}
           </div>

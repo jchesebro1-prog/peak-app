@@ -4,7 +4,7 @@
    effects still reach the real setTimeout, so nothing else in a shared test process is touched. */
 import Module from "node:module";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import type { LiveSaveApi, SaveMode, SaveOutcome } from "../src/app/(app)/estimator/use-live-save";
 import type { LiveGate } from "../src/lib/estimate-live-save/scheduler";
 

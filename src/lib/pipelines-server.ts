@@ -3,8 +3,8 @@ import { inTransaction } from "@/db";
 import { isPreviewDeploy } from "@/lib/deploy-env";
 import { listDocs, type Doc } from "@/db/doc-store";
 import {
-  resolvePipelines, resolveProjectStage, validateProjectPipeline, validateQuotePipeline, projectPipelineFor, quotePipelineFor, carriesPipeline,
-  stageById, DEFAULT_PIPELINES, LEAD_QUALIFY_FIX, withLeadQualifyStage, type Pipelines, type ProjectPipeline, type QuotePipeline,
+  resolvePipelines, validateQuotePipeline, quotePipelineFor, carriesPipeline,
+  stageById, DEFAULT_PIPELINES, LEAD_QUALIFY_FIX, withLeadQualifyStage, type Pipelines, type QuotePipeline,
 } from "@/lib/pipelines";
 
 /**
@@ -60,11 +60,6 @@ export async function stageUsage(): Promise<Record<string, Record<string, number
   const pipes = await loadPipelines();
   const out: Record<string, Record<string, number>> = {};
   const bump = (pl: string, st: string) => { (out[pl] ||= {})[st] = (out[pl][st] || 0) + 1; };
-  for (const p of await listDocs<Doc & { kind?: string; pipelineId?: string; stage?: string }>("projects")) {
-    const pl = projectPipelineFor(pipes, p);
-    // A doc not yet re-saved may still carry a pre-pipeline key — count it where it reads.
-    if (p.stage) bump(pl.id, resolveProjectStage(pl, p.kind, p.stage));
-  }
   for (const q of await listDocs<Doc & { quoteType?: string; pipelineId?: string; stage?: string }>("quotes")) {
     if (!carriesPipeline(q.quoteType) || !q.stage) continue;
     bump(quotePipelineFor(pipes, q).id, q.stage);
@@ -73,10 +68,9 @@ export async function stageUsage(): Promise<Record<string, Record<string, number
 }
 
 export async function savePipelines(input: {
-  project?: ProjectPipeline[]; quote?: QuotePipeline[]; defaultQuotePipelineId?: string;
+  quote?: QuotePipeline[]; defaultQuotePipelineId?: string;
 }): Promise<{ ok: true } | { ok: false; errors: string[] }> {
   const errors: string[] = [];
-  for (const p of input.project || []) errors.push(...validateProjectPipeline(p).map((e) => `${p.label || p.id}: ${e}`));
   for (const p of input.quote || []) errors.push(...validateQuotePipeline(p).map((e) => `${p.label || p.id}: ${e}`));
   const current = await loadPipelines();
   const usage = await stageUsage();
@@ -91,11 +85,9 @@ export async function savePipelines(input: {
       }
     }
   };
-  checkRemoved(current.project, input.project);
   checkRemoved(current.quote, input.quote);
   if (errors.length) return { ok: false, errors };
   const patch: Record<string, unknown> = {};
-  if (input.project) patch.projectPipelines = input.project;
   if (input.quote) patch.quotePipelines = input.quote;
   if (input.defaultQuotePipelineId) patch.defaultQuotePipelineId = input.defaultQuotePipelineId;
   await setSettings(patch);
@@ -103,21 +95,18 @@ export async function savePipelines(input: {
 }
 
 /**
- * Settings → Pipelines "Move records": rewrite every live record parked on
- * an in-use stage to a target stage of the SAME pipeline, so the stage can
- * then be removed. Projects go through `setProjectStage` (records history,
- * runs the checklist/Done hooks — same as a normal drag). Quotes only move
- * when the source and target stage share a tag: a different tag would change
- * the quote's Draft/Sent/Won status as a side effect, which stays a
- * deliberate action taken from the quote itself, not from Settings.
+ * Settings → Pipelines "Move records": rewrite every live quote parked on an
+ * in-use stage to a target stage of the SAME pipeline, so the stage can then
+ * be removed. Quotes only move when the source and target stage share a tag:
+ * a different tag would change the quote's Draft/Sent/Won status as a side
+ * effect, which stays a deliberate action taken from the quote itself, not
+ * from Settings.
  *
- * The store modules (`@/lib/stores/projects`, `@/lib/stores/quotes`) both
- * import `loadPipelines` from this module, so they're loaded dynamically
- * here to avoid a static import cycle — the same pattern `projects.ts` uses
- * for `@/lib/stores/tasks` inside `afterStageChange`.
+ * `@/lib/stores/quotes` imports `loadPipelines` from this module, so it is
+ * loaded dynamically here to avoid a static import cycle.
  */
 export async function moveStageRecords(
-  kind: "project" | "quote",
+  kind: "quote",
   pipelineId: string,
   fromStage: string,
   toStage: string,
@@ -126,18 +115,7 @@ export async function moveStageRecords(
   if (fromStage === toStage) return { ok: false, error: "Pick a different stage to move records to." };
   const pipes = await loadPipelines();
 
-  if (kind === "project") {
-    const pl = pipes.project.find((p) => p.id === pipelineId);
-    if (!pl || !stageById(pl, fromStage) || !stageById(pl, toStage))
-      return { ok: false, error: "Unknown pipeline or stage." };
-    const { getAllProjects, setProjectStage } = await import("@/lib/stores/projects");
-    const targets = (await getAllProjects()).filter(
-      (p) => projectPipelineFor(pipes, p).id === pipelineId && p.stage === fromStage
-    );
-    let moved = 0;
-    for (const p of targets) if (await setProjectStage(p.id, toStage, actor)) moved++;
-    return { ok: true, moved };
-  }
+  if (kind !== "quote") return { ok: false, error: "Unknown pipeline or stage." };
 
   const pl = pipes.quote.find((q) => q.id === pipelineId);
   const from = pl && stageById(pl, fromStage);

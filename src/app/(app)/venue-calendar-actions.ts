@@ -3,30 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { getSiteByDocLocId } from "@/lib/identity/sites";
 import {
   addWindow,
   getVenueCalendar,
   hasVenueCalendar,
   importCsvWindows,
   refreshIcs,
-  refreshIfStale,
   removeWindow,
   setIcsUrl,
 } from "@/lib/stores/venue-calendars";
 import {
-  checkAvailability,
-  windowsBetween,
   DEFAULT_TZ,
-  type AvailabilityCheck,
-  type AvailWindow,
   type VenueCalendar,
 } from "@/lib/venue-availability";
 
 /**
  * Server actions behind the venue calendar feature: the Venue page's editor
- * (feed URL, CSV import, manual windows) and the "does the venue's calendar
- * show this time open?" check every scheduler's date picker calls. Every
+ * (feed URL, CSV import, manual windows). Every
  * action re-derives its own office timezone from Settings (same
  * try/validate/fallback the dashboard greeting uses,
  * src/app/(app)/page.tsx) rather than trusting a client-supplied one, since
@@ -53,55 +46,6 @@ function revalidateVenue(locationId: string): void {
   // non-migrated venue); getSiteByDocLocId callers refresh their own page
   // via router.refresh() regardless.
   revalidatePath(`/venues/${encodeURIComponent(locationId)}`);
-}
-
-export type VenueAvailabilityResult = {
-  hasCalendar: boolean;
-  check: AvailabilityCheck;
-  windows: AvailWindow[];
-  venueName?: string;
-  /** `/venues/<sites.id>#calendar` for the resolved venue, or null when
-   *  `locationId` doesn't match any site (so the "Add one" hint has
-   *  nothing sensible to link to and the caller should omit it). */
-  venueHref: string | null;
-};
-
-/** Sunday-start week (the app's own convention — see gantt-lib.ts's
- *  `noonOfWeekStart`) containing `ms`, as [start, end) day boundaries. */
-function weekRange(ms: number): { start: number; end: number } {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
-  const start = d.getTime();
-  const end = new Date(start);
-  end.setDate(end.getDate() + 7);
-  return { start, end: end.getTime() };
-}
-
-/** The scheduling-popover check: does this venue's calendar show
- *  [startMs, endMs) as open? Refreshes a stale ics feed best-effort first,
- *  but never waits more than ~2.5s for it (refreshIfStale) — the popover
- *  answers from whatever's on file rather than making every date-field
- *  edit wait out a slow or broken feed's own (longer) fetch timeout. */
-export async function getVenueAvailabilityAction(
-  locationId: string | null,
-  startMs: number,
-  endMs: number
-): Promise<VenueAvailabilityResult> {
-  const user = await requireUser();
-  if (!locationId || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
-    return { hasCalendar: false, check: { status: "none", conflicts: [] }, windows: [], venueHref: null };
-  }
-  const cal = await refreshIfStale(locationId, user.name);
-  const { start, end } = weekRange(startMs);
-  const site = await getSiteByDocLocId(locationId);
-  return {
-    hasCalendar: !!cal.icsUrl || cal.windows.length > 0 || cal.icsWindows.length > 0,
-    check: checkAvailability(cal, startMs, endMs),
-    windows: windowsBetween(cal, start, end),
-    venueName: site?.name || undefined,
-    venueHref: site ? `/venues/${encodeURIComponent(site.id)}` : null,
-  };
 }
 
 export async function getVenueCalendarAction(locationId: string): Promise<VenueCalendar> {

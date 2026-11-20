@@ -83,11 +83,10 @@ export default function EstimatorClient(props: EstimatorProps) {
         review: s.next ? { label: s.next.pill.label, tone: s.next.pill.tone } : null,
         status: s.status,
         revNum: s.revNum,
-        track: s.trackSummary ?? undefined,
         document: s.packageDoc,
         boxSale: s.boxSale,
       }),
-    [s.loadedId, s.sections, s.packageDoc, s.next, s.status, s.revNum, s.trackSummary, s.boxSale]
+    [s.loadedId, s.sections, s.packageDoc, s.next, s.status, s.revNum, s.boxSale]
   );
 
   return (
@@ -95,7 +94,7 @@ export default function EstimatorClient(props: EstimatorProps) {
       <style>{CSS}</style>
       {!s.phone && (
         <>
-          <EstimatorHeader s={s} step={step} onActed={onActed} onStep={goStep} />
+          <EstimatorHeader s={s} step={step} onActed={onActed} />
           <StepTabs step={step} badges={badges} onStep={goStep} />
           <EstimatorBanners s={s} onActed={onActed} />
         </>

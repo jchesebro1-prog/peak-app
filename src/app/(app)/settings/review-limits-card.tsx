@@ -4,6 +4,7 @@ import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import {
   REVIEW_KINDS,
+  REVIEW_KINDS_SHOWN,
   applyLimitCells,
   formatLimitInput,
   reviewKindColumn,
@@ -103,11 +104,11 @@ export function ReviewLimitsCard({ people, limits }: { people: Person[]; limits:
         </div>
       </div>
       <div style={{ overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", minWidth: 1180, width: "100%" }}>
+        <table style={{ borderCollapse: "collapse", minWidth: 520, width: "100%" }}>
           <thead>
             <tr>
               <th style={{ ...thS, paddingLeft: 18 }}>Person</th>
-              {REVIEW_KINDS.map((k) => (
+              {REVIEW_KINDS_SHOWN.map((k) => (
                 <th key={k.key} style={thS}>
                   {k.group}
                   {k.sub && <span style={{ display: "block", fontWeight: 500, color: "#9aa0ab" }}>{k.sub}</span>}
@@ -119,7 +120,7 @@ export function ReviewLimitsCard({ people, limits }: { people: Person[]; limits:
             {people.map((p) => (
               <tr key={p.id}>
                 <td style={{ ...tdS, paddingLeft: 18, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>{p.name}</td>
-                {REVIEW_KINDS.map((k) => (
+                {REVIEW_KINDS_SHOWN.map((k) => (
                   <td key={k.key} style={tdS}>
                     <input
                       style={cellS}

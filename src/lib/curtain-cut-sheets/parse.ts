@@ -3,7 +3,7 @@
  * (spec §2.1). Pure. A desc that doesn't match EXACTLY reads as null: the
  * collector flags the line, it never guesses a size.
  */
-import { GRID_CURTAIN_TYPES, type GridCurtainType } from "@/lib/design/grid-bom";
+import { GRID_CURTAIN_TYPES, type GridCurtainType } from "./vocab";
 
 export type CurtainSize = { widthFt: number; heightFt: number };
 export type ParsedEstimatorDesc = { name: string; fabricName: string; widthFt: number; heightFt: number; fullnessPct: number };

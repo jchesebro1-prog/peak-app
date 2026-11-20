@@ -9,13 +9,14 @@ import type { Pipelines } from "@/lib/pipelines";
 import type { ReviewLimits } from "@/lib/review-limits";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import { GROUP_LINKS } from "../settings-sections";
-import { LinkTiles } from "./shared";
+import { AssumptionsCard } from "../assumptions-card";
+import { LinkTiles, type Run } from "./shared";
 import type { UserVM } from "./types";
 
 /**
- * Settings → Sales & Rewards (settings cleanup): the Rewards, Catalog,
- * Estimating Rules and Templates shortcut row, then Review limits, Pipelines
- * and Customer fields — each card unchanged from the old Admin section.
+ * Settings → Sales (settings cleanup): the Catalog and Estimating Rules
+ * shortcut row, then Review limits, Pipelines, Customer fields, Estimate
+ * output and the Assumptions library.
  */
 export function SalesGroup({
   users,
@@ -24,6 +25,8 @@ export function SalesGroup({
   pipelines,
   pipelineUsage,
   customerFieldDefs,
+  assumptions,
+  run,
 }: {
   users: UserVM[];
   /** #242 — resolved; archived people's rows kept. */
@@ -35,6 +38,9 @@ export function SalesGroup({
   /** Stage usage counts, keyed by pipeline id then stage id. */
   pipelineUsage: Record<string, Record<string, number>>;
   customerFieldDefs: CustomFieldDef[];
+  /** The Estimator's assumptions library (stored or the defaults). */
+  assumptions: string[];
+  run: Run;
 }) {
   return (
     <>
@@ -50,6 +56,7 @@ export function SalesGroup({
         defs={customerFieldDefs}
       />
       <EstimateOutputCard key={JSON.stringify(estimateOutput)} defaults={estimateOutput} />
+      <AssumptionsCard key={assumptions.join("\n")} assumptions={assumptions} run={run} />
     </>
   );
 }

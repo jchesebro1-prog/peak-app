@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { PartPicker } from "@/app/(app)/design/grid/settings/equipment-map/part-picker";
+import { PartPicker } from "@/components/part-picker";
 import { ShapeSvg } from "@/components/cutsheets/shape-svg";
 import { BLANK_MOUNT_DRAFT, isPristineMountDraft, MOUNT_RULE_LABELS, validateMountRows, type CurtainMountHardware, type MountQtyRule } from "@/lib/curtain-mounts";
 import { mountDetail, MOUNT_DETAIL_VIEWBOX } from "@/lib/curtain-cut-sheets/mount-details";

@@ -5,7 +5,7 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
 import { lineOwnModel } from "@/lib/catalog-rename/sku";
 import { photoTagText } from "@/lib/estimate-output/photo-models";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
-import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
+import { CREDIT_APPLIED_LABEL } from "@/lib/credit-line";
 import { findLine, findSection, resolveChip } from "./chips";
 import { lineAnchorInBom, productBlockInBom } from "./gaps";
 import { linePlaceholder } from "./print";
@@ -158,7 +158,7 @@ export function priceTableOf(ctx: PackageDocCtx): RPriceTable {
     rows: secs.filter((s) => s && s.alternate !== true && systemPrintsInBody(s)).map(row),
     extra: [
       ...(ctx.t.tax > 0 ? [{ name: `Sales tax (${ctx.taxRatePct ?? 0}%)`, price: fmt(ctx.t.tax) }] : []),
-      ...(credit > 0 ? [{ name: rewardPointsAppliedLabel(credit), price: "−" + fmt(credit) }] : []),
+      ...(credit > 0 ? [{ name: CREDIT_APPLIED_LABEL, price: "−" + fmt(credit) }] : []),
     ],
     totalLabel: ctx.totalLabel || "Total",
     total: fmt(ctx.t.grand),

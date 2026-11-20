@@ -7,8 +7,6 @@ import { IMPORT_TYPES, getTypeMeta } from "./types";
 import { linksCustomer, type CustomerRef } from "./link";
 import { allCounts, UPDATABLE_TYPES } from "./registry";
 import { PastePreview } from "./controls";
-import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
-import { mergedConsultingPhases } from "@/lib/stores/engagements";
 
 export const metadata = { title: "Import & export — Quartzite-6" };
 
@@ -148,7 +146,6 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
   const resultRaw = one(sp.r);
   const errRaw = tab === "import" ? one(sp.err) : "";
   const counts = await allCounts();
-  const settings = await getSettings();
 
   // #137 — the contacts / venues previews resolve each row's customer
   // client-side against this index, with the same rule the commit uses
@@ -451,71 +448,6 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           );
         })}
 
-        {/* Daylite history — its own two-file flow (import tab only) */}
-        {tab === "import" && (
-          <div
-            className="im-card"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              background: "#fff",
-              border: "1px solid #ececf0",
-              borderRadius: 13,
-              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-              overflow: "hidden",
-            }}
-          >
-            <div style={{ padding: "16px 16px 0", flex: 1 }}>
-              <span
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "#fff",
-                  background: "#4a5a7a",
-                }}
-              >
-                DL
-              </span>
-              <div style={{ fontSize: 14.5, fontWeight: 600, marginTop: 12, letterSpacing: "-.01em" }}>
-                Daylite history
-              </div>
-              <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4, lineHeight: 1.5, minHeight: 36 }}>
-                Past and live projects, service calls and open quotes from Daylite’s Projects and Opportunities
-                exports.
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "13px 16px", marginTop: 6 }}>
-              <Link
-                href="/import/daylite"
-                className="im-linkbtn"
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 7,
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: "#fff",
-                  background: ACCENT,
-                  padding: "9px 12px",
-                  borderRadius: 8,
-                  textDecoration: "none",
-                }}
-              >
-                <span style={{ fontSize: 13, lineHeight: 1 }}>↑</span> Import
-              </Link>
-            </div>
-          </div>
-        )}
-
         {/* pricing / estimating-rules export (export tab only) */}
         {tab === "export" && (
           <div
@@ -615,10 +547,6 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           closeHref={hrefFor({ type: null, r: null })}
           anotherHref={hrefFor({ type: openType.key, r: null })}
           customerIndex={customerIndex}
-          validationOptions={{
-            phases: mergedConsultingPhases(settings.consultingPhases),
-            disciplines: mergedConsultingDisciplines(settings.consultingDisciplines),
-          }}
         />
       )}
     </>
@@ -632,7 +560,6 @@ function ImportFlowModal({
   closeHref,
   anotherHref,
   customerIndex,
-  validationOptions,
 }: {
   type: NonNullable<ReturnType<typeof getTypeMeta>>;
   resultRaw: string;
@@ -640,7 +567,6 @@ function ImportFlowModal({
   closeHref: string;
   anotherHref: string;
   customerIndex: CustomerRef[];
-  validationOptions: { phases: string[]; disciplines: string[] };
 }) {
   const done = parseResult(resultRaw);
 
@@ -800,7 +726,6 @@ function ImportFlowModal({
                   today={isoDateOf(Date.now())}
                   customerIndex={customerIndex}
                   canUpdate={UPDATABLE_TYPES.has(type.key)}
-                  validationOptions={validationOptions}
                 />
               </>
             )}
@@ -1010,28 +935,6 @@ function DonePanel({
        *  Discipline still commits (decision 3), but that must not be
        *  invisible: this is the one place every import type's result
        *  reaches a human. */}
-      {r.warnings > 0 && (
-        <div
-          style={{
-            marginTop: 14,
-            background: "#fdf6e3",
-            border: "1px solid #efe0ae",
-            borderRadius: 10,
-            padding: "10px 12px",
-            fontSize: 12,
-            color: "#8a6d1f",
-            lineHeight: 1.5,
-          }}
-        >
-          {r.warnings} row{r.warnings === 1 ? "" : "s"} referenced a Phase or Discipline that isn’t
-          in the current settings and {r.warnings === 1 ? "was" : "were"} imported as written
-          anyway.{" "}
-          <Link href="/task-templates" style={{ color: "#8a6d1f", fontWeight: 600, textDecoration: "none" }}>
-            Check them in Task templates
-          </Link>
-          .
-        </div>
-      )}
     </>
   );
 }

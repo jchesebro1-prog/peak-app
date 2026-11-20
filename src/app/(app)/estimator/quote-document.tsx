@@ -2,7 +2,7 @@ import { Fragment, type CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import { systemSellTotal } from "./pricing";
-import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
+import { CREDIT_APPLIED_LABEL } from "@/lib/credit-line";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
 import { alternateGroupsForPrint, alternatingPhotoSides, documentAppendixSystemIds, printedGroupHeadings } from "./quote-document-view";
@@ -84,10 +84,6 @@ export type QuoteDocumentProps = {
    *  anyway; scoped here so an ordinary Estimator quote's own $0 lines (an
    *  intentional freebie, not price-on-request) are never relabeled. */
   isPortalCatalog?: boolean;
-  /** #282 perks+points — "Your Gold rewards: Free freight · Waived travel"
-   *  under the totals; absent/"" when the program is off or the customer has
-   *  no purchase perks (the print route loads it). */
-  rewardsLine?: string;
   /** #293 — Show on PDF → Itemized appendix: every system the body didn't
    *  itemize prints again, in full, after the signature (totals unchanged). */
   pdfItemizedAppendix: boolean;
@@ -1158,7 +1154,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                   marginBottom: 10,
                 }}
               >
-                <span>{rewardPointsAppliedLabel(p.t.credit || 0)}</span>
+                <span>{CREDIT_APPLIED_LABEL}</span>
                 <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(p.t.credit || 0)}</span>
               </div>
             )}
@@ -1178,15 +1174,6 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 {fmt(p.t.grand)}
               </span>
             </div>
-            {p.rewardsLine && (
-              <div
-                className="est-rewards-line"
-                data-testid="doc-purchase-perks"
-                style={{ marginTop: 8, fontSize: 11, color: "#1f7a52", fontWeight: 600, lineHeight: 1.5, textAlign: "right" }}
-              >
-                {p.rewardsLine}
-              </div>
-            )}
             {standingLines.length > 0 && (
               <div className="est-standing" style={{ marginTop: 8, fontSize: 11, color: "#5b616e", lineHeight: 1.6, textAlign: "right" }}>
                 {standingLines.map((line) => (
@@ -1229,8 +1216,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 >
                   <div style={{ ...microLabel, marginBottom: 2 }}>Acceptance</div>
                   <div style={{ fontSize: 11.5, color: "#5b616e", lineHeight: 1.6, marginBottom: 18 }}>
-                    To proceed, sign and return this quote — or accept it online through your{" "}
-                    {p.companyName} customer portal.
+                    To proceed, sign and return this quote.
                   </div>
                   <div
                     className="est-sig"

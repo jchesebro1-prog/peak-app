@@ -1,21 +1,16 @@
 "use client";
 
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { NextStepAction } from "@/lib/quote-next-step";
-import { SEND_STEP_IDS, sendStepLayout, type SendCard } from "@/lib/estimate-email/send-ui";
+import { SEND_STEP_IDS, sendStepLayout, type SendCard } from "@/lib/estimate-steps/send-layout";
 import type { QuoteStatus } from "@/lib/stores/quotes";
 import { QuoteNextStep } from "@/components/quote-review/quote-next-step";
-import { TasksCard } from "@/components/tasks-card";
-import { ApplyTemplateControl } from "@/components/apply-template-control";
-import { addQuoteTaskAction, removeQuoteTaskAction, applyQuoteTemplateAction, setQuoteTaskStatusAction, updateQuoteTaskAction } from "../actions";
 import { ClientLinkPanel } from "../client-link-panel";
 import { PackageStaffPanel } from "../package-staff-panel";
 import { CHEVRON_CLIP, DARK_SELECT, STATUS_DOT } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
-import { SendActivity } from "./send-activity";
-import { BiddersCard, type BidSendCtx } from "./bidders-card";
+import { BiddersCard } from "./bidders-card";
 import { VendorsCard } from "./vendors-card";
-import { SendComposer } from "./send-composer";
 import { BonusCard } from "./bonus-card";
 import { alternateChoices, liveEstimatorBonus } from "@/lib/estimate-bonus/card";
 import { quoteHasBonusLines } from "@/lib/estimate-bonus/record";
@@ -26,11 +21,9 @@ const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpac
 
 /**
  * #305 — Send & track: status and the next step, the Daylite pipeline, the
- * client link (+ revisions) and the client's responses, and the quote's tasks.
- * Phase 3 (spec §10): the email composer leads before the first send; once
- * sent, the Activity card leads with a collapsed "Send another email"
- * composer (none once won/lost). The cards render as one keyed list, so a
- * status change reorders them without remounting the composer.
+ * client link (+ revisions) and the client's responses.
+ * The app sends no email: the PDF is downloaded and the client link copied, and the Status card's next step
+ * (or the status select) marks the estimate sent. The cards render as one keyed list.
  */
 export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextStepAction) => void }) {
   const {
@@ -54,60 +47,28 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
     pdfDirty,
     people,
     pipelines,
-    quoteTasks,
     saveNow,
-    selectionSettled,
     setActionError,
     setGateRefused,
-    setTrackSummary,
     showStageBar,
     stageBarCurIdx,
     stageBarLostLabel,
     stageBarPipeline,
     status,
     statusChanging,
-    templateSets,
     tierResolving,
     next,
     setPdf,
   } = s;
-  /** Bumped after a send so the Activity card re-reads at once. */
-  const [trackKey, setTrackKey] = useState(0);
-  /** #348 2b-ii — a bidder send saves and settles exactly as the composer's send does, then refreshes Activity. */
-  const sendCtx: BidSendCtx = {
-    versionToSend: async () => {
-      // Live mode: land a pending autosave first so the version stamp isn't stale (a false flush keeps the old path).
-      if (s.liveMode) await s.live.flush();
-      return pdfDirty ? await saveNow() : next?.asOf;
-    },
-    selectionSettled,
-    applySync,
-    onSent: () => setTrackKey((k) => k + 1),
-  };
-
   const cards: Record<SendCard, ReactNode> = {
-    composer: (
-      <section key="composer" aria-label="Email the estimate" style={CARD}>
-        <SendComposer s={s} collapsible={status !== "draft"} onSent={() => setTrackKey((k) => k + 1)} />
-      </section>
-    ),
-    activity: (
-      <section key="activity" aria-label="Activity" style={CARD}>
-        {loadedId ? (
-          <SendActivity quoteId={loadedId} refreshKey={trackKey} onTrack={setTrackSummary} />
-        ) : (
-          <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>
-        )}
-      </section>
-    ),
     bidders: (
       <section key="bidders" aria-label="Bidders" style={CARD}>
-        {loadedId ? <BiddersCard quoteId={loadedId} refreshKey={trackKey} sendCtx={sendCtx} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
+        {loadedId ? <BiddersCard quoteId={loadedId} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
       </section>
     ),
     vendors: (
       <section key="vendors" aria-label="Vendors" style={CARD}>
-        {loadedId ? <VendorsCard quoteId={loadedId} vendorQuotes={s.vendorQuotes} refreshKey={trackKey} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
+        {loadedId ? <VendorsCard quoteId={loadedId} vendorQuotes={s.vendorQuotes} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
       </section>
     ),
     status: (
@@ -290,45 +251,6 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
           </>
         )}
         {loadedId && <PackageStaffPanel quoteId={loadedId} section="responses" onPdf={setPdf} />}
-      </section>
-    ),
-    tasks: (
-      <section key="tasks" aria-label="Tasks" style={CARD}>
-        {/* Tasks (PUNCHLIST #17 remainder) — needs a saved quote to
-              attach to; a brand-new unsaved draft has nowhere for
-              quoteId to point yet. */}
-        <div>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: "#9aa0ab",
-              letterSpacing: ".05em",
-              textTransform: "uppercase",
-              marginBottom: 8,
-            }}
-          >
-            Tasks
-          </div>
-          {loadedId ? (
-            <>
-              <ApplyTemplateControl parentField="quoteId" parentId={loadedId} templateSets={templateSets} action={applyQuoteTemplateAction} />
-              <TasksCard
-                parentField="quoteId"
-                parentId={loadedId}
-                tasks={quoteTasks}
-                people={people}
-                addAction={addQuoteTaskAction}
-                setStatusAction={setQuoteTaskStatusAction}
-                updateAction={updateQuoteTaskAction}
-                removeAction={removeQuoteTaskAction}
-                defaultSection="Review"
-              />
-            </>
-          ) : (
-            <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the quote to add tasks.</div>
-          )}
-        </div>
       </section>
     ),
   };

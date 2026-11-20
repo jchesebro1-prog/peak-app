@@ -185,14 +185,6 @@ export async function markCustomerSeen(customerId: string, at: number = Date.now
   return markSeen(fresh.map((d) => d.id), at);
 }
 
-/** Every unseen customer upload — the bell's input. Runs on every
- *  navigation, so both conditions are SQL (`source = customer AND
- *  seenByTeamAt IS NULL`): acknowledged uploads never leave the database. */
-export async function unseenCustomerDocuments(): Promise<DocumentRecord[]> {
-  const rows = await listDocsByField<DocumentRecord>(COLL, "source", ["customer"], { nullFields: ["seenByTeamAt"] });
-  return rows.map(normalize).filter((d) => !d.deleted);
-}
-
 /** Settings → Document categories, resolved (seed when never edited). */
 export async function documentCategories(): Promise<DocumentCategory[]> {
   return resolveDocumentCategories((await getSettings()).documentCategories);

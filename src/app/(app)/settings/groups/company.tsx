@@ -20,7 +20,7 @@ import { inputStyle, labelStyle, LinkTiles, Toggle, type Run } from "./shared";
 import type { CompanySettingsVM, OfficeVM } from "./types";
 
 /**
- * Settings → Company (settings cleanup): the Rewards + Catalog shortcut row,
+ * Settings → Company (settings cleanup): the Catalog shortcut row,
  * Branding & logos, Locations (+ the add/edit location modal), Federal
  * holidays and the company Dashboard defaults. Cards moved verbatim from the
  * old settings-client.tsx Company section.

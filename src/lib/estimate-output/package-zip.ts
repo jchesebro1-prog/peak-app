@@ -11,10 +11,9 @@ export const PACKAGE_ZIP_TOTAL_MAX_BYTES = 60 * 1024 * 1024;
 export const PACKAGE_ZIP_DEADLINE_MS = 45_000;
 /** #329 — Datasheets.pdf may merge this long past the read deadline (45 + 30 s, then the zip, inside the route's 120 s). */
 export const PACKAGE_BOOK_MS = 30_000;
-/** #329 — bumped when the zip's contents change, so a cached zip from before is never served (2: Datasheets.pdf; 3: its job cover, Grid notes #8). */
-export const PACKAGE_ZIP_CACHE_VERSION = 3;
+/** #329 — bumped when the zip's contents change, so a cached zip from before is never served (2: Datasheets.pdf; 3: its job cover, Grid notes #8; 4: no Specifications.docx). */
+export const PACKAGE_ZIP_CACHE_VERSION = 4;
 export const PACKAGE_ZIP_CACHE_PREFIX = "estimate-package/";
-export const SPEC_DOCX_NAME = "Specifications.docx";
 export const LEFT_OUT_NAME = "LEFT OUT.txt";
 export const NOTHING_TO_DOWNLOAD = "Nothing to download for this estimate.";
 export const LEFT_OUT_REASON = {
@@ -36,7 +35,7 @@ export function packageZipCacheDir(quoteId: string): string {
  *  `-h0`), so a company-default change or a toggle racing a build can never
  *  serve a zip with the wrong header. The header is LIVE, not frozen with the
  *  revision: a toggle after send applies to the next download. #329: plus the
- *  contents version (`-v3`), so a zip cached before is never served. Grid notes
+ *  contents version (`-v4`), so a zip cached before is never served. Grid notes
  *  #8: plus `-c<coverKey>`, the fingerprint of Datasheets.pdf's job cover as it
  *  would print now (bookCoverFingerprint — it reads live data), so a logo,
  *  contact, estimator or letterhead edit names a fresh zip, as the standalone book does. */

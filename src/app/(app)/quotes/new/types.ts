@@ -7,14 +7,9 @@
 export type ServiceType =
   | "system"
   | "box_sale"
-  | "flame_test"
-  | "repair"
-  | "inspection"
-  | "consulting"
-  | "rental"
   | "custom";
 
-/** Same six entries as the "+ New quote" split menu (quotes/controls.tsx) —
+/** The same entries as the "+ New quote" split menu (quotes/controls.tsx) —
  *  label/sub-label/badge content ported verbatim so the picker on this
  *  screen reads identically to the menu that links here — plus a trailing
  *  "custom" card (#110): a user-named category for a system quote that
@@ -49,51 +44,6 @@ export const SERVICE_TYPES: Array<{
     badgeBd: "",
   },
   {
-    key: "flame_test",
-    label: "Flame test quote",
-    sub: "Auto-priced by travel + curtain count",
-    badge: "Auto",
-    badgeInk: "#b4543a",
-    badgeSoft: "#f7e9e5",
-    badgeBd: "#f0d6cd",
-  },
-  {
-    key: "repair",
-    label: "Repair quote",
-    sub: "Auto-priced by labor + travel + parts",
-    badge: "Auto",
-    badgeInk: "#9a6a1f",
-    badgeSoft: "#fbf3dd",
-    badgeBd: "#f0e2bd",
-  },
-  {
-    key: "inspection",
-    label: "Inspection quote",
-    sub: "Auto-priced by line sets + level + travel",
-    badge: "Auto",
-    badgeInk: "#3155a8",
-    badgeSoft: "#e9eefb",
-    badgeBd: "#d4ddf3",
-  },
-  {
-    key: "consulting",
-    label: "Consulting quote",
-    sub: "Fee-based design & advisory work",
-    badge: "Fee",
-    badgeInk: "#6b4fa1",
-    badgeSoft: "#f0ebf9",
-    badgeBd: "#ddd2f0",
-  },
-  {
-    key: "rental",
-    label: "Rental quote",
-    sub: "Auto-priced by equipment + duration",
-    badge: "Auto",
-    badgeInk: "#2f7a52",
-    badgeSoft: "#e6f4ec",
-    badgeBd: "#cde7d8",
-  },
-  {
     key: "custom",
     label: "Custom category",
     sub: "Name your own — builds in the Estimator",
@@ -108,17 +58,12 @@ export function isServiceType(v: string | null | undefined): v is ServiceType {
   return !!v && SERVICE_TYPES.some((s) => s.key === v);
 }
 
-/** Where each service type's builder lives, matching NewQuoteMenu's six hrefs
+/** Where each service type's builder lives, matching NewQuoteMenu's hrefs
  *  ("custom" is a system quote with a user-named category, #110). */
 export const BUILDER_BASE: Record<ServiceType, string> = {
   system: "/estimator",
   box_sale: "/estimator",
   custom: "/estimator",
-  flame_test: "/flame-tests/quote",
-  repair: "/repairs/quote",
-  inspection: "/inspections/quote",
-  consulting: "/design/engagements/quote",
-  rental: "/rentals/quote",
 };
 
 export type BuilderPathOpts = {
@@ -126,7 +71,7 @@ export type BuilderPathOpts = {
   category?: string;
   /** #160 — optional quote name; blank → the builder's own auto-name. */
   name?: string;
-  /** #160 — customer location id; never sent to rental (no venue concept). */
+  /** #160 — customer location id. */
   venue?: string;
   /** #160 — contact NAME (contacts have no id). */
   contact?: string;
@@ -148,7 +93,7 @@ export function builderPath(type: ServiceType, customerId: string, opts: Builder
   if (type === "box_sale") p.set("box", "1");
   if (type === "custom") put("category", opts.category);
   put("name", opts.name);
-  if (type !== "rental") put("venue", opts.venue);
+  put("venue", opts.venue);
   put("contact", opts.contact);
   put("replaces", opts.replaces);
   const qs = p.toString();
@@ -237,12 +182,4 @@ export type IntakeSubmit = {
   newContactRole: string;
   newContactEmail: string;
   newContactPhone: string;
-  /** #123 — set when the intake was opened from an Inbox thread ("+ New
-   *  quote"): the action mints the draft quote, links the thread and
-   *  returns to the Inbox instead of redirecting into the builder. */
-  threadId?: string;
-  /** I4 review — set only after the user explicitly picks "Create another"
-   *  on the "This thread is linked to X" notice; lets linkThreadToNewQuote
-   *  overwrite a thread's existing (non-inbox-draft) link on purpose. */
-  confirmReplaceLink?: boolean;
 };

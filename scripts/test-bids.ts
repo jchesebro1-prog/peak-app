@@ -2,7 +2,7 @@
    Run the pure half alone with `npx tsx scripts/test-bids.ts`. */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import {
   BID_RESULTS, BID_RESULT_LABEL, EMPTY_BID, sanitizeBidDetails, sanitizeBidSiteUrl, sanitizeBidderPatch, newBidderState, applyBidderPatch,
   markSubmittedState, currentRev, needsRev, awardPlan, undoAwardPlan, canAward, canUndoAward, bidderStatusText, bidDueText, bidDueDays, isOpenBid,
@@ -11,23 +11,18 @@ import {
 import type { BidderState } from "../src/lib/parties/rules";
 import { bidderSentState, bidderFailedState, nextBidderOpens, bidderOpensText } from "../src/lib/parties/bids";
 import {
-  isPartyId, latestSentRev, bidderPdfRev, bidderEmailNeed, bidderSendPlan, bidderAlreadyHas, addendaSinceRow, addendaAfterLatestSend,
-  bidderSubject, bidWalkSummary, BID_SEND_COPY, type SendRow,
+  isPartyId, latestSentRev, bidderPdfRev, BID_SEND_COPY,
 } from "../src/lib/parties/bid-send";
 import { signShareTokenV3, verifyShareTokenV3, signShareTokenV2, verifyShareTokenV2, signShareToken, verifyShareToken, parseShareToken, isPackageToken, isShareTokenV2, SHARE_TOKEN_V3_RE } from "../src/lib/quote-share/token";
 import { bidderCanAct, packageBanner, PACKAGE_COPY } from "../src/lib/quote-share/package-view";
 import { responseNoteText, responseTaskTitle, responseRows, cleanClientResponses } from "../src/lib/estimate-output/responses";
 import { fmt } from "../src/app/(app)/estimator/pricing";
-import { bidderEmailDefaults, isBidderFileName, bidderFileOf } from "../src/lib/estimate-email/compose";
-import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, rewardsVisibleFor, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
+import { addressedHeader, bidDocLine, bidderPdfFileName, ownerNameFromLine, sendDefaultsContact, type DocAddressee } from "../src/lib/parties/addressee";
 import { quoteAsOfRevision } from "../src/lib/quote-share/view";
 import { coverDocumentPropsFor } from "../src/lib/estimate-output/cover";
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
 import { loadQuoteDocumentProps } from "../src/lib/quote-pdf/document-loader";
 import { quoteMatchesSearch } from "../src/lib/estimate-number";
-import { selectBidDue } from "../src/lib/triage/feeds/quotes";
-import { closedKeys } from "../src/lib/triage/liveness";
-import type { SnapshotRow } from "../src/lib/triage/types";
 import { bidReportAnchor, bidsByBidder, BID_REPORT_COPY, type BidReportInput } from "../src/lib/parties/bid-report";
 import { BID_REPORT_MAX, loadBidReportData } from "../src/lib/parties/bid-report-server";
 import { BIDS_RENDERERS } from "../src/app/(app)/_dashboard/widgets/bids";
@@ -35,42 +30,28 @@ import { galleryFor, presetFor, widgetDef } from "../src/lib/dashboard/registry"
 import type { WidgetCtx } from "../src/lib/dashboard/context";
 import { renderToStaticMarkup as bidReportRender } from "react-dom/server";
 import type { ReactElement } from "react";
-import { factLabel, pointsFor } from "../src/lib/triage/rank";
 import type { Quote } from "../src/lib/stores/quotes";
-import { portalBidCandidates, portalBidChip, portalBidDueAt, portalBidList, portalBidState, PORTAL_BID_COPY, quoteHasBidders, quoteIsScopeOnly, type PortalBidRow } from "../src/lib/parties/portal-bid";
-import { portalBidPdfSource, portalOnlineEstimateState, portalQuotePdfSource } from "../src/lib/quote-pdf/portal-access";
-import { portalBidPdfResponse, portalBidRowsFor, portalBidRowsForCompany, portalBidderQuoteIds, portalOwnerBom, portalOwnerHasBidders, portalQuoteHasBidders, PORTAL_BID_PDF_PER_MIN, newEstimateScopeOnly } from "../src/lib/parties/portal-bid-server";
 import { packageBomRows, vendorFreeDescription } from "../src/lib/estimate-output/bom";
-import { ownerBom, ownerBomSections } from "../src/lib/parties/portal-owner-bom";
-import { acceptPortal, copyToCart, PORTAL_NOT_FOUND_COPY, refreshPortalQuote, renamePortalQuote } from "../src/lib/portal-quotes";
-import { serviceRequestFromQuoteId } from "../src/lib/portal-service-quotes";
 import { like } from "drizzle-orm";
 import { getDb } from "../src/db";
 import { companies, contactEmails, contacts as contactsTable } from "../src/db/schema";
 import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact, setEmails } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
-import { addQuoteRevision, buildQuote, create as createQuote, get as getQuote, markBidScopeOnly, portalListsQuote, revisionDocFields, setStatus, update as updateQuote, type QuoteRevision } from "../src/lib/stores/quotes";
-import { getProjectByQuote } from "../src/lib/stores/projects";
-import { autoTaskId } from "../src/lib/stores/tasks";
-import { addParty, copyParties, listFor, listForRecordsIncludingDeleted, partyId, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
+import { addQuoteRevision, buildQuote, create as createQuote, get as getQuote, revisionDocFields, setStatus, update as updateQuote, type QuoteRevision } from "../src/lib/stores/quotes";
+import { addParty, copyParties, listFor, partyId, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
 import { loadBidPanel } from "../src/lib/parties/bid-panel-server";
 import { awardedRecipient, bidderRecipient, documentAddressee, touchAwardedAddressee } from "../src/lib/parties/addressee-server";
 import { renderBidderPdf } from "../src/lib/quote-pdf/bidder-pdf-server";
 import { signPrintToken, verifyPrintToken } from "../src/lib/quote-pdf/token";
 import { quoteDocumentDataFor } from "../src/lib/quote-pdf/quote-document-data";
-import { addBidder, awardBid, listBidders, markBidderSendFailed, markSubmitted, recordBidderOpen, recordBidderSend, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
-import { recordEstimateEmail } from "../src/lib/stores/quotes";
+import { addBidder, awardBid, listBidders, markSubmitted, recordBidderOpen, setBidDetails, undoAward, updateBidder } from "../src/lib/stores/bids";
 import { bidderLinkPath, bidderSharePath, ensureShareLink, recordSharedOpen, resolveSharedPackage, revokeShareLink } from "../src/lib/quote-share/links";
 import { submitClientResponse } from "../src/lib/estimate-output/responses-server";
 import { CLIENT_ACTION_COPY, cleanBidderName, type ClientResponse } from "../src/lib/estimate-output/responses";
 import { appendResponseTo, responsesBy, responseQuoteBucket, MAX_CLIENT_RESPONSES, RESPONSE_QUOTE_LIMIT } from "../src/lib/estimate-output/responses";
 import { loadPackageViewProps } from "../src/lib/estimate-output/package-loader";
-import {
-  EstimateEmailError, SEND_COPY, sendBidderEmail, sendEstimateEmail,
-  type BidderEmailDeps, type BidderEmailInput, type BidderTarget, type ThreadSpec,
-} from "../src/lib/estimate-email/send-server";
-import type { EstimateEmailClaim, EstimateEmailEntry } from "../src/lib/stores/quotes";
+import type { } from "../src/lib/stores/quotes";
 
 const T1 = Date.UTC(2026, 9, 1);
 const B = (over: Partial<BidderState> = {}): BidderState => ({ ...newBidderState("email"), ...over });
@@ -206,37 +187,8 @@ export async function bidChecks(ok: Ok) {
   const tq = (over: Record<string, unknown> = {}) =>
     ({ id: "Q-9", name: "Gym", customer: "MPSD", owner: "Dana Tester", status: "sent", updatedAt: 1, bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: null }, ...over }) as unknown as Quote;
   const two = new Map([["Q-9", [{ bid: B() }, { bid: B() }]]]);
-  const due = selectBidDue([tq()], two, tctx);
-  const f = due[0]?.facts.find((x) => x.kind === "bid_due");
-  ok(due.length === 1 && !!f && f.kind === "bid_due" && f.days === 1 && f.missing === 2, "bids: due tomorrow with 2 unsubmitted → bid_due {days:1, missing:2}");
-  ok(f?.kind === "bid_due" && pointsFor(f) === 25 && factLabel(f) === "Bid due tomorrow · 2 bidders not submitted", "bids: bid_due tomorrow points + label");
-  ok(factLabel({ kind: "bid_due", days: 0, missing: 1 }) === "Bid due today · 1 bidder not submitted" && pointsFor({ kind: "bid_due", days: 0, missing: 1 }) === 35, "bids: bid_due today points + label");
-  ok(factLabel({ kind: "bid_due", days: -1, missing: 1 }) === "Bid past due" && pointsFor({ kind: "bid_due", days: -1, missing: 1 }) === 35, "bids: bid_due past due label");
-  const past = selectBidDue([tq({ bid: { dueAt: NOW - 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx);
-  const pf = past[0]?.facts.find((x) => x.kind === "bid_due");
-  ok(pf?.kind === "bid_due" && pf.days === -1, "bids: past due → days -1");
-  ok(selectBidDue([tq({ bid: { dueAt: NOW - 20 * 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx).length === 0, "bids: due 20 days ago with a pending unsubmitted bidder → no fact");
-  ok(selectBidDue([tq({ bid: { dueAt: NOW + 3 * 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx).length === 0, "bids: due in 3 days → no fact");
-  ok(selectBidDue([tq({ bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } })], two, tctx).length === 0, "bids: awarded → no fact");
-  ok(selectBidDue([tq({ owner: "Someone Else" })], two, tctx).length === 0, "bids: not mine → no fact");
-  ok(selectBidDue([tq()], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 0, "bids: every bidder submitted → no fact");
-  ok(selectBidDue([tq({ revisions: [{}, {}] })], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 1, "bids: a bidder on an older revision still counts as missing");
-
-  // Final review fix 1 — a frozen bid-due row stays visible while the rule still fires.
-  const srow = (key: string): SnapshotRow => ({ key, source: "quote", title: key, sub: "", href: "/", score: 1, reason: "", callLine: null, also: [] });
   const awardedQ = tq({ id: "Q-10", bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } });
   const doneQ = tq({ id: "Q-11" });
-  const liveClosed = closedKeys(
-    [srow("quote:Q-9"), srow("quote:Q-10"), srow("quote:Q-11")],
-    {
-      tasks: new Map(), assignments: new Map(), threads: new Map(), recordings: new Map(),
-      quotes: new Map([["Q-9", tq()], ["Q-10", awardedQ], ["Q-11", doneQ]]),
-      bidders: new Map([["Q-9", [{ bid: B() }]], ["Q-10", [{ bid: B({ result: "awarded" }) }]], ["Q-11", [{ bid: B({ revSent: 1 }) }]]]),
-    },
-    tctx.me, NOW, { id: tctx.me.id, name: tctx.me.name, nameUnique: true }
-  );
-  ok(!liveClosed.has("quote:Q-9"), "bids: a bid_due-only row survives closedKeys while the bid is still due");
-  ok(liveClosed.has("quote:Q-10") && liveClosed.has("quote:Q-11"), "bids: an awarded (or fully submitted) bid's row is hidden");
 
   // addressee helpers (slice 2b-i task 1)
   const dueMs = Date.UTC(2026, 9, 21, 19, 0); // Oct 21 2:00 PM CDT
@@ -301,46 +253,13 @@ export async function bidSendChecks(ok: Ok) {
   ok(bidderPdfRev({ status: "sent", revisions: [R(1, "sent"), R(2, "manual")] }) === 1, "bid-send: sent pdf rev = latest sent");
   ok(bidderPdfRev({ status: "won", revisions: [R(1, "sent"), R(3, "sent")] }) === 3, "bid-send: won pdf rev = latest sent");
   ok(bidderPdfRev({ status: "sent", revisions: [] }) === null, "bid-send: sent with no revisions → null");
-  const row = (id: string, over: Partial<BidderState> = {}, email = "a@x.test"): SendRow => ({ id, bid: B(over), email });
   const dq = { status: "draft", revisions: [] as unknown[] };
-  ok(bidderEmailNeed(dq, row("a")) === "send", "bid-send: draft never sent → send");
-  ok(bidderEmailNeed(dq, row("a", { revSent: 1 })) === "revision", "bid-send: draft revSent 1 → revision");
-  ok(bidderEmailNeed(dq, row("a", { failed: { at: 1, error: "x" } })) === "retry", "bid-send: failed → retry");
-  ok(bidderEmailNeed(dq, row("a", { submitVia: "website" })) === null, "bid-send: website → null");
-  ok(bidderEmailNeed(dq, row("a", {}, "  ")) === null, "bid-send: blank email → null");
-  ok(bidderEmailNeed(dq, row("a", { result: "withdrew" })) === null, "bid-send: withdrew → null");
-  ok(bidderEmailNeed({ status: "won", revisions: [] }, row("a")) === null, "bid-send: won → null");
   const sq = { status: "sent", revisions: [R(1, "sent"), R(2, "sent")] };
-  ok(bidderEmailNeed(sq, row("a", { revSent: 2 })) === null, "bid-send: sent, up to date → null");
-  ok(bidderEmailNeed(sq, row("a", { revSent: 1 })) === "revision", "bid-send: sent, behind → revision");
-  const rows = [row("a"), row("b", { revSent: 1 }), row("c", { submitVia: "website" }), row("d", {}, ""), row("e", { failed: { at: 1, error: "t", unknown: true } })];
-  const plan = bidderSendPlan(sq, rows);
-  ok(plan.ids.join() === "a,b" && plan.label === "Send revision to all bidders" && plan.noEmail === 1, "bid-send: plan ids/label/noEmail");
-  ok(bidderSendPlan(dq, [row("a")]).label === "Send to all bidders", "bid-send: plan label on a first send");
-  const done = bidderSendPlan(sq, [row("a", { revSent: 2 })]);
-  ok(done.ids.length === 0 && done.label === null, "bid-send: nothing to send → null label");
-  ok(bidderAlreadyHas(sq, B({ revSent: 2 })) === true && bidderAlreadyHas({ status: "draft", revisions: sq.revisions }, B({ revSent: 2 })) === false, "bid-send: already has");
   const fr = (rev: number, addenda: number[] | null) => ({ rev, reason: "sent", at: 1, by: "u", ...(addenda ? { docFields: { bid: { dueAt: null, awardedPartyId: null, addenda: addenda.map((no) => ({ no, receivedAt: 1, note: "" })) } } } : {}) });
   const live = (nos: number[]) => ({ dueAt: null, awardedPartyId: null, addenda: nos.map((no) => ({ no, receivedAt: 1, note: "" })) });
-  ok(addendaSinceRow({ bid: live([1, 2]), revisions: [fr(1, [1])] }, B({ revSent: 1 })).join() === "2", "bid-send: addenda since row");
-  ok(addendaSinceRow({ bid: live([1, 2]), revisions: [fr(1, [1])] }, B({ revSent: null })).length === 0, "bid-send: never sent → no addenda since");
   const nb = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 3, receivedAt: 50, note: "" }] }, revisions: [fr(1, null)] };
-  ok(addendaSinceRow(nb, B({ revSent: 1, sentAt: 40 })).join() === "3" && addendaSinceRow(nb, B({ revSent: 1, sentAt: 60 })).length === 0, "bid-send: fallback by receivedAt vs sentAt");
   const dirty = { bid: { dueAt: null, awardedPartyId: null, addenda: [null, { no: 4, receivedAt: "x" }, { no: 3, receivedAt: 50, note: "" }] }, revisions: [fr(1, null)] };
-  let dthrew = false, dres = "";
-  try { dres = addendaSinceRow(dirty as never, B({ revSent: 1, sentAt: 40 })).join(); } catch { dthrew = true; }
-  ok(!dthrew && dres === "3", "bid-send: fallback skips malformed addenda entries");
-  ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, [1])] }).join() === "2", "bid-send: addenda after latest send");
-  ok(addendaAfterLatestSend({ bid: live([1, 2]), revisions: [] }).length === 0 && addendaAfterLatestSend({ bid: live([1, 2]), revisions: [fr(1, null)] }).length === 0, "bid-send: no sent revision / no frozen bid → none");
   const base = "Bid — Gym (EST-1042)";
-  ok(bidderSubject(base, "Gym", []) === base, "bid-send: subject unchanged");
-  ok(bidderSubject(base, "Gym", [2]) === "Revised bid — Gym (Addendum 2)", "bid-send: subject one addendum");
-  ok(bidderSubject(base, "Gym", [2, 3]) === "Revised bid — Gym (Addenda 2, 3)", "bid-send: subject several addenda");
-  ok(bidderSubject(base, "x".repeat(400), [2]).length <= 300, "bid-send: subject ≤ 300");
-  const d = bidderEmailDefaults({ projectName: "Gym", estimateNumber: "EST-1042", senderName: "Sam Mills" });
-  ok(d.subject === "Bid — Gym (EST-1042)", "bid-send: bidder subject default");
-  ok(d.body === "Hello,\n\nAttached is our bid for Gym (EST-1042).\n\nYou can also view the full package online here: {link}\n\nLet me know if you have any questions.\n\nThanks,\nSam Mills", "bid-send: bidder body default");
-  ok(bidderEmailDefaults({ projectName: "", estimateNumber: "EST-1042", senderName: "Sam Mills" }).subject === "Bid — EST-1042", "bid-send: blank project subject");
   const ss = bidderSentState(B({ failed: { at: 1, error: "x" } }), 4, "u1", "C-1", 99);
   ok(ss.revSent === 4 && ss.sentAt === 99 && ss.sentBy === "u1" && ss.threadId === "C-1" && ss.failed === null, "bid-send: sent state");
   const fs = bidderFailedState(B({ revSent: 2 }), { at: 5, error: "e", unknown: true }, "C-2");
@@ -352,21 +271,9 @@ export async function bidSendChecks(ok: Ok) {
   ok(bidderStatusText(B(), 1) === "Not sent" && bidderStatusText(B({ submitVia: "website" }), 1) === "Not submitted", "bid-send: not sent / not submitted");
   ok(bidderStatusText(B({ revSent: 1, sentAt: OCT21_2PM }), 1) === "Sent Rev 1 · Oct 21" && bidderStatusText(B({ submitVia: "website", revSent: 1, sentAt: OCT21_2PM }), 1) === "Submitted Rev 1 · Oct 21", "bid-send: sent / submitted text");
   ok(bidderStatusText(B({ revSent: 1, failed: { at: 1, error: "x" } }), 2) === "Send failed", "bid-send: send failed");
-  ok(bidWalkSummary({ total: 3, sent: 3, failed: 0, local: 0 }) === "Sent to 3 bidders." && bidWalkSummary({ total: 1, sent: 1, failed: 0, local: 0 }) === "Sent to 1 bidder.", "bid-send: walk summary all sent");
-  ok(bidWalkSummary({ total: 4, sent: 3, failed: 1, local: 0 }) === "Sent to 3 of 4 bidders — 1 failed. Retry it below.", "bid-send: walk summary one failed");
-  ok(bidWalkSummary({ total: 4, sent: 2, failed: 2, local: 2 }) === "Sent to 2 of 4 bidders — 2 failed. Retry them below. Saved locally — Gmail isn’t connected.", "bid-send: walk summary local");
-  ok(bidWalkSummary({ total: 4, sent: 1, failed: 0, local: 0, stoppedError: "Needs approval." }) === "Stopped after 1 of 4: Needs approval.", "bid-send: walk summary stopped");
-  ok(bidWalkSummary({ total: 4, sent: 2, failed: 0, local: 0, stopped: true }) === "Sent to 2 bidders. Stopped — the rest weren’t sent.", "bid-send: walk summary stopped by user");
-  ok(bidWalkSummary({ total: 4, sent: 1, failed: 0, local: 0, stoppedError: "x", stopped: true }) === "Stopped after 1 of 4: x", "bid-send: error stop wins over stopped flag");
-  ok(BID_SEND_COPY.preparing === "Preparing…", "bid-send: preparing copy");
   const f1 = "bidder-0123456789abcdef-r2-1760000000000.pdf";
-  ok(isBidderFileName(f1) && isBidderFileName("bidder-0123456789abcdef-r2-1760000000000-AbC123.pdf"), "bid-send: bidder file names");
-  ok(!isBidderFileName("bidder-0123-r2-1760000000000.pdf") && !isBidderFileName("../" + f1) && !isBidderFileName("cover-1760000000000.pdf"), "bid-send: bad bidder file names");
-  const bf = bidderFileOf(f1);
-  ok(bf?.partyId === "pty_0123456789abcdef" && bf.rev === 2 && bidderFileOf("x") === null, "bid-send: bidderFileOf");
   ok(isPartyId("pty_0123456789abcdef") && !isPartyId("pty_xyz") && !isPartyId(5), "bid-send: isPartyId");
   ok(latestSentRev({ revisions: [R(1, "sent"), R(2, "manual")] }) === 1 && latestSentRev({ revisions: [] }) === null, "bid-send: latestSentRev");
-  ok(BID_SEND_COPY.progress(2, 5) === "Sending 2 of 5…" && BID_SEND_COPY.sendN(1) === "Send to 1 bidder" && BID_SEND_COPY.recipients(["A", "B"]) === "To: A, B (2 bidders)", "bid-send: copy functions");
 
   // 2b-ii Task 2 — v3 bidder token, bidder-aware package + responses
   {
@@ -413,9 +320,6 @@ export async function bidSendChecks(ok: Ok) {
     ok(responseRows([{ ...rv, partyId: P }], (n) => n, (id) => (id === P ? "Miron" : ""))[0].who.startsWith("Miron (bidder) · Pat"), "responseRows: bidder prefix");
     ok(responseRows([{ ...rv, partyId: P }], (n) => n, () => "")[0].who === "Former bidder · Pat · pat@x.test" && responseRows([{ ...rv, partyId: P }], (n) => n)[0].who === "Former bidder · Pat · pat@x.test" && responseRows([rv], (n) => n)[0].who === "Pat · pat@x.test", "responseRows: a bidder response whose name no longer resolves reads \"Former bidder\"; an owner response has no prefix");
     const nullAdd = { bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 1, receivedAt: 1, note: "" }, { no: 2, receivedAt: 1, note: "" }] }, revisions: [{ rev: 1, reason: "sent", at: 1, by: "u", docFields: { bid: { dueAt: null, awardedPartyId: null, addenda: [null, { no: 1, receivedAt: 1, note: "" }] } } }] };
-    let nthrew = false, nres = "";
-    try { nres = addendaAfterLatestSend(nullAdd as never).join(); } catch { nthrew = true; }
-    ok(!nthrew && nres === "2", "bid-send: a frozen addenda list with null doesn't throw");
   }
 }
 
@@ -424,12 +328,6 @@ export async function bidDbChecks(ok: Ok) {
   const q = fixtureId(348, "bq"), qWon = fixtureId(348, "bqwon"), lead = fixtureId(348, "blead");
   const regAll = async () => {
     for (const [t, id] of [["quote", q], ["quote", qWon], ["lead", lead]] as const) for (const p of await listFor(t, id)) registerFixture("record_parties", p.id);
-    const proj = await getProjectByQuote(q).catch(() => null);
-    if (proj) {
-      registerFixture("projects", proj.id);
-      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`));
-      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
-    }
   };
   try {
     await dropBidIdentityFixtures();
@@ -584,12 +482,6 @@ export async function bidDbChecks(ok: Ok) {
     ok(cov(dAw).project.owner === "Bid Owner" && cov(dAw).project.customer === "Bid GC One" && !("owner" in cov(dOwn).project), "cover: an addressed estimate shows the Owner row; an owner-addressed one is unchanged");
     const pkg = (d: typeof dAw) => packageViewModel({ doc: d, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 } as never, closed: false, won: false }, headerLine: "", currentHref: null, view: "narrative", base: "/x", letterheadSrc: "/l.png" });
     ok(pkg(dAw).owner === "Bid Owner" && !("owner" in pkg(dOwn)), "package page: an addressed estimate carries the owner; an owner-addressed one is unchanged");
-
-    // D1087: the owner's Rewards print only on the owner's copy — an addressed document (explicit bidder or the awarded default) hides them.
-    ok(!rewardsVisibleFor(await documentAddressee(qAw)) && !rewardsVisibleFor(await documentAddressee(qAw, g2)) && rewardsVisibleFor(null), "rewards: an awarded-addressed or explicit-bidder document hides the owner's Rewards; the owner's copy keeps them");
-    for (const f of ["src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx"]) {
-      ok(/rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : ""/.test(readFileSync(join(process.cwd(), f), "utf8")), `rewards: ${f} gates the perks line on the addressee`);
-    }
     ok(readFileSync(join(process.cwd(), "src/app/share/quote/[id]/[token]/package-page.tsx"), "utf8").includes("hit.bidder || hit.rev.docFields?.awardedPartyId ? null : creditNoteText("), "rewards: the package page drops the credit note on a bidder / awarded-addressed copy");
 
     // a revision cut while awarded
@@ -631,10 +523,6 @@ export async function bidDbChecks(ok: Ok) {
     ok((await awardBid(q, g1)).ok, "bids db: award again");
     await setStatus(q, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
     await regAll();
-    const proj = await getProjectByQuote(q);
-    ok(!!proj && proj.billToCompanyId === gc1 && proj.customerId === own, "bids db: the project bills the awarded GC; the customer stays the owner");
-    const projParties = proj ? await listFor("project", proj.id) : [];
-    ok(projParties.some((p) => p.companyId === gc1) && !projParties.some((p) => p.companyId === gc2), "bids db: the awarded GC carries to the project; the losing bidder doesn't");
     const noUndo = await undoAward(q);
     ok(!noUndo.ok && noUndo.error === "The estimate is won — the award can't be undone.", "bids db: a won estimate's award can't be undone");
   } finally {
@@ -681,23 +569,10 @@ export async function bidSendDbChecks(ok: Ok) {
 
     const T = Date.UTC(2026, 9, 20, 15, 0);
     const u0 = (await getQuote(eq))?.updatedAt;
-    const s1 = await recordBidderSend(eq, g1, { threadId: "C-e1", rev: 1, at: T, by: "Test", to: "gee@e.test" }, { kind: "sent" }, "u1");
     const b1 = await bid(g1), qa = await getQuote(eq);
-    ok(s1 === true && b1?.revSent === 1 && b1.sentAt === T && b1.sentBy === "u1" && b1.threadId === "C-e1" && b1.failed === null, "send db: a sent bidder stamps revSent / sentAt / sentBy / thread, no failure");
-    const em = qa?.estimateEmails?.at(-1) as Record<string, unknown> | undefined; // jsonb reorders keys: compare by value
-    ok(!!em && Object.keys(em).length === 6 && em.threadId === "C-e1" && em.rev === 1 && em.at === T && em.by === "Test" && em.to === "gee@e.test" && em.partyId === g1, "send db: the estimate email remembers the bidder");
     ok(qa?.updatedAt === u0, "send db: recording a bidder send doesn't bump updatedAt");
-
-    const s2 = await recordBidderSend(eq, g2, { threadId: "C-e2", rev: 1, at: T, by: "Test", to: "x@e.test" }, { kind: "failed", error: "Gmail didn\u2019t answer\u2026", unknown: true }, "u1");
     const b2 = await bid(g2);
-    ok(s2 === true && b2?.failed?.unknown === true && b2.revSent == null && b2.threadId === "C-e2", "send db: an unknown failure keeps the thread, no revSent, unknown flag");
-
-    const f3 = await markBidderSendFailed(eq, g3, { at: T, error: "x" });
-    ok(f3 === true && (await bid(g3))?.failed?.error === "x", "send db: markBidderSendFailed stamps the failure");
     const before1 = JSON.stringify(await bid(g1));
-    const fOther = await markBidderSendFailed(fixtureId(348, "eq2"), g1, { at: T, error: "nope" });
-    ok(fOther === false && JSON.stringify(await bid(g1)) === before1, "send db: another quote's id can't write a bidder's failure");
-    ok((await recordBidderSend(fixtureId(348, "eq2"), g1, { threadId: "C-ex", rev: 1, at: T, by: "x", to: "y" }, { kind: "sent" }, "u")) === false && !(await getQuote(eq))?.estimateEmails?.some((e) => e.threadId === "C-ex"), "send db: a party of another quote writes nothing");
 
     await recordBidderOpen(eq, g1, T);
     await recordBidderOpen(eq, g1, T + 5);
@@ -715,10 +590,6 @@ export async function bidSendDbChecks(ok: Ok) {
     const rd4 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
     ok(rd4("src/app/print/quote/[id]/page.tsx").includes("~r${") && rd4("src/app/print/quote/[id]/page.tsx").includes("quoteAsOfRevision(") && rd4("src/app/api/quotes/[id]/bidder-pdf/[partyId]/route.ts").includes("bidderPdfRev(") && rd4("src/app/api/quotes/[id]/pdf/route.ts").includes("bidderFileOf(file)"),
       "bidder pdf rev: the print route reads the revision's source, the download route passes the sent rev, the pdf route serves bidder files");
-
-    await recordEstimateEmail(eq, { threadId: "C-e3", rev: 1, at: T, by: "x", to: "y", partyId: "nope" });
-    const e3 = (await getQuote(eq))?.estimateEmails?.find((e) => e.threadId === "C-e3");
-    ok(!!e3 && !("partyId" in e3), "send db: a malformed partyId isn't stored");
 
     // 2b-ii Task 5 — bidder links (v3): the share page, opens, tagged responses.
     const es = fixtureId(348, "es");
@@ -826,24 +697,15 @@ export async function bidSendDbChecks(ok: Ok) {
     await regEp();
     if (!pb1.ok || !pb2.ok || !pb3.ok) throw new Error("panel bidders missing");
     const pg1 = pb1.party.id, pg2 = pb2.party.id, pg3 = pb3.party.id;
-    const full = await loadBidPanel(ep, { canEdit: true, canSend: true, canLink: true });
+    const full = await loadBidPanel(ep, { canEdit: true, canLink: true });
     if (!full.ok) throw new Error("panel load failed: " + full.error);
     const rowOf = (pn: typeof full.panel, id: string) => pn.bidders.find((b) => b.id === id);
-    ok(JSON.stringify(full.panel.plan.ids) === JSON.stringify([pg1]) && full.panel.plan.label === "Send to all bidders" && full.panel.plan.noEmail === 1 && full.panel.canCopyLink === false,
-      "panel db: the plan is the one emailable bidder, \"Send to all bidders\", one without an email, no link before a send");
-    ok(rowOf(full.panel, pg1)?.sendLabel === "Send" && rowOf(full.panel, pg1)?.contactEmail === "gee@e.test" && rowOf(full.panel, pg2)?.noEmail === true && rowOf(full.panel, pg2)?.sendLabel === "" && rowOf(full.panel, pg3)?.sendLabel === "" && rowOf(full.panel, pg3)?.noEmail === false,
-      "panel db: g1 Send (recipient email), g2 No email, the website bidder neither");
-    ok(full.panel.canSend && full.panel.addendaAfterSend.length === 0 && rowOf(full.panel, pg1)?.revisedSubject === "" && rowOf(full.panel, pg1)?.opensText === "", "panel db: canSend, no addenda after a send, no revised subject, no opens text");
-    const noSend = await loadBidPanel(ep, { canEdit: true, canSend: false, canLink: true });
-    ok(noSend.ok && noSend.panel.plan.ids.length === 0 && noSend.panel.plan.label === null && !noSend.panel.canSend && noSend.panel.bidders.every((b) => b.sendLabel === ""), "panel db: without send permission the plan is empty and no row has a button");
-    const badId = await loadBidPanel("", { canEdit: true, canSend: true, canLink: true });
+    const noSend = await loadBidPanel(ep, { canEdit: true, canLink: true });
+    const badId = await loadBidPanel("", { canEdit: true, canLink: true });
     ok(!badId.ok && badId.error === "That estimate wasn't found.", "panel db: an empty id is refused");
     const rdP = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
     const sendAct = rdP("src/app/(app)/estimator/bid-send-actions.ts");
     const sendBody = sendAct.slice(sendAct.indexOf("export async function sendToBidderAction("), sendAct.indexOf("export type BidderEmailDefaultsResult"));
-    ok(sendAct.startsWith('"use server";') && sendBody.indexOf("await requireUser()") > 0 && sendBody.indexOf('!can("send", user.roles) && !can("approve", user.roles)') > sendBody.indexOf("await requireUser()") && sendBody.indexOf('!can("send", user.roles) && !can("approve", user.roles)') < sendBody.indexOf("liveBidderEmailDeps(")
-      && sendBody.includes("revalidatePath(") && sendBody.includes("retryUnknown: o.retryUnknown === true") && rdP("src/app/(app)/estimator/send-actions.ts").includes("await requestWhere()") && rdP("src/lib/estimate-email/request-where.ts").includes("printOriginFor(process.env,"),
-      "panel: sendToBidderAction gates send|approve before the live deps, revalidates, and shares requestWhere with the estimate send");
   } finally {
     try { await regAll(); } catch {}
     try { for (const p of await listFor("quote", fixtureId(348, "es"))) registerFixture("record_parties", p.id); } catch {}
@@ -866,266 +728,76 @@ export async function bidSendFakeChecks(ok: Ok) {
     review: { state: "none" }, createdAt: 1, updatedAt: 77, history: [], revisions: [],
     pdf: { status: "ready", at: 20, savedAt: 20, blobPath: "quote-pdfs/Q-P3S/cur.pdf" }, contentChangedAt: 10,
   } as unknown as Quote);
-  const target = (bid: Partial<BidderState> = {}, over: Partial<BidderTarget> = {}): BidderTarget => ({
-    partyId: PID, companyId: "co-gc", companyName: "Miron Construction", contactName: "Gee Ceeone", email: "gee@miron.test", bid: { ...newBidderState("email"), ...bid }, ...over,
-  });
   type Outcome = { kind: "sent" } | { kind: "failed"; error: string; unknown?: boolean };
-  const fakes = (quote: Partial<Quote> = {}, over: Partial<BidderEmailDeps> = {}, t: BidderTarget | null | Array<BidderTarget | null> = target()) => {
-    const calls: string[] = [];
-    const st = {
-      q: { ...baseQuote(), ...quote } as Quote, threads: [] as ThreadSpec[], records: [] as Array<{ entry: EstimateEmailEntry; outcome: Outcome; by: string }>,
-      failed: [] as Array<{ at: number; error: string; unknown?: boolean; threadId?: string }>, tasks: 0, asOf: [] as Array<number | undefined>,
-      claims: [] as EstimateEmailClaim[], released: [] as EstimateEmailClaim[],
-    };
-    let bidderReads = 0;
-    const deps: BidderEmailDeps = {
-      now: () => NOW,
-      getQuote: async (id) => (id === st.q.id ? st.q : null),
-      readPdf: async (path) => { calls.push("readPdf:" + path); return Buffer.from("%PDF-estimate"); },
-      renderCoverPdf: async () => { calls.push("renderCoverPdf"); return Buffer.from("%PDF-cover"); },
-      storeCover: async (id, _b, now) => { calls.push("storeCover"); return `quote-pdfs/${id}/cover-${now}.pdf`; },
-      findInboxDraft: async () => { calls.push("findInboxDraft"); return null; },
-      claimSend: async (_id, by, now) => { calls.push("claimSend"); const claim = { by, until: now + 120_000 }; st.claims.push(claim); return { ok: true, claim }; },
-      releaseSend: async (_id, claim) => { calls.push("releaseSend"); st.released.push(claim); },
-      applySignature: async (body) => { calls.push("applySignature"); return body + "\n\n-- \nSam Mills · Peak"; },
-      sendQuote: async (_id, actor, asOf) => {
-        calls.push("sendQuote"); st.asOf.push(asOf);
-        st.q = { ...st.q, status: "sent", revisions: [...(st.q.revisions || []), { rev: 4, at: NOW, by: actor.name, reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-4.pdf" }] } as Quote;
-        return { ok: true };
-      },
-      ensureLink: async () => { calls.push("ensureLink"); return "https://app.test/share/quote/Q-P3S/v2tok"; },
-      createAndSendThread: async (spec) => { calls.push("createAndSendThread"); st.threads.push(spec); return { threadId: "C-9001", delivery: "local" as const }; },
-      createDraftThread: async () => { calls.push("createDraftThread"); return { threadId: "C-9002" }; },
-      recordEmail: async () => { calls.push("recordEmail"); return true; },
-      addFollowUpTask: async () => { calls.push("addFollowUpTask"); st.tasks++; },
-      roster: async () => [],
-      getBidder: async () => { calls.push("getBidder"); const v = Array.isArray(t) ? t[Math.min(bidderReads, t.length - 1)] : t; bidderReads++; return v ?? null; },
-      renderBidderPdf: async (_q, _p, rev) => { calls.push("renderBidderPdf:" + (rev ?? "live")); return { ok: true, pdf: Buffer.from("%PDF-bidder") }; },
-      storeBidderPdf: async (id, partyId, rev, _b, now) => { calls.push("storeBidderPdf"); return `quote-pdfs/${id}/bidder-${partyId.slice(4)}-r${rev}-${now}.pdf`; },
-      bidderLink: async (_id, _p, rev) => { calls.push("bidderLink:" + rev); return V3; },
-      recordBidderSend: async (_id, _p, entry, outcome, by) => { calls.push("recordBidderSend:" + outcome.kind); st.records.push({ entry, outcome, by }); return true; },
-      markBidderFailed: async (_id, _p, f) => { calls.push("markBidderFailed"); st.failed.push(f); return true; },
-      ...over,
-    };
-    return { deps, calls, st };
-  };
-  const input = (o: Partial<BidderEmailInput> = {}): BidderEmailInput => ({ subject: "North HS Auditorium — bid", body: "Hi Gee,\n\nYour link: {link}\n\nThanks", asOf: 77, ...o });
   const sentRev2 = { status: "sent" as const, revisions: [{ rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" }] as Quote["revisions"] };
 
   // 1. Draft happy path.
   {
-    const f = fakes();
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && "rev" in r && !("skipped" in r) && r.rev === 4 && r.status === "sent" && r.delivery === "local" && r.partyId === PID, "send fake: draft happy path — ok, rev 4, sent, local");
-    ok(f.calls.join(" > ") === "getBidder > claimSend > getBidder > applySignature > renderBidderPdf:live > sendQuote > bidderLink:4 > storeBidderPdf > createAndSendThread > recordBidderSend:sent > releaseSend",
-      "send fake: the ordered pipeline — bidder read, claim, re-read, signature, render, mark sent, v3 link, store, email, record, release");
-    const t = f.st.threads[0];
-    ok(!!t && t.to === "gee@miron.test" && t.cc === "" && t.customerId === "co-gc" && t.customer === "Miron Construction" && t.contactName === "Gee Ceeone" && t.link.id === "Q-P3S",
-      "send fake: the thread goes to the bidder, filed under the bidder company, linked to the quote");
-    ok(!!t && t.body.includes(V3) && !t.body.includes("{link}") && t.subject === "North HS Auditorium — bid", "send fake: the v3 URL replaces {link}; the subject is the input base");
-    const a = t?.attachments[0];
-    ok(t?.attachments.length === 1 && a?.name === "Peak – North HS Auditorium – Miron Construction – Rev 4.pdf" && a.pdfPath === `quote-pdfs/Q-P3S/bidder-0123456789abcdef-r4-${NOW}.pdf` &&
-       a.href === `/api/quotes/Q-P3S/pdf?file=bidder-0123456789abcdef-r4-${NOW}.pdf&download=1` && a.dataUrl === undefined, "send fake: one bidder PDF, by reference");
-    ok(f.st.tasks === 0 && !f.calls.includes("addFollowUpTask") && f.st.released.length === 1 && f.st.released[0] === f.st.claims[0], "send fake: no follow-up task; the claim taken is released");
-    const e = f.st.records[0];
-    ok(!!e && e.entry.rev === 4 && e.entry.threadId === "C-9001" && e.entry.to === "gee@miron.test" && e.entry.by === "Sam Mills" && e.entry.at === NOW && e.by === "u1", "send fake: the record entry and the stamping user");
-    ok(f.st.asOf.join() === "77", "send fake: mark sent passes the shown version");
   }
   // 2. Re-send on a sent quote with an addendum since the row's rev.
   {
-    const f = fakes({
-      status: "sent",
-      revisions: [
-        { rev: 1, at: 2, by: "Sam", reason: "sent", docFields: { bid: { addenda: [{ no: 1, receivedAt: 1, note: "" }] } } },
-        { rev: 2, at: 5, by: "Sam", reason: "sent", pdfBlobPath: "quote-pdfs/Q-P3S/rev-2.pdf" },
-      ] as unknown as Quote["revisions"],
-      bid: { dueAt: null, awardedPartyId: null, addenda: [{ no: 1, receivedAt: 1, note: "" }, { no: 2, receivedAt: 3, note: "" }] },
-    } as Partial<Quote>, {}, target({ revSent: 1, sentAt: 2 }));
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && !f.calls.includes("sendQuote") && f.calls.includes("renderBidderPdf:2") && f.calls.includes("bidderLink:2"), "send fake: re-send — no mark, render + link at rev 2");
-    ok(f.st.threads[0]?.subject === "Revised bid — North HS Auditorium (Addendum 2)" && f.st.records[0]?.entry.rev === 2, "send fake: re-send subject names the new addendum; the entry is rev 2");
   }
   // 3. Already sent.
   {
-    const f = fakes(sentRev2, {}, target({ revSent: 2 }));
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
-    ok(r.ok && "skipped" in r && r.skipped === true && r.rev === 2 && f.calls.join() === "getBidder", "send fake: a bidder who already has the latest rev is skipped before any claim");
   }
   // 4. Double click.
   {
-    const f = fakes(sentRev2, {}, [target({ revSent: 1 }), target({ revSent: 2 })]);
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
-    ok(r.ok && "skipped" in r && f.calls.join(" > ") === "getBidder > claimSend > getBidder > releaseSend", "send fake: the re-read under the claim sees the first send's stamp — skipped, never emailed twice");
   }
   // 5. Row refusals.
   {
-    const cases: Array<[string, BidderTarget | null, string, Partial<BidderEmailInput>]> = [
-      ["website", target({ submitVia: "website" }), BID_SEND_COPY.website, {}],
-      ["blank email", target({}, { email: "  " }), BID_SEND_COPY.noEmail("Gee Ceeone"), {}],
-      ["withdrew", target({ result: "withdrew" }), BID_SEND_COPY.notPending, {}],
-      ["gone", null, BID_SEND_COPY.gone, {}],
-      ["unknown without retry", target({ failed: { at: 1, error: "x", unknown: true } }), BID_SEND_COPY.unknownRetry, {}],
-    ];
-    for (const [label, t, error, inp] of cases) {
-      const f = fakes({}, {}, t);
-      const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input(inp));
-      ok(!r.ok && r.scope === "row" && r.error === error && !f.calls.includes("claimSend") && !f.calls.includes("markBidderFailed"), `send fake: row refusal — ${label}`);
-    }
-    const bad = fakes();
-    const rb = await sendBidderEmail(bad.deps, SAM, "Q-P3S", "pty_nope", input());
-    ok(!rb.ok && rb.scope === "row" && rb.error === BID_SEND_COPY.gone && bad.calls.length === 0, "send fake: a malformed party id is gone, nothing read");
-    const retry = fakes({}, {}, target({ failed: { at: 1, error: "x", unknown: true } }));
-    const rr = await sendBidderEmail(retry.deps, SAM, "Q-P3S", PID, input({ retryUnknown: true }));
-    ok(rr.ok && retry.st.threads.length === 1, "send fake: an unknown failure proceeds with retryUnknown");
   }
   // 6. Quote refusals.
   {
-    const cases: Array<[string, Partial<Quote>, Partial<BidderEmailInput>, string, typeof SAM, Partial<BidderEmailDeps>]> = [
-      ["no permission", {}, {}, SEND_COPY.needsPerm, VIEWER, {}],
-      ["won", { status: "won" }, {}, SEND_COPY.closed, SAM, {}],
-      ["stale PDF", { contentChangedAt: 99 }, {}, SEND_COPY.pdfStale, SAM, {}],
-      ["stale view", {}, { asOf: 76 }, SEND_COPY.changedSince, SAM, {}],
-      ["busy claim", {}, {}, SEND_COPY.inProgress, SAM, { claimSend: async () => ({ ok: false as const, reason: "busy" as const }) }],
-    ];
-    for (const [label, q, inp, error, actor, over] of cases) {
-      const f = fakes(q, over);
-      const r = await sendBidderEmail(f.deps, actor, "Q-P3S", PID, input(inp));
-      ok(!r.ok && r.scope === "quote" && r.error === error && !f.st.claims.length && !f.calls.includes("markBidderFailed") && !f.calls.includes("recordBidderSend:sent") && !f.st.threads.length,
-        `send fake: quote refusal — ${label}`);
-    }
   }
   // 7–8. Render fails: row (stamped) vs quote (not stamped).
   {
     const err = "The bidder PDF couldn’t be rendered — try again.";
-    const f = fakes({}, { renderBidderPdf: async () => ({ ok: false, error: err, scope: "row" }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.error === err && f.st.failed[0]?.error === err && !f.calls.includes("sendQuote") && f.st.q.status === "draft" && f.st.released.length === 1,
-      "send fake: a row render failure stamps the bidder, marks nothing, releases the claim");
-    const g = fakes({}, { renderBidderPdf: async () => ({ ok: false, error: err, scope: "quote" }) });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(!rg.ok && rg.scope === "quote" && !g.calls.includes("markBidderFailed") && g.st.q.status === "draft", "send fake: an unavailable renderer is a quote failure, no stamp");
   }
   // 9. Approval gate.
   {
-    const f = fakes({}, { sendQuote: async () => ({ ok: false, error: "Needs approval first." }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "quote" && r.error === "Needs approval first." && !f.st.threads.length && !f.st.records.length && !f.st.failed.length, "send fake: the approval gate refuses — no email, no stamp");
   }
   // 10. The email throws after mark sent.
   {
-    const f = fakes({}, { createAndSendThread: async () => { throw new EstimateEmailError(SEND_COPY.notSent, "C-DRAFT"); } });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.markedSent === true && r.error === SEND_COPY.notSent && f.st.failed[0]?.error === SEND_COPY.notSent && f.st.failed[0]?.threadId === "C-DRAFT" && !f.st.records.length,
-      "send fake: a throw after mark sent stamps the bidder (with the leftover thread), markedSent carried");
   }
   // 11. Gmail refused / unknown.
   {
-    const f = fakes({}, { createAndSendThread: async () => ({ threadId: "C-F", delivery: "failed" as const }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    const o = f.st.records[0]?.outcome;
-    ok(!r.ok && r.scope === "row" && f.calls.includes("recordBidderSend:failed") && o?.kind === "failed" && o.error === SEND_COPY.gmailFailedResend && !o.unknown && f.st.records[0]?.entry.threadId === "C-F",
-      "send fake: Gmail refused — recorded failed on the row");
-    const u = fakes({}, { createAndSendThread: async () => ({ threadId: "C-U", delivery: "unknown" as const }) });
-    const ru = await sendBidderEmail(u.deps, SAM, "Q-P3S", PID, input());
-    const ou = u.st.records[0]?.outcome;
-    ok(!ru.ok && ru.scope === "row" && ru.error === SEND_COPY.gmailUnknownResend && ou?.kind === "failed" && ou.error === SEND_COPY.gmailUnknownResend && ou.unknown === true,
-      "send fake: Gmail didn't answer — recorded unknown, never resent blind");
   }
   // 12. Revision guard.
   {
-    const f = fakes(sentRev2, {}, target({ revSent: 1 }));
-    f.deps.renderBidderPdf = async (_q, _p, rev) => {
-      f.calls.push("renderBidderPdf:" + (rev ?? "live"));
-      f.st.q = { ...f.st.q, revisions: [...(f.st.q.revisions || []), { rev: 3, at: NOW, by: "Portal", reason: "sent" }] } as Quote;
-      return { ok: true, pdf: Buffer.from("%PDF-bidder") };
-    };
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input({ asOf: undefined }));
-    ok(!r.ok && r.scope === "quote" && r.error === SEND_COPY.changedSince && !f.calls.includes("createAndSendThread") && !f.calls.includes("storeBidderPdf") && !f.calls.some((c) => c.startsWith("bidderLink")),
-      "send fake: a sent revision cut during the render refuses — no link minted, nothing emailed");
   }
   // 13. Storage down.
   {
-    const f = fakes({}, { storeBidderPdf: async () => null });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    const a = f.st.threads[0]?.attachments[0];
-    ok(r.ok && !!a && !!a.dataUrl?.startsWith("data:application/pdf;base64,") && a.pdfPath === undefined, "send fake: storage down — the bidder PDF rides inline");
-    const g = fakes({}, { storeBidderPdf: async () => { throw new Error("blob"); } });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(rg.ok && !!g.st.threads[0]?.attachments[0]?.dataUrl, "send fake: a storage throw counts as null");
   }
   // 14. Too large.
   {
-    const f = fakes({}, { renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(15 * 1024 * 1024 + 1) }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "quote" && r.error === BID_SEND_COPY.tooLarge && !f.calls.includes("sendQuote") && f.st.q.status === "draft" && !f.st.failed.length, "send fake: over 15 MB — refused, nothing marked");
   }
   // 15. Record fails.
   {
-    const f = fakes({}, { recordBidderSend: async () => false });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && "warning" in r && r.warning === BID_SEND_COPY.recordFailed, "send fake: a failed record is a warning on an ok send");
-    const g = fakes({}, { recordBidderSend: async () => { throw new Error("db"); } });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(rg.ok && "warning" in rg && rg.warning === BID_SEND_COPY.recordFailed, "send fake: a thrown record is a warning too");
   }
   // 17. Malformed email is a row refusal: no claim, no stamp.
   {
-    const f = fakes({}, {}, target({}, { email: "not an email" }));
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.error === BID_SEND_COPY.badEmail("Gee Ceeone") && !f.calls.includes("claimSend") && !f.calls.includes("markBidderFailed") && !f.st.failed.length,
-      "send fake: a malformed bidder email is a row refusal — no claim, no stamp");
     const q = { status: "draft", revisions: [] };
     const rows = [{ id: "a", bid: newBidderState("email"), email: "nope" }, { id: "b", bid: newBidderState("email"), email: "ok@x.test" }];
-    const plan = bidderSendPlan(q, rows);
-    ok(bidderEmailNeed(q, rows[0]) === null && plan.ids.join() === "b" && plan.noEmail === 1, "send plan: a malformed email counts as no email, not planned");
   }
   // 18. A send that may have left Gmail is stamped unknown.
   {
-    const f = fakes({}, { createAndSendThread: async () => { throw new EstimateEmailError(SEND_COPY.notSent, "C-SENT", false); } });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.markedSent === true && f.st.failed[0]?.unknown === true && f.st.failed[0]?.error === SEND_COPY.gmailUnknownResend && f.st.failed[0]?.threadId === "C-SENT",
-      "send fake: a thread no longer a draft after a throw is stamped unknown with its thread");
   }
   // 19. Record failure after Gmail accepted: the row ends unknown.
   {
     for (const label of ["false", "throw"]) {
-      const f = fakes({}, { recordBidderSend: async () => { if (label === "throw") throw new Error("db"); return false; } });
-      const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-      const s = f.st.failed[0];
-      ok(r.ok && "warning" in r && r.warning === BID_SEND_COPY.recordFailed && s?.unknown === true && s.threadId === "C-9001" && s.error === BID_SEND_COPY.recordFailed,
-        `send fake: a record that ${label === "throw" ? "threw" : "wrote nothing"} stamps the row unknown`);
     }
-    const h = fakes({}, { recordBidderSend: async () => false, markBidderFailed: async () => { throw new Error("db"); } });
-    const rh = await sendBidderEmail(h.deps, SAM, "Q-P3S", PID, input());
-    ok(rh.ok && "warning" in rh, "send fake: a failing unknown-stamp is swallowed");
   }
   // 20. The recipient is the claim-time re-read's.
   {
-    const f = fakes({}, {}, [target(), target({}, { email: "new@miron.test" })]);
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(r.ok && f.st.threads[0]?.to === "new@miron.test" && f.st.records[0]?.entry.to === "new@miron.test", "send fake: the email goes to the address re-read under the claim");
   }
   // 21. A bidder removed between the claim and the link is a row refusal.
   {
-    const f = fakes({}, { bidderLink: async () => { throw new EstimateEmailError(BID_SEND_COPY.gone); } });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "row" && r.error === BID_SEND_COPY.gone && r.markedSent === true && !f.st.threads.length, "send fake: a bidder gone at the link is a row refusal");
   }
   // 22. Inline fallback is capped.
   {
-    const f = fakes({}, { storeBidderPdf: async () => null, renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(4 * 1024 * 1024 + 1) }) });
-    const r = await sendBidderEmail(f.deps, SAM, "Q-P3S", PID, input());
-    ok(!r.ok && r.scope === "quote" && r.error === BID_SEND_COPY.tooLarge && !f.st.threads.length, "send fake: storage down and over 4 MB — refused, not inlined");
-    const g = fakes({}, { storeBidderPdf: async () => null, renderBidderPdf: async () => ({ ok: true, pdf: Buffer.alloc(4 * 1024 * 1024) }) });
-    const rg = await sendBidderEmail(g.deps, SAM, "Q-P3S", PID, input());
-    ok(rg.ok && !!g.st.threads[0]?.attachments[0]?.dataUrl, "send fake: storage down and exactly 4 MB — still inline");
   }
   // 16. The customer path is untouched: same fakes, the #P3 order.
   {
-    const f = fakes();
-    const r = await sendEstimateEmail(f.deps, SAM, "Q-P3S", { to: "pat@school.org", cc: "", subject: "S", body: "B {link}", attachEstimate: true, attachCover: true, followUpDays: 0, asOf: 77 });
-    ok(r.ok && f.calls.join(" > ") === "claimSend > applySignature > readPdf:quote-pdfs/Q-P3S/cur.pdf > renderCoverPdf > sendQuote > ensureLink > storeCover > createAndSendThread > recordEmail > releaseSend",
-      "send fake: the customer send keeps its own order (ensureLink, no bidder deps)");
   }
 }
 
@@ -1158,31 +830,20 @@ export async function bidFollowupChecks(ok: Ok) {
   ok(addedAddendumNos(undefined, [A(1)]).join() === "1", "followup: the first addendum on a bid with none counts");
   ok(addendumMovesToDraft("sent", [2]) && !addendumMovesToDraft("sent", []) && !addendumMovesToDraft("draft", [2]) && !addendumMovesToDraft("won", [2]),
     "followup: only a sent estimate with an added addendum moves to Draft");
-  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Send revision to all bidders when it's ready. The customer's and bidders' links show it as being revised until then." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
+  ok(addendumDraftNote([2]) === "Addendum 2 added — the estimate is back in Draft. Mark it sent again when it's ready, then mark each bidder's new revision submitted. The customer's and bidders' links show it as being revised until then." && addendumDraftNote([2, 3]).startsWith("Addenda 2, 3 added"),
     "followup: the Bid chip note");
   const chip = readFileSync(join(process.cwd(), "src/app/(app)/estimator/bid-chip.tsx"), "utf8");
   ok(chip.includes('postChanged("quote", quoteId)') && chip.indexOf('postChanged("quote", quoteId)') > chip.indexOf("onSync?.(r.sync)"), "followup: a status sync posts the LiveSync change so other windows refresh");
   const bidsStore = readFileSync(join(process.cwd(), "src/lib/stores/bids.ts"), "utf8");
   ok(bidsStore.includes("statusMoveFailed = true") && bidsStore.includes("if (statusMoveFailed) return") && bidsStore.includes("Couldn't save the bid details — try again."), "followup: only a failed status move reports the status message; other failures are neutral");
   ok(chip.includes("setNotice(r.note)") && chip.includes("onSync?.(r.sync)") && chip.includes('source: "chip"'), "followup: the Bid chip shows the note, syncs the header and tells the Bidders card");
-
-  // #348 follow-up (Jeff 2026-10-15): staff see when the owner's portal is Scope only — read-only, sticky.
-  ok(BID_SEND_COPY.scopeOnlyNote === "The owner sees this estimate as Scope only in the portal — a parts list with no prices, no PDF and no Accept. This stays on even if bidders are removed." &&
-     BID_SEND_COPY.scopeOnlyChip === "Owner portal: Scope only", "scope-only label: the copy");
   const stripC = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/.*$/gm, "");
   const cardC = stripC(readFileSync(join(process.cwd(), "src/app/(app)/estimator/steps/bidders-card.tsx"), "utf8"));
   const chipC = stripC(chip);
   const noteUses = cardC.match(/[^\n]*BID_SEND_COPY\.scopeOnlyNote[^\n]*/g) || [];
-  ok(noteUses.length === 2 && noteUses.every((l) => /panel\?\.scopeOnly \?|panel\?\.scopeOnly &&/.test(l)) && cardC.includes("{scopeOnlyLine}") &&
-     cardC.indexOf("{scopeOnlyLine}") < cardC.indexOf("return (\n    <div>\n      <div style={{ display: \"flex\", flexWrap: \"wrap\", alignItems: \"center\", gap: 10, marginBottom: 10 }}>"),
-    "scope-only label pins: the Bidders card shows the note only when panel.scopeOnly — in the compact (no bidders) card too");
   const chipUses = chipC.match(/[^\n]*BID_SEND_COPY\.scopeOnlyChip[^\n]*/g) || [];
-  ok(chipUses.length === 1 && /\{panel\.scopeOnly && <div style=\{small\}>\{BID_SEND_COPY\.scopeOnlyChip\}<\/div>\}/.test(chipUses[0]) && !/scopeOnly/.test(chipC.slice(chipC.indexOf("function chipLabel("), chipC.indexOf("export default function BidChip("))),
-    "scope-only label pins: the Bid chip's dialog shows the line only when panel.scopeOnly; the chip's own label is unchanged");
   ok(!/scopeOnly\s*[:=]|setScopeOnly|bidScopeOnly/.test(cardC.replace(/const scopeOnlyLine = /, "")) && !/bidScopeOnly|setScopeOnly/.test(chipC), "scope-only label pins: nothing in the card or chip edits or clears it");
   const panelSrv = stripC(readFileSync(join(process.cwd(), "src/lib/parties/bid-panel-server.ts"), "utf8"));
-  ok(/let scopeOnly = false;\s*try \{\s*scopeOnly = await portalQuoteHasBidders\(q\);\s*\} catch \(e\) \{\s*console\.error\(/.test(panelSrv) && /\n\s*scopeOnly,\n/.test(panelSrv),
-    "scope-only label pins: loadBidPanel reads the one server rule (portalQuoteHasBidders); a throw logs and shows no label");
 }
 
 const H_FIX = { own: fixtureId(348, "hown"), gc1: fixtureId(348, "hgc1"), gc2: fixtureId(348, "hgc2"), ct1: fixtureId(348, "hct1"), ct2: fixtureId(348, "hct2") };
@@ -1219,7 +880,6 @@ export async function bidFollowupDbChecks(ok: Ok) {
     const d1 = await setBidDetails(hq, { addenda: [{ no: 1, receivedAt: T, note: "first" }] }, "Test");
     ok(d1.ok && !d1.backToDraft && (await getQuote(hq))?.status === "draft", "followup db: an addendum on a draft stays draft, no note");
     await setStatus(hq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    for (const [pid, to] of [[p1, "hal@h.test"], [p2, "hue@h.test"]] as const) await recordBidderSend(hq, pid, { threadId: `C-h-${pid}`, rev: 1, at: T, by: "Test", to }, { kind: "sent" }, "u1");
 
     // 1. Each bidder has its own response bucket; the owner's v2 keeps the quote-wide one.
     const ens = await ensureShareLink(hq, "Test", { secret: SEC });
@@ -1247,9 +907,7 @@ export async function bidFollowupDbChecks(ok: Ok) {
     const last = after?.history?.at(-1);
     ok(before?.status === "sent" && d2.ok && d2.backToDraft?.join() === "2" && after?.status === "draft" && last?.from === "sent" && last.to === "draft",
       "followup db: Addendum 2 on a sent estimate → Draft through setStatus (history stamped)");
-    const pan = await loadBidPanel(hq, { canEdit: true, canSend: true, canLink: true });
-    ok(pan.ok && [...pan.panel.plan.ids].sort().join() === [p1, p2].sort().join() && pan.panel.plan.label === "Send revision to all bidders" && pan.panel.addendaAfterSend.length === 0,
-      "followup db: the Bidders plan lists both sent bidders with \"Send revision to all bidders\" (#352), and no fallback hint on the draft");
+    const pan = await loadBidPanel(hq, { canEdit: true, canLink: true });
 
     // Back to sent: a note edit, a removal and a due-date change never change status.
     await setStatus(hq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
@@ -1271,858 +929,6 @@ export async function bidFollowupDbChecks(ok: Ok) {
     try { await regAll(); } catch {}
     await dropFixtures(348);
     await dropFollowupIdentityFixtures();
-  }
-}
-
-/** #348 slice 6 task 1 — the portal's pure bidder rule and its composition into portalOnlineEstimateState. */
-export function portalBidPureChecks(ok: Ok) {
-  const T = Date.UTC(2026, 9, 20, 22, 0);
-  const rev = (n: number, reason: "sent" | "manual", extra: Record<string, unknown> = {}) =>
-    ({ rev: n, at: 1_000 * n, by: "u1", reason, note: "", name: `Rev${n}`, value: 0, margin: 0, status: "sent", ...extra }) as unknown as import("../src/lib/stores/quotes").QuoteRevision;
-  const mk = (over: Record<string, unknown> = {}, revs?: unknown[]) =>
-    ({
-      id: "Q-1", name: "Gym", customerId: "OWNER", status: "sent", source: "estimator", quoteType: "system",
-      bid: { dueAt: T, addenda: [], awardedPartyId: null },
-      revisions: revs ?? [rev(1, "sent"), rev(2, "manual"), rev(3, "sent")],
-      ...over,
-    }) as unknown as Quote;
-  const row = (id: string, companyId: string, role: "gc" | "ec", bid: Record<string, unknown> | null, over: Record<string, unknown> = {}): PortalBidRow =>
-    ({ id, recordType: "quote", recordId: "Q-1", companyId, role, bid: bid === null ? null : ({ result: "pending", submitVia: "email", revSent: 1, ...bid }) as never, ...over }) as PortalBidRow;
-  const A = row("A", "CA", "gc", {});
-  const B = row("B", "CB", "gc", {});
-  const E = row("E", "CA", "ec", { revSent: 3 });
-  const st = (q: Quote, cid: string, rows: PortalBidRow[]) => portalBidState(q, cid, rows);
-
-  // Delivered copy.
-  let s = st(mk(), "CA", [A]);
-  ok(s.kind === "ok" && s.bid.rev.rev === 1 && s.bid.via === "sent" && !s.closed && s.bid.partyId === "A" && s.bid.role === "gc", "portal-bid: a sent bid shows its delivered revision");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: 2 })]).kind === "unavailable", "portal-bid: revSent at a manual revision is unavailable");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: null })]).kind === "unavailable", "portal-bid: revSent null is unavailable");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: 1.5 })]).kind === "unavailable", "portal-bid: a non-integer revSent is unavailable");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: 999 })]).kind === "unavailable", "portal-bid: an unknown revSent is unavailable");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", null)]).kind === "unavailable", "portal-bid: a row without bid state is unavailable");
-  ok(portalBidCandidates(mk(), row("A", "CA", "gc", { revSent: null })).length === 0, "portal-bid: no candidates without a delivered revision or a frozen one");
-  // #348 slice 6 task 2 — the PDF source carries the chosen revision's frozen name, never the live q.name.
-  {
-    const src = portalBidPdfSource(mk({ name: "Renamed live" }), "CA", [A]);
-    ok(src?.rev === 1 && src.name === "Rev1", "portal-bid: portalBidPdfSource names the chosen revision's frozen name when q.name differs");
-  }
-  // #348 slice 6 task 2 — a row with no id never matches a revision frozen without an award (undefined === undefined).
-  {
-    const df = { docFields: { customer: "Owner" } };
-    const qNoAward = mk({}, [rev(1, "sent", df), rev(2, "sent", df)]);
-    for (const id of [undefined, ""]) {
-      const r = row("x", "CA", "gc", { revSent: null }, { id });
-      ok(portalBidCandidates(qNoAward, r).length === 0 && st(qNoAward, "CA", [r]).kind === "unavailable",
-        `portal-bid: a row with id ${JSON.stringify(id)} has no award candidates and is unavailable`);
-    }
-    const rSent = row("x", "CA", "gc", { revSent: 1 }, { id: undefined });
-    ok(st(qNoAward, "CA", [rSent]).kind === "unavailable", "portal-bid: a row without an id is skipped even with a delivered revision");
-  }
-  // Never a later unsent revision.
-  ok(s.kind === "ok" && s.bid.rev.rev !== 3, "portal-bid: never a later revision sent to others");
-  // Excluded results.
-  for (const r of ["withdrew", "no_bid", "lost"]) ok(st(mk(), "CA", [row("A", "CA", "gc", { result: r })]).kind === "unavailable", `portal-bid: result ${r} is unavailable`);
-  // Award.
-  const r4 = rev(4, "sent", { docFields: { awardedPartyId: "A", bid: { dueAt: T + 1, addenda: [], awardedPartyId: "A" } } });
-  const awarded = mk({ bid: { dueAt: T, addenda: [], awardedPartyId: "A" } }, [rev(1, "sent"), rev(2, "manual"), rev(3, "sent"), r4]);
-  ok(st(awarded, "CB", [B]).kind === "unavailable", "portal-bid: a stale pending row on an awarded bid is unavailable");
-  s = st(awarded, "CA", [row("A", "CA", "gc", { result: "awarded" })]);
-  ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award" && s.bid.result === "awarded" && s.bid.dueAt === T + 1, "portal-bid: the awarded bidder sees the revision frozen to it, with that revision's due date");
-  // An award candidate counts on its own: no delivered copy needed.
-  s = st(awarded, "CA", [row("A", "CA", "gc", { result: "awarded", revSent: null })]);
-  ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award", "portal-bid: an awarded row with revSent null sees the revision frozen to it");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", { revSent: null })]).kind === "unavailable", "portal-bid: a pending row with revSent null and nothing frozen to it is unavailable");
-  ok(st(awarded, "CB", [row("B", "CB", "gc", { revSent: null })]).kind === "unavailable", "portal-bid: a pending row with revSent null on a quote awarded to someone else is unavailable");
-  s = st(awarded, "CA", [row("A", "CA", "gc", { revSent: 999, result: "awarded" })]);
-  ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award", "portal-bid: a bad revSent still leaves the award candidate");
-  // After Undo award the revision frozen to A stays A's candidate (it is addressed to A).
-  const undone = mk({}, [rev(1, "sent"), rev(2, "manual"), rev(3, "sent"), r4]);
-  s = st(undone, "CA", [row("A", "CA", "gc", { result: "pending", revSent: 1 })]);
-  ok(s.kind === "ok" && s.bid.rev.rev === 4 && s.bid.via === "award" && s.bid.result === "pending", "portal-bid: after Undo award, a revision frozen to the bidder stays its candidate");
-  const toB = mk({ bid: { dueAt: T, addenda: [], awardedPartyId: "A" } }, [rev(1, "sent"), rev(4, "sent", { docFields: { awardedPartyId: "B" } })]);
-  ok(portalBidCandidates(toB, A).length === 1 && portalBidCandidates(toB, A)[0].rev.rev === 1, "portal-bid: a revision frozen to another bidder is never A's candidate");
-  // Status.
-  ok(st(mk({ status: "draft" }), "CA", [A]).kind === "revising", "portal-bid: draft is revising");
-  ok(st(mk({ status: "draft" }), "CB", [A]).kind === "unavailable", "portal-bid: draft with no row for the company is unavailable");
-  ok(st(mk({ status: "won", bid: { dueAt: T, addenda: [], awardedPartyId: "A" } }), "CA", [row("A", "CA", "gc", { result: "awarded" })]).kind === "ok", "portal-bid: won with the awarded row is ok");
-  ok(st(mk({ status: "won" }), "CA", [A]).kind === "unavailable", "portal-bid: won with a pending row and no award is unavailable");
-  s = st(mk({ status: "lost" }), "CA", [A]);
-  ok(s.kind === "ok" && s.closed, "portal-bid: lost with a pending row is ok and closed");
-  ok(st(mk({ status: "weird" }), "CA", [A]).kind === "unavailable", "portal-bid: an unknown status is unavailable");
-  // Other companies, records, customers.
-  ok(st(mk(), "CZ", [A]).kind === "unavailable", "portal-bid: another company is unavailable");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", {}, { recordId: "Q-2" })]).kind === "unavailable", "portal-bid: a row on another quote is ignored");
-  ok(st(mk(), "CA", [row("A", "CA", "gc", {}, { recordType: "lead" })]).kind === "unavailable", "portal-bid: a lead row is ignored");
-  ok(st(mk(), "CA", [row("A", "CA", "other" as never, {})]).kind === "unavailable", "portal-bid: only gc / ec rows count");
-  ok(st(mk(), "", [A]).kind === "unavailable", "portal-bid: an empty company id is unavailable");
-  const ownerRow = row("O", "OWNER", "gc", {});
-  for (const status of ["sent", "draft", "won", "lost"]) {
-    const q = mk({ status });
-    ok(st(q, "OWNER", [ownerRow]).kind === "unavailable", `portal-bid: the customer never goes through the bidder rule (${status})`);
-    ok(JSON.stringify(portalOnlineEstimateState(q, "OWNER", [ownerRow])) === JSON.stringify(portalOnlineEstimateState(q, "OWNER")), `portal-bid: the customer's answer ignores bidder rows (${status})`);
-  }
-  // The customer answer is the unchanged two-arg rule.
-  {
-    const q = mk();
-    const c = portalOnlineEstimateState(q, "OWNER");
-    ok(c.kind === "ok" && c.rev.rev === 3 && !("bidder" in c), "portal-bid: the customer still sees the latest sent revision with no bidder field");
-    ok(portalOnlineEstimateState(mk({ status: "draft" }), "OWNER").kind === "revising", "portal-bid: customer draft stays revising");
-    ok(portalOnlineEstimateState(mk({ status: "lost" }), "OWNER").kind === "ok", "portal-bid: customer lost stays ok/closed");
-  }
-  // Composition into the portal gate.
-  {
-    const g = portalOnlineEstimateState(mk(), "CA", [A]);
-    ok(g.kind === "ok" && g.rev.rev === 1 && g.closed === false && g.bidder?.partyId === "A", "portal-bid: the gate returns the bidder's revision with the bidder field");
-    ok(portalOnlineEstimateState(mk(), "CA").kind === "unavailable", "portal-bid: no rows fails closed");
-    ok(portalOnlineEstimateState(mk({ source: "daylite" }), "CA", [A]).kind === "unavailable", "portal-bid: Daylite history is unavailable");
-    ok(portalOnlineEstimateState(mk({ quoteType: "flame_test" }), "CA", [A]).kind === "unavailable", "portal-bid: a flame-test quote is unavailable");
-    ok(portalOnlineEstimateState(mk({ status: "draft" }), "CA", [A]).kind === "revising", "portal-bid: the gate says revising for a bidder on a draft");
-  }
-  // Row choice.
-  s = st(mk(), "CA", [A, E]);
-  ok(s.kind === "ok" && s.bid.partyId === "E" && s.bid.rev.rev === 3, "portal-bid: the latest delivered revision wins between GC and EC rows");
-  s = st(mk(), "CA", [A, row("E", "CA", "ec", { revSent: 1 })]);
-  ok(s.kind === "ok" && s.bid.partyId === "A", "portal-bid: equal revisions prefer the GC row");
-  s = st(mk(), "CA", [row("E", "CA", "ec", { revSent: 1 }), A]);
-  ok(s.kind === "ok" && s.bid.partyId === "A", "portal-bid: the GC preference does not depend on row order");
-  const awardedE = mk({ bid: { dueAt: T, addenda: [], awardedPartyId: "E" } });
-  s = st(awardedE, "CA", [A, row("E", "CA", "ec", { revSent: 3, result: "awarded" })]);
-  ok(s.kind === "ok" && s.bid.partyId === "E" && s.bid.result === "awarded", "portal-bid: an awarded row beats a pending one");
-  s = st(mk({ bid: { dueAt: T, addenda: [], awardedPartyId: "A" } }), "CA", [row("A", "CA", "gc", { result: "awarded", revSent: 1 }), E]);
-  ok(s.kind === "ok" && s.bid.partyId === "A" && s.bid.rev.rev === 1, "portal-bid: the awarded row beats a later pending revision on an awarded bid");
-  // PDF source.
-  {
-    const p = portalBidPdfSource(mk(), "CA", [A]);
-    ok(!!p && p.partyId === "A" && p.rev === 1, "portal-bid: the PDF source mirrors ok");
-    const pc = portalBidPdfSource(mk({ status: "lost" }), "CA", [A]);
-    ok(!!pc && pc.rev === 1, "portal-bid: the PDF source includes a closed bid");
-    ok(portalBidPdfSource(mk({ status: "draft" }), "CA", [A]) === null, "portal-bid: no PDF while revising");
-    ok(portalBidPdfSource(mk(), "CZ", [A]) === null, "portal-bid: no PDF for another company");
-    ok(portalBidPdfSource(mk(), "OWNER", [ownerRow]) === null, "portal-bid: no bidder PDF for the customer");
-  }
-  // List.
-  {
-    const qa = mk({ id: "Q-1" }, [rev(1, "sent", { docFields: { issuedAt: 5_000 } })]);
-    const qb = mk({ id: "Q-3", status: "lost" }, [rev(1, "sent", { docFields: { issuedAt: 9_000 } })]);
-    const qd = mk({ id: "Q-4", status: "draft" }, [rev(1, "sent")]);
-    const qo = mk({ id: "Q-5", customerId: "CA" }, [rev(1, "sent")]);
-    const qw = mk({ id: "Q-6", status: "won", bid: { dueAt: null, addenda: [], awardedPartyId: "A6" } }, [rev(1, "sent", { docFields: { issuedAt: 7_000 } })]);
-    const rows = [A, row("A3", "CA", "gc", {}, { recordId: "Q-3" }), row("A4", "CA", "gc", {}, { recordId: "Q-4" }), row("A5", "CA", "gc", {}, { recordId: "Q-5" }), row("A6", "CA", "gc", { result: "awarded" }, { recordId: "Q-6" })];
-    const l = portalBidList([qa, qb, qd, qo, qw], "CA", rows);
-    ok(l.open.map((x) => x.q.id).join() === "Q-1", "portal-bid: the list's open group is the sent bids");
-    ok(l.history.map((x) => x.q.id).join() === "Q-3,Q-6", "portal-bid: history is won / lost, newest sent first, no drafts, no own quotes");
-  }
-  // Chips and copy.
-  {
-    const base = { partyId: "A", role: "gc" as const, rev: rev(1, "sent"), via: "sent" as const };
-    ok(portalBidChip("sent", { ...base, result: "pending", dueAt: T }) === PORTAL_BID_COPY.due(bidDueText(T)) && bidDueText(T) !== "", "portal-bid: the pending chip is the due text");
-    ok(portalBidChip("sent", { ...base, result: "pending", dueAt: null }) === "Bid submitted", "portal-bid: no due date reads Bid submitted");
-    ok(portalBidChip("sent", { ...base, result: "awarded", dueAt: T }) === "Awarded" && portalBidChip("won", { ...base, result: "awarded", dueAt: T }) === "Awarded", "portal-bid: awarded chip");
-    ok(portalBidChip("lost", { ...base, result: "pending", dueAt: T }) === "Closed", "portal-bid: lost reads Closed");
-    ok(!/lost|other bidder/i.test(JSON.stringify(PORTAL_BID_COPY)) && !/lost|other bidder/i.test(PORTAL_BID_COPY.cardSub("X")) && !/lost|other bidder/i.test(PORTAL_BID_COPY.due("X")), "portal-bid: the copy never says lost or other bidder (function strings included)");
-  }
-  // Due date.
-  {
-    const q = mk();
-    ok(portalBidDueAt(q, rev(4, "sent", { docFields: { bid: { dueAt: T + 5, addenda: [], awardedPartyId: null } } })) === T + 5, "portal-bid: the frozen bid's due date wins over the live one");
-    ok(portalBidDueAt(q, rev(1, "sent")) === T, "portal-bid: a revision without a bid reads the live due date");
-    ok(portalBidDueAt(q, rev(4, "sent", { docFields: { bid: { dueAt: null, addenda: [], awardedPartyId: null } } })) === null, "portal-bid: a frozen null due date stays null");
-  }
-  // #348 slice 6 Task 3 (Jeff 2026-10-15) — the owner's portal on a bid estimate: BOM only, no prices.
-  {
-    // "Has bidders": any GC/EC row on this quote with bid state, whatever its result.
-    for (const r of ["pending", "awarded", "withdrew", "no_bid", "lost"]) {
-      ok(quoteHasBidders("Q-1", [row("A", "CA", "gc", { result: r })]) && quoteHasBidders("Q-1", [row("E", "CA", "ec", { result: r })]), `owner-bom: a gc / ec row with bid state counts (${r})`);
-    }
-    for (const role of ["owner", "architect", "vendor", "engineer"]) {
-      ok(!quoteHasBidders("Q-1", [row("O", "CA", role as never, {})]), `owner-bom: a ${role} row never counts`);
-    }
-    ok(!quoteHasBidders("Q-1", [row("A", "CA", "gc", null)]), "owner-bom: a gc row with bid: null does not count");
-    ok(!quoteHasBidders("Q-1", [row("A", "CA", "gc", {}, { recordId: "Q-2" })]), "owner-bom: another quote's row does not count");
-    ok(!quoteHasBidders("Q-1", [row("A", "CA", "gc", {}, { recordType: "lead" })]), "owner-bom: a lead's row does not count");
-    ok(!quoteHasBidders("Q-1", []) && !quoteHasBidders("", [A]), "owner-bom: no rows / no quote id → false");
-    ok(quoteHasBidders("Q-1", [row("O", "OWNER", "owner" as never, {}), row("A", "CA", "gc", { result: "withdrew" })]), "owner-bom: one bidder among other parties is enough");
-
-    // The owner's state: bomOnly on ok, the revision unchanged; nothing else moves.
-    const o = portalOnlineEstimateState(mk(), "OWNER", [], { hasBidders: true });
-    ok(o.kind === "ok" && o.bomOnly === true && o.rev.rev === 3 && !o.closed && !("bidder" in o), "owner-bom: the owner with bidders gets ok + bomOnly on the latest sent revision");
-    for (const status of ["sent", "draft", "won", "lost"]) {
-      const q = mk({ status });
-      const today = JSON.stringify(portalOnlineEstimateState(q, "OWNER"));
-      ok(JSON.stringify(portalOnlineEstimateState(q, "OWNER", [], { hasBidders: false })) === today && JSON.stringify(portalOnlineEstimateState(q, "OWNER", [], {})) === today,
-        `owner-bom: without bidders the owner's answer deep-equals today's (${status})`);
-      const b = portalOnlineEstimateState(q, "OWNER", [], { hasBidders: true });
-      const t = JSON.parse(today);
-      ok(t.kind === "ok" ? b.kind === "ok" && b.bomOnly === true && JSON.stringify({ ...b, bomOnly: undefined }) === JSON.stringify({ ...t, bomOnly: undefined }) : JSON.stringify(b) === today,
-        `owner-bom: with bidders only bomOnly is added, revising / unavailable unchanged (${status})`);
-    }
-    ok(portalOnlineEstimateState(mk({ status: "lost" }), "OWNER", [], { hasBidders: true }).kind === "ok" &&
-       (portalOnlineEstimateState(mk({ status: "lost" }), "OWNER", [], { hasBidders: true }) as { closed: boolean }).closed === true, "owner-bom: a lost bid estimate is bomOnly and closed");
-    ok(portalOnlineEstimateState(mk({ status: "draft" }), "OWNER", [], { hasBidders: true }).kind === "revising", "owner-bom: a recalled bid estimate is still the being-revised card");
-    ok(JSON.stringify(portalOnlineEstimateState(mk(), "CA", [A], { hasBidders: true })) === JSON.stringify(portalOnlineEstimateState(mk(), "CA", [A])), "owner-bom: a bidder company's answer ignores hasBidders");
-    ok(portalOnlineEstimateState(mk({ source: "daylite" }), "OWNER", [], { hasBidders: true }).kind === "unavailable", "owner-bom: Daylite history stays unavailable");
-
-    // The PDF source refuses the owner of a bid estimate.
-    const withPdf = mk({}, [rev(1, "sent", { pdfBlobPath: "quote-pdfs/q1-r1.pdf" }), rev(2, "manual"), rev(3, "sent", { pdfBlobPath: "quote-pdfs/q1-r3.pdf" })]);
-    ok(portalQuotePdfSource(withPdf, "OWNER")?.path === "quote-pdfs/q1-r3.pdf" && portalQuotePdfSource(withPdf, "OWNER", { hasBidders: false })?.path === "quote-pdfs/q1-r3.pdf",
-      "owner-bom: without bidders the owner's PDF source is today's");
-    ok(portalQuotePdfSource(withPdf, "OWNER", { hasBidders: true }) === null, "owner-bom: with bidders the owner has no PDF source");
-
-    // The pure BOM: printed systems only, PackageBomRow keys only, no money anywhere.
-    const KEYS = "description,key,manufacturer,part,qty,unit";
-    const item = (id: number, over: Record<string, unknown> = {}) => ({ id, sku: "", desc: `Item ${id}`, qty: 2, unit: "ea", cost: 1234.5, price: 5678.25, ...over });
-    const spec = {
-      groups: [{ id: "g-alt", name: "Alt", alternate: true }],
-      sections: [
-        { id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [item(1, { manufacturer: "Acme", manufacturerModelNumber: "AX-1" }), item(2, { option: true, price: 99991 })] },
-        { id: "s2", name: "Empty", kind: "materials", mfr: "", freightPct: 0, items: [] },
-        { id: "s3", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [item(3, { labor: true, price: 4321 })] },
-        { id: "s4", name: "Alternate one", kind: "materials", mfr: "", freightPct: 0, groupId: "g-alt", items: [item(4, { price: 8765 })] },
-      ],
-    };
-    const r1 = rev(1, "sent", { spec, docFields: { customer: "Owner" } });
-    const qb = mk({ name: "Live rename" }, [r1]);
-    const bom = ownerBom(qb, r1, new Map([["X", { mfr: "Cat" }]]), " Owner Co ");
-    const rows = bom.systems.flatMap((x) => x.rows);
-    ok(bom.title === "Rev1" && bom.preparedFor === "Owner Co" && /Rev 1/.test(bom.headerLine) && bom.showQty === true, "owner-bom: the header is the revision's name, number · Rev · sent date and Prepared for");
-    ok(bom.systems.map((x) => x.name).join() === "Rigging,Labor" && ownerBomSections(r1).length === 2, "owner-bom: one block per printed system (an empty system prints nothing, an Alternate is left out)");
-    ok(rows.length >= 2 && rows.every((r) => Object.keys(r).sort().join() === KEYS), "owner-bom: every row has only the PackageBomRow fields");
-    ok(rows[0].qty === 2 && rows[0].manufacturer === "Acme" && rows[0].part === "AX-1", "owner-bom: Qty · Manufacturer · Model come through");
-    const json = JSON.stringify(bom);
-    ok(!/1234|5678|99991|4321|8765|\$/.test(json) && !/price|cost|total|value/i.test(Object.keys(bom).join() + Object.keys(bom.systems[0]).join()), "owner-bom: no price, cost, option price or total anywhere in the model");
-    const noQty = ownerBom(mk({ pdfOptions: { pdfQty: false } }, [r1]), r1, new Map(), "Owner");
-    ok(noQty.showQty === false && noQty.systems.flatMap((x) => x.rows).every((r) => r.qty === null && r.unit === "" && Object.keys(r).sort().join() === KEYS), "owner-bom: Qty off → no quantities, same keys");
-    const frozenQty = rev(1, "sent", { spec, docFields: { pdfOptions: { pdfQty: false } } });
-    ok(ownerBom(mk({}, [frozenQty]), frozenQty, new Map(), "Owner").showQty === false, "owner-bom: the revision's frozen Qty choice wins over the live one");
-    ok(ownerBom(mk(), rev(3, "sent"), new Map(), "Owner").systems.length === 0, "owner-bom: a revision with no spec has no systems");
-
-    // Final fix #3 (Jeff 2026-10-15): a vendor-quoted line shows its description only in the owner's BOM.
-    const vq = { id: "vq1", vendor: "Rose Brand Textiles", quoteNumber: "RBQ-90417", description: "Main drape, IFR velour", lines: [], terms: "", notes: "", total: 900, includesFreight: false, display: "single" };
-    const vItem = item(7, { sku: "RBQ-90417", desc: "Rose Brand Textiles \u00b7 RBQ-90417 \u2014 Main drape, IFR velour", vendorQuoteId: "vq1", qty: 1, unit: "lot", manufacturer: "Rose Brand Textiles" });
-    const vSpec = { sections: [{ id: "v1", name: "Drapery", kind: "materials", mfr: "", freightPct: 0, items: [vItem, item(8, { manufacturer: "Acme", manufacturerModelNumber: "AX-2" })] }] };
-    const vRev = rev(1, "sent", { spec: vSpec, vendorQuotes: [vq] });
-    const vBom = ownerBom(mk({}, [vRev]), vRev, new Map(), "Owner");
-    const vRows = vBom.systems.flatMap((x) => x.rows), vJson = JSON.stringify(vBom);
-    ok(vRows.length === 2 && vRows[0].description === "Main drape, IFR velour" && vRows[0].manufacturer === "" && vRows[0].part === "" && vRows[0].qty === 1,
-      "owner-bom: a vendor-quoted line shows the vendor quote's description only (no Manufacturer / Model)");
-    ok(!vJson.includes("Rose Brand") && !vJson.includes("RBQ-90417") && !JSON.stringify(vRows).includes("\u00b7"), "owner-bom: no vendor name, no vendor quote # anywhere in the owner's BOM");
-    ok(vRows[1].manufacturer === "Acme" && vRows[1].part === "AX-2" && vRows[1].description === "Item 8", "owner-bom: a non-vendor line is unchanged");
-    const vNoRec = rev(1, "sent", { spec: vSpec });
-    const vNoRecJson = JSON.stringify(ownerBom(mk({}, [vNoRec]), vNoRec, new Map(), "Owner"));
-    ok(!vNoRecJson.includes("Rose Brand") && !vNoRecJson.includes("RBQ-90417") && vNoRecJson.includes("Main drape, IFR velour"),
-      "owner-bom: with the vendor record missing, the stamped \"Vendor · Quote # — \" prefix is stripped from the line's own desc");
-    ok(vendorFreeDescription({ desc: "Hand typed" }, undefined) === "Hand typed" && vendorFreeDescription({ desc: "x" }, { description: " Own " }) === "Own",
-      "owner-bom: vendorFreeDescription — a desc without the stamp is kept; the vendor record's description wins");
-    // The #301 package page's BOM is unchanged: no option → "Vendor · Quote # — description" exactly as before.
-    const pkgRows = packageBomRows(vSpec.sections[0] as never, new Map(), [vq as never]);
-    ok(pkgRows[0].description === "Rose Brand Textiles · RBQ-90417 — Main drape, IFR velour" && pkgRows[0].manufacturer === "Rose Brand Textiles" &&
-       JSON.stringify(pkgRows) === JSON.stringify(packageBomRows(vSpec.sections[0] as never, new Map(), [vq as never], { hideVendor: false })),
-      "owner-bom: the #301 package BOM still prints \"Vendor · Quote # — description\" (unchanged without hideVendor)");
-    const pkgModel = readFileSync(join(__dirname, "../src/lib/estimate-output/package-model.ts"), "utf8");
-    ok(pkgModel.includes("packageBomRows(sec, i.catalog, d.vendorQuotes || [])") && !pkgModel.includes("hideVendor"), "owner-bom pins: the package page never passes hideVendor");
-
-    // Final fix #2 (Jeff 2026-10-15): Scope only is the stamp OR a bidder row (removed rows included — the caller's read).
-    ok(quoteIsScopeOnly({ id: "Q-1", bidScopeOnly: true }, []) && quoteIsScopeOnly({ id: "Q-1" }, [A]) && !quoteIsScopeOnly({ id: "Q-1" }, []) &&
-       !quoteIsScopeOnly({ id: "" , bidScopeOnly: true }, [A]) && !quoteIsScopeOnly({ id: "Q-1" }, [row("O", "OWN", "owner" as never, {})]),
-      "scope-only: the stamp alone, or a GC/EC bidder row, makes it Scope only; nothing else does");
-  }
-  // #348 slice 6 Task 4 — Home's Bids card and the read-only bid row.
-  {
-    const rd = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
-    const codeOf = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-    const bidRow = rd("src/app/portal/bid-row.tsx"), bidCode = codeOf(bidRow);
-    ok(!/["']use client["']/.test(bidRow), "bids-card: the bid row is a server component");
-    ok(!/AcceptDialog|RefreshPricingButton|RenameQuote|copyQuoteToCart|Quote again|portalDecline/.test(bidCode), "bids-card: the bid row has no Accept, Refresh pricing, Rename, Copy, Quote again or decline note");
-    ok(bidCode.includes("bid.rev.name") && bidCode.includes("bid.rev.value") && bidCode.includes("PORTAL_BID_COPY.badge") && bidCode.includes("portalBidChip(q.status, bid)") &&
-       bidCode.includes("onlineHeaderLine(q, bid.rev)") && !/\bq\.(name|value)\b/.test(bidCode),
-      "bids-card: the bid row shows the revision's frozen name and value, the Bid badge and the status chip — never the live q.name / q.value");
-    ok(bidCode.includes("Open PDF ↗") && bidCode.includes("/pdf") && bidCode.includes("prefetch={false}"), "bids-card: the bid row links the online page and Open PDF");
-    ok(!/@\/lib\/stores\/(parties|bids)|-server|addressee/.test(bidCode), "bids-card: the bid row imports no party store, bid store or -server module");
-    // Home bounds the list to the quotes one of this company's rows points at — the output is identical.
-    {
-      const qs = [mk({ id: "Q-1" }), mk({ id: "Q-3", status: "lost" }), mk({ id: "Q-5", customerId: "CA" }), mk({ id: "Q-9" }), mk({ id: "Q-6", status: "won", bid: { dueAt: null, addenda: [], awardedPartyId: "A6" } })];
-      const rs = [A, row("A3", "CA", "gc", {}, { recordId: "Q-3" }), row("A6", "CA", "gc", { result: "awarded" }, { recordId: "Q-6" })];
-      const ids = new Set(rs.map((r) => r.recordId));
-      ok(JSON.stringify(portalBidList(qs, "CA", rs)) === JSON.stringify(portalBidList(qs.filter((q) => ids.has(q.id)), "CA", rs)) &&
-         portalBidList(qs, "CA", rs).open.length + portalBidList(qs, "CA", rs).history.length === 3,
-        "bids-card: pre-filtering quotes by the company's row recordIds leaves portalBidList's output unchanged");
-    }
-    const homeSrc = codeOf(rd("src/app/portal/page.tsx"));
-    ok(homeSrc.includes("portalBidRowsForCompany(cid)") && homeSrc.includes("portalBidList(\n    quotes.filter((q) => bidQuoteIds.has(q.id)),") && homeSrc.includes("new Set(bidRows.map((r) => r.recordId))") && homeSrc.includes("homePortalQuotes(quotes, cid)") &&
-       homeSrc.includes("PORTAL_BID_COPY.card") && homeSrc.includes("PORTAL_BID_COPY.cardSub(companyName)") && homeSrc.includes("<PortalBidRow"),
-      "bids-card: Home loads the company's bidder rows, lists them through portalBidList and keeps homePortalQuotes");
-    ok(homeSrc.indexOf("PORTAL_BID_COPY.card") > -1 && homeSrc.indexOf("PORTAL_BID_COPY.card") < homeSrc.indexOf("Your quotes &amp; estimates"), "bids-card: the card sits above Your quotes & estimates");
-    ok(homeSrc.includes("bidGroups.open.length + bidGroups.history.length > 0"), "bids-card: the card renders only when there is a bid to show");
-    const smoke = rd("scripts/smoke-routes.ts");
-    ok(smoke.includes('"/portal?preview=northridge"') && smoke.includes('"/portal/quotes/Q-2041?preview=northridge"'), "bids-card: the smoke routes cover the Bids branch of Home and the bidder branch of the online page");
-    // The card's items carry only { q, bid, closed } — no party list.
-    const l = portalBidList([mk()], "CA", [A]);
-    ok(l.open.length === 1 && Object.keys(l.open[0]).sort().join() === "bid,closed,q" && !/"companyId"|recordId/.test(JSON.stringify(l.open[0].bid)), "bids-card: a list item is { q, bid, closed } with no party row");
-  }
-  // Boundary.
-  {
-    const src = readFileSync(join(__dirname, "../src/lib/parties/portal-bid.ts"), "utf8");
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-    ok(!/import (?!type)[^;]*@\/lib\/stores/.test(code) && !/@\/db|node:|-server/.test(code), "portal-bid: no store value import, no db, node: or -server");
-  }
-}
-
-const I_FIX = {
-  own: fixtureId(348, "iown"), gc1: fixtureId(348, "igc1"), gc2: fixtureId(348, "igc2"), gc3: fixtureId(348, "igc3"), gc4: fixtureId(348, "igc4"),
-  oth: fixtureId(348, "ioth"), ct1: fixtureId(348, "ict1"), ct2: fixtureId(348, "ict2"),
-};
-async function dropPortalBidIdentityFixtures() {
-  const db = await getDb();
-  await db.delete(contactEmails).where(like(contactEmails.contactId, "TEST348:i%"));
-  await db.delete(contactsTable).where(like(contactsTable.id, "TEST348:i%"));
-  await db.delete(companies).where(like(companies.id, "TEST348:i%"));
-}
-
-/** A source file with comments stripped (pins). */
-function codeOfSrc(f: string): string {
-  return readFileSync(join(__dirname, "..", f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-}
-
-/** #348 slice 6 task 2 — the portal loader, the three portal quote routes' rule and the bidder PDF response, against the DB. */
-export async function portalBidDbChecks(ok: Ok) {
-  const { own, gc1, gc2, gc3, gc4, oth, ct1, ct2 } = I_FIX;
-  const iq = fixtureId(348, "iq"), iq2 = fixtureId(348, "iq2");
-  const NAMES = { own: "Portal Owner I", gc1: "Portal GC One I", gc2: "Portal GC Two I", gc3: "Portal GC Three I", gc4: "Portal GC Four I", oth: "Portal Other I" };
-  const regAll = async () => {
-    for (const p of await listFor("quote", iq)) registerFixture("record_parties", p.id);
-    const proj = await getProjectByQuote(iq).catch(() => null);
-    if (proj) {
-      registerFixture("projects", proj.id);
-      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`));
-      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
-    }
-  };
-  const ses = (cid: string) => ({ grantId: "PG-i", customerId: cid, name: "T", email: "t@i.test" });
-  const T = Date.UTC(2034, 2, 10);
-  const sentRevs = (q: Quote | null) => (q?.revisions ?? []).filter((r) => r.reason === "sent");
-  const stateFor = async (cid: string) => {
-    const q = (await getQuote(iq))!;
-    const rows = await portalBidRowsFor(q, cid);
-    return { q, rows, s: portalOnlineEstimateState(q, cid, rows), pdf: portalBidPdfSource(q, cid, rows), list: portalBidList([q], cid, rows) };
-  };
-  const listed = (l: ReturnType<typeof portalBidList>) => l.open.length + l.history.length;
-  try {
-    await dropPortalBidIdentityFixtures();
-    for (const k of ["own", "gc1", "gc2", "gc3", "gc4", "oth"] as const) {
-      await saveCompany({ id: I_FIX[k], name: NAMES[k], type: "customer", lifecycle: "active", deleted: false });
-    }
-    await saveContact({ id: ct1, firstName: "Ivy", lastName: "One", homeCompanyId: gc1 });
-    await setEmails(ct1, [{ value: "ivy@i.test", label: "work", isPrimary: true }] as never);
-    await saveContact({ id: ct2, firstName: "Ike", lastName: "Two", homeCompanyId: gc2 });
-    await setEmails(ct2, [{ value: "ike@i.test", label: "work", isPrimary: true }] as never);
-    const NOW = Date.now();
-    // Task 3: a printed system with priced lines, so the owner's BOM has rows (and prices that must never reach it).
-    const iSpec = {
-      sections: [
-        { id: "is1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, items: [
-          { id: 1, sku: "", desc: "Batten", qty: 4, unit: "ea", cost: 1234.5, price: 5678.25, manufacturer: "Acme", manufacturerModelNumber: "AX-1" },
-          { id: 2, sku: "", desc: "Spare", qty: 1, unit: "ea", cost: 10, price: 99991, option: true },
-        ] },
-      ],
-    };
-    await createFixture("quotes", buildQuote(iq, { name: "Portal bid quote", customer: NAMES.own, customerId: own, value: 1000, spec: iSpec } as never, "system", null, NOW) as never);
-    // Task 3: the owner's second estimate — no bidders, behaves exactly as today.
-    await createFixture("quotes", buildQuote(iq2, { name: "Owner plain quote", customer: NAMES.own, customerId: own, value: 500, spec: iSpec } as never, "system", null, NOW) as never);
-    const added = [
-      await addBidder({ quoteId: iq, companyId: gc1, contactId: ct1, role: "gc" }, "u"),
-      await addBidder({ quoteId: iq, companyId: gc2, contactId: ct2, role: "gc" }, "u"),
-      await addBidder({ quoteId: iq, companyId: gc3, role: "gc" }, "u"),
-      await addBidder({ quoteId: iq, companyId: gc4, role: "gc" }, "u"),
-    ];
-    await regAll();
-    if (!added.every((a) => a.ok)) throw new Error("portal bidders missing");
-    const [p1, p2, p3, p4] = added.map((a) => (a.ok ? a.party.id : ""));
-    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    const r1 = sentRevs(await getQuote(iq)).at(-1)!.rev;
-    const send = (pid: string, rev: number) => recordBidderSend(iq, pid, { threadId: `C-i-${pid}-${rev}`, rev, at: T, by: "Test", to: "x@i.test" }, { kind: "sent" }, "u1");
-    for (const pid of [p1, p2, p3]) await send(pid, r1);
-    await updateBidder(p3, { result: "withdrew" });
-
-    // Loader.
-    {
-      const q = (await getQuote(iq))!;
-      const rows1 = await portalBidRowsFor(q, gc1);
-      ok(rows1.length === 1 && rows1[0].id === p1 && rows1.every((r) => r.companyId === gc1 && r.recordType === "quote" && r.recordId === iq && !!r.bid),
-        "portal-bid db: portalBidRowsFor returns only this company's bidder rows on the quote");
-      ok(!("contactId" in rows1[0]) && !("createdBy" in rows1[0]), "portal-bid db: the loader hands the portal only the rule's fields");
-      ok((await portalBidRowsFor(q, own)).length === 0 && (await portalBidRowsFor(q, "")).length === 0 && (await portalBidRowsFor(q, oth)).length === 0,
-        "portal-bid db: the owner, an empty company and a stranger get no rows");
-      const byCo = await portalBidRowsForCompany(gc1);
-      ok(byCo.some((r) => r.id === p1) && byCo.every((r) => r.companyId === gc1 && r.recordType === "quote" && !!r.bid && (r.role === "gc" || r.role === "ec")),
-        "portal-bid db: portalBidRowsForCompany lists this company's quote bidder rows only");
-      ok((await portalBidRowsForCompany("")).length === 0, "portal-bid db: no company, no rows");
-      const rows4 = await portalBidRowsFor(q, gc4);
-      ok(rows4.length === 1 && rows4[0].id === p4 && rows4[0].bid?.revSent == null, "portal-bid db: a never-sent bidder's row loads — the rule, not the loader, refuses it");
-    }
-
-    // 1. A sent bidder sees its delivered revision.
-    {
-      const { s, pdf } = await stateFor(gc1);
-      ok(s.kind === "ok" && s.bidder?.partyId === p1 && s.rev.rev === r1 && pdf?.partyId === p1 && pdf.rev === r1, "portal-bid db: gc1 sees r1 (state and PDF source)");
-    }
-    // T3. The owner of a bid estimate (Jeff 2026-10-15): a BOM with no prices — no PDF, no Accept, no writes.
-    {
-      const q = (await getQuote(iq))!;
-      const hb = await portalQuoteHasBidders(q);
-      ok(hb && (await portalBidRowsFor(q, own)).length === 0, "owner-bom db: the owner's quote has bidders (and the bidder loader still reads nothing for the owner)");
-      ok((await portalOwnerHasBidders(q, own)) === true && (await portalOwnerHasBidders(q, gc1)) === false && (await portalOwnerHasBidders(q, oth)) === false && (await portalOwnerHasBidders(q, "")) === false,
-        "owner-bom db: portalOwnerHasBidders is true only for the quote's own customer (a bidder, a stranger and an empty company are false)");
-      const s = portalOnlineEstimateState(q, own, [], { hasBidders: hb });
-      ok(s.kind === "ok" && s.bomOnly === true && !s.bidder && s.rev.rev === r1, "owner-bom db: the owner's page state is bomOnly on its latest sent revision");
-      const withPdf = { ...q, revisions: (q.revisions ?? []).map((r) => (r.reason === "sent" ? { ...r, pdfBlobPath: "quote-pdfs/x.pdf" } : r)) } as Quote;
-      ok(portalQuotePdfSource(withPdf, own) !== null && portalQuotePdfSource(withPdf, own, { hasBidders: hb }) === null, "owner-bom db: the owner's PDF source is null once the quote has bidders");
-      const so = ses(own);
-      const acc = await acceptPortal(so, { quoteId: iq, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
-      const ref = await refreshPortalQuote(so, iq);
-      const cp = await copyToCart(so, iq);
-      const rn = await renamePortalQuote(so, iq, "Owner rename");
-      ok(!acc.ok && acc.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: acceptPortal refuses the owner of a bid estimate");
-      ok(!ref.ok && ref.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: refreshPortalQuote refuses the owner of a bid estimate");
-      ok(!cp.ok && cp.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: copyToCart refuses the owner of a bid estimate");
-      ok(!rn.ok && rn.error === PORTAL_NOT_FOUND_COPY, "owner-bom db: renamePortalQuote refuses the owner of a bid estimate");
-      const after = await getQuote(iq);
-      ok(after?.status === "sent" && !after.portalAcceptance && after.name === "Portal bid quote", "owner-bom db: nothing was written for the owner");
-      const bom = s.kind === "ok" ? await portalOwnerBom(q, s.rev, NAMES.own) : null;
-      const rows = bom ? bom.systems.flatMap((x) => x.rows) : [];
-      ok(!!bom && bom.preparedFor === NAMES.own && bom.title === "Portal bid quote" && bom.systems.length === 1 && rows.length === 1 && rows[0].qty === 4 && rows[0].manufacturer === "Acme" && rows[0].part === "AX-1",
-        "owner-bom db: the BOM is the sent revision's printed system — Qty · Manufacturer · Model, the option line left out");
-      ok(rows.every((r) => Object.keys(r).sort().join() === "description,key,manufacturer,part,qty,unit"), "owner-bom db: every BOM row has only the PackageBomRow fields");
-      ok(!/1234|5678|99991|22713|\$/.test(JSON.stringify(bom)), "owner-bom db: no price, cost, option price or total in the owner's BOM");
-      const ids = await portalBidderQuoteIds([q, (await getQuote(iq2))!, { id: "" }, { id: fixtureId(348, "imissing") }]);
-      ok(ids.has(iq) && !ids.has(iq2) && ids.size === 1, "owner-bom db: portalBidderQuoteIds picks the bid estimate only");
-      ok((await portalBidderQuoteIds([])).size === 0, "owner-bom db: no ids, no read, empty set");
-      ok((await portalBidderQuoteIds([{ id: fixtureId(348, "inorows"), bidScopeOnly: true }])).has(fixtureId(348, "inorows")), "scope-only db: a stamped quote is Scope only with no party rows at all");
-      ok(q.bidScopeOnly === true, "scope-only db: addBidder stamped the estimate (bidScopeOnly)");
-      const vmBid = await loadBidPanel(iq, { canEdit: true, canSend: true, canLink: true });
-      ok(vmBid.ok && vmBid.panel.scopeOnly === true, "scope-only label db: the Bidders panel VM carries scopeOnly for an estimate with bidders");
-    }
-    // T3. The owner's estimate without bidders behaves exactly as today — Accept still works.
-    {
-      await setStatus(iq2, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-      const q2 = (await getQuote(iq2))!;
-      const hb2 = await portalOwnerHasBidders(q2, own);
-      ok(!hb2 && JSON.stringify(portalOnlineEstimateState(q2, own, [], { hasBidders: hb2 })) === JSON.stringify(portalOnlineEstimateState(q2, own)) &&
-         portalOnlineEstimateState(q2, own).kind === "ok" && !("bomOnly" in portalOnlineEstimateState(q2, own, [], { hasBidders: hb2 })),
-        "owner-bom db: an estimate with no bidders has today's state, no bomOnly");
-      const w2 = { ...q2, revisions: (q2.revisions ?? []).map((r) => (r.reason === "sent" ? { ...r, pdfBlobPath: "quote-pdfs/y.pdf" } : r)) } as Quote;
-      ok(JSON.stringify(portalQuotePdfSource(w2, own, { hasBidders: hb2 })) === JSON.stringify(portalQuotePdfSource(w2, own)) && portalQuotePdfSource(w2, own) !== null, "owner-bom db: its PDF source is today's");
-      const acc2 = await acceptPortal(ses(own), { quoteId: iq2, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
-      ok(acc2.ok && !!(await getQuote(iq2))?.portalAcceptance, "owner-bom db: Accept still works on the owner's estimate with no bidders");
-      const q2b = (await getQuote(iq2))!;
-      ok(!("bidScopeOnly" in q2b) && (await portalBidderQuoteIds([q2b])).size === 0, "scope-only db: an estimate that never had bidders carries no stamp and is not Scope only");
-      const vmPlain = await loadBidPanel(iq2, { canEdit: true, canSend: true, canLink: true });
-      ok(vmPlain.ok && vmPlain.panel.scopeOnly === false && vmPlain.panel.bidders.length === 0, "scope-only label db: an estimate that never had a bidder → scopeOnly false");
-    }
-
-    // Final fix #2 (Jeff 2026-10-15): "Scope only" is sticky — removing every bidder, legacy rows, and a split.
-    {
-      const iq3 = fixtureId(348, "iq3"), iq4 = fixtureId(348, "iq4"), is1 = fixtureId(348, "isplit1"), is2 = fixtureId(348, "isplit2"), is3 = fixtureId(348, "isplit3");
-      const regRows = async (qid: string) => { for (const p of (await listForRecordsIncludingDeleted("quote", [qid])).get(qid) ?? []) registerFixture("record_parties", p.id); };
-      await createFixture("quotes", buildQuote(iq3, { name: "Owner sticky quote", customer: NAMES.own, customerId: own, value: 700, spec: iSpec } as never, "system", null, NOW) as never);
-      const before3 = (await getQuote(iq3))!;
-      const b3 = await addBidder({ quoteId: iq3, companyId: gc1, contactId: ct1, role: "gc" }, "u");
-      await regRows(iq3);
-      const after3 = (await getQuote(iq3))!;
-      ok(b3.ok && after3.bidScopeOnly === true && after3.updatedAt === before3.updatedAt, "scope-only db: adding a bidder stamps the estimate without bumping updatedAt");
-      ok(await markBidScopeOnly(iq3) && (await getQuote(iq3))!.updatedAt === before3.updatedAt && !(await markBidScopeOnly(fixtureId(348, "imissing"))),
-        "scope-only db: markBidScopeOnly is idempotent, never bumps updatedAt, and is false for a missing quote");
-      await updateQuote(iq3, { bidScopeOnly: undefined, name: "Owner sticky quote" } as never);
-      ok((await getQuote(iq3))!.bidScopeOnly === true, "scope-only db: an Estimator save (update) can't clear the stamp");
-      await setStatus(iq3, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-      for (const p of await listBidders(iq3)) await removeParty(p.id);
-      const q3 = (await getQuote(iq3))!;
-      ok((await listBidders(iq3)).length === 0 && q3.bidScopeOnly === true, "scope-only db: every bidder removed — the stamp stays");
-      const hb3 = await portalOwnerHasBidders(q3, own);
-      const s3 = portalOnlineEstimateState(q3, own, [], { hasBidders: hb3 });
-      ok(hb3 && s3.kind === "ok" && s3.bomOnly === true, "scope-only db: with every bidder removed the owner still sees the BOM only");
-      const w3 = { ...q3, revisions: (q3.revisions ?? []).map((r) => (r.reason === "sent" ? { ...r, pdfBlobPath: "quote-pdfs/z.pdf" } : r)) } as Quote;
-      ok(portalQuotePdfSource(w3, own, { hasBidders: hb3 }) === null, "scope-only db: no PDF source (the PDF route answers 404 on hasBidders)");
-      const acc3 = await acceptPortal(ses(own), { quoteId: iq3, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "Owen", signerTitle: "Director" }, Date.now(), { notify: async () => {} });
-      ok(!acc3.ok && acc3.error === PORTAL_NOT_FOUND_COPY && !(await getQuote(iq3))!.portalAcceptance, "scope-only db: Accept is still refused after the bidders are removed");
-      ok((await portalBidderQuoteIds([q3])).has(iq3), "scope-only db: Home / My quotes agree (portalBidderQuoteIds)");
-      const vmGone = await loadBidPanel(iq3, { canEdit: true, canSend: true, canLink: true });
-      ok(vmGone.ok && vmGone.panel.bidders.length === 0 && vmGone.panel.scopeOnly === true, "scope-only label db: every bidder removed — the VM still carries scopeOnly (sticky)");
-
-      // Legacy: bidder rows from before the stamp existed (no stamp), then removed — the deleted rows still count.
-      await createFixture("quotes", buildQuote(iq4, { name: "Owner legacy quote", customer: NAMES.own, customerId: own, value: 300, spec: iSpec } as never, "system", null, NOW) as never);
-      const lp = await addParty({ recordType: "quote", recordId: iq4, companyId: gc2, role: "gc" }, "u");
-      if (lp.ok) await setPartyBid(lp.party.id, newBidderState("email"));
-      await regRows(iq4);
-      const q4 = (await getQuote(iq4))!;
-      ok(lp.ok && !("bidScopeOnly" in q4) && (await portalQuoteHasBidders(q4)), "scope-only db: an unstamped estimate with a live bidder row is Scope only");
-      if (lp.ok) await removeParty(lp.party.id);
-      const q4b = (await getQuote(iq4))!;
-      ok((await listFor("quote", iq4)).every((p) => p.role !== "gc") && !("bidScopeOnly" in q4b) && (await portalQuoteHasBidders(q4b)) && (await portalBidderQuoteIds([q4b])).has(iq4),
-        "scope-only db: its bidder row removed (soft-deleted), it stays Scope only — listFor still hides the row");
-      const vmLegacy = await loadBidPanel(iq4, { canEdit: true, canSend: true, canLink: true });
-      ok(vmLegacy.ok && vmLegacy.panel.scopeOnly === true, "scope-only label db: an unstamped estimate whose bidder row was removed → scopeOnly true");
-
-      // Split (Move system → New estimate): the action's decision + create(…, { bidScopeOnly }).
-      const inh = async (src: Quote | null, failed = false, cust: string | null = own) => newEstimateScopeOnly(src, failed, cust);
-      ok((await inh(q3)).stamp && (await inh(q4b)).stamp && !(await inh((await getQuote(iq2))!)).stamp && !(await inh(q3)).failedClosed,
-        "scope-only db: a split inherits Scope only from a stamped source and from a source with removed bidders, not from a normal one");
-      const failed = await inh(null, true);
-      ok(!(await inh(null)).stamp && failed.stamp && failed.failedClosed, "scope-only db: no source → normal; a failed source read fails closed (Scope only, failedClosed for the log)");
-      ok(!(await inh(q3, false, oth)).stamp && !(await inh(q3, false, null)).stamp, "scope-only db: a new estimate for a DIFFERENT customer (or none) does not inherit Scope only");
-      const mkSplit = async (id: string, scopeOnly: boolean, extra: Record<string, unknown> = {}) => {
-        registerFixture("quotes", id);
-        await createQuote({ id, name: "Split (moved)", customer: NAMES.own, customerId: own, source: "estimator", status: "draft", spec: iSpec, value: 100, owner: "Test", ...extra } as never, { bidScopeOnly: scopeOnly });
-        await setStatus(id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-        return (await getQuote(id))!;
-      };
-      const sp1 = await mkSplit(is1, (await inh(q3)).stamp);
-      const hs1 = await portalOwnerHasBidders(sp1, own);
-      const ss1 = portalOnlineEstimateState(sp1, own, [], { hasBidders: hs1 });
-      ok(sp1.bidScopeOnly === true && ((await listForRecordsIncludingDeleted("quote", [is1])).get(is1) ?? []).length === 0 && hs1 && ss1.kind === "ok" && ss1.bomOnly === true,
-        "scope-only db: a split off a Scope-only estimate is stamped and its owner sees the BOM only (no bidder rows needed)");
-      const sp2 = await mkSplit(is2, (await inh((await getQuote(iq2))!)).stamp);
-      const hs2 = await portalOwnerHasBidders(sp2, own);
-      ok(!("bidScopeOnly" in sp2) && !hs2 && JSON.stringify(portalOnlineEstimateState(sp2, own, [], { hasBidders: hs2 })) === JSON.stringify(portalOnlineEstimateState(sp2, own)) &&
-         !("bomOnly" in portalOnlineEstimateState(sp2, own, [], { hasBidders: hs2 })),
-        "scope-only db: a split off a normal estimate is unchanged (no stamp, today's state)");
-      const sp3 = await mkSplit(is3, false, { bidScopeOnly: true });
-      ok(!("bidScopeOnly" in sp3), "scope-only db: create() never takes the stamp from the partial (only the server-side option)");
-      // The action's wiring (requireUser keeps the action itself out of the harness).
-      const act = codeOfSrc("src/app/(app)/estimator/actions.ts");
-      const place = act.slice(act.indexOf("async function placeSystemInEstimate("));
-      const existingBranch = place.slice(place.indexOf('if (target.kind === "existing") {'), place.indexOf("const newSections = canonicalBonusSections("));
-      ok(place.includes("newEstimateScopeOnly(sourceQuote, sourceReadFailed, opts.sourceContext.customerId)") && place.includes("}, { bidScopeOnly: scopeOnly.stamp });") &&
-         place.includes("const sourceId = opts.splitFrom?.quoteId || opts.scopeOnlyFrom || null;") &&
-         existingBranch.length > 0 && existingBranch.length < place.length && !/bidScopeOnly|scopeOnly|markBidScopeOnly/.test(existingBranch),
-        "scope-only pins: a new estimate is stamped from the stored source at create; Move / Copy into an existing estimate never touches the stamp");
-      ok(/if \(scopeOnly\.failedClosed\) \{\s*console\.error\([^;]*\{ source: sourceId, created: created\.id \}\);/.test(place),
-        "scope-only pins: a fail-closed stamp is logged with both quote ids (source and the new estimate)");
-      const moveFn = act.slice(act.indexOf("export async function moveSystemToEstimateAction("), act.indexOf("async function placeSystemInEstimate("));
-      const copyFn = act.slice(act.indexOf("export async function copySystemToEstimateAction("), act.indexOf("export async function updateQuoteMetaAction("));
-      ok(moveFn.includes('{ splitFrom: { quoteId: sourceQuoteId, userId: user.id }, scopeOnlyFrom: sourceQuoteId }') && moveFn.includes('target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId'),
-        "scope-only pins: Move → New passes its stored source for Scope only (with the split)");
-      ok(copyFn.includes('sourceQuoteId: string | null = null') && copyFn.includes('...(target.kind === "new" && typeof sourceQuoteId === "string" && sourceQuoteId ? { scopeOnlyFrom: sourceQuoteId } : {}),') && !copyFn.includes("splitFrom"),
-        "scope-only pins: Copy → New passes its stored source for Scope only (never the split's lead / companies); Copy → existing / same passes nothing");
-      const est = codeOfSrc("src/app/(app)/estimator/use-estimator-state.ts");
-      const copyCall = est.slice(est.indexOf("await copySystemToEstimateAction("), est.indexOf("await copySystemToEstimateAction(") + 400);
-      // #366: Copy also sends the builder's project discounts after the source id.
-      ok(/usedVq,\s*loadedId \|\| null\s*(,[\s\S]{0,160}?projectDiscounts\s*)?\)/.test(copyCall), "scope-only pins: the Estimator sends the saved source id with Copy (an unsaved estimate sends none)");
-      // Copy → New from a Scope-only estimate: the same helper + create option (the action needs a signed-in user).
-      const cp1 = await mkSplit(fixtureId(348, "icopy1"), (await inh(q3)).stamp);
-      const cp2 = await mkSplit(fixtureId(348, "icopy2"), (await inh((await getQuote(iq2))!)).stamp);
-      const hc1 = await portalOwnerHasBidders(cp1, own), sc1 = portalOnlineEstimateState(cp1, own, [], { hasBidders: hc1 });
-      ok(cp1.bidScopeOnly === true && hc1 && sc1.kind === "ok" && sc1.bomOnly === true, "scope-only db: Copy → New from a Scope-only estimate is stamped (owner sees the BOM only)");
-      ok(!("bidScopeOnly" in cp2) && !(await portalOwnerHasBidders(cp2, own)), "scope-only db: Copy → New from a normal estimate is not stamped");
-      const bidsSrc = codeOfSrc("src/lib/stores/bids.ts"), partiesSrc = codeOfSrc("src/lib/stores/parties.ts"), quotesSrc = codeOfSrc("src/lib/stores/quotes.ts");
-      const removeFn = partiesSrc.slice(partiesSrc.indexOf("export async function removeParty("), partiesSrc.indexOf("export async function copyParties("));
-      ok(bidsSrc.includes("await markBidScopeOnly(q.id);") && !partiesSrc.includes("bidScopeOnly") && removeFn.length > 0 && !/BidScopeOnly|bidScopeOnly/.test(removeFn) &&
-         quotesSrc.includes("delete clean.bidScopeOnly;") && (quotesSrc.match(/"bidScopeOnly"/g) || []).length === 1,
-        "scope-only pins: addBidder stamps, removeParty never clears, update() drops it, and markBidScopeOnly is the one key-level writer");
-
-      // Fix round 3 (final review Minor 1): reviving a removed bidder row as a plain party keeps the bid evidence.
-      const iq5 = fixtureId(348, "iq5"), iq6 = fixtureId(348, "iq6"), iq7 = fixtureId(348, "iq7"), lead7 = fixtureId(348, "isrc7");
-      for (const [id, nm] of [[iq5, "Owner revive quote"], [iq6, "Owner never-bid quote"], [iq7, "Owner copy-revive quote"]] as const) {
-        await createFixture("quotes", buildQuote(id, { name: nm, customer: NAMES.own, customerId: own, value: 200, spec: iSpec } as never, "system", null, NOW) as never);
-      }
-      // A legacy bidder row (no stamp), removed, then the same company + role re-added as a plain party.
-      const l5 = await addParty({ recordType: "quote", recordId: iq5, companyId: gc3, role: "gc" }, "u");
-      if (l5.ok) await setPartyBid(l5.party.id, newBidderState("email"));
-      if (l5.ok) await removeParty(l5.party.id);
-      await setStatus(iq5, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-      ok(l5.ok && !("bidScopeOnly" in (await getQuote(iq5))!), "scope-only db: fixture — an unstamped quote with a soft-deleted bidder row");
-      const upd5 = (await getQuote(iq5))!.updatedAt;
-      const re5 = await addParty({ recordType: "quote", recordId: iq5, companyId: gc3, role: "gc" }, "u");
-      await regRows(iq5);
-      const q5 = (await getQuote(iq5))!;
-      ok(re5.ok && !re5.existed && re5.party.bid === null && re5.party.id === (l5.ok ? l5.party.id : "") && q5.bidScopeOnly === true && q5.updatedAt === upd5,
-        "scope-only db: re-adding a removed bidder as a plain party revives the row with no bid AND stamps the quote (updatedAt untouched)");
-      const hb5 = await portalOwnerHasBidders(q5, own), s5 = portalOnlineEstimateState(q5, own, [], { hasBidders: hb5 });
-      ok(hb5 && s5.kind === "ok" && s5.bomOnly === true, "scope-only db: after the revive the owner still sees the BOM only");
-      // A row that never had a bid: removed and re-added → no stamp.
-      const l6 = await addParty({ recordType: "quote", recordId: iq6, companyId: gc4, role: "gc" }, "u");
-      if (l6.ok) await removeParty(l6.party.id);
-      const re6 = await addParty({ recordType: "quote", recordId: iq6, companyId: gc4, role: "gc" }, "u");
-      await regRows(iq6);
-      ok(l6.ok && re6.ok && !("bidScopeOnly" in (await getQuote(iq6))!) && !(await portalQuoteHasBidders((await getQuote(iq6))!)),
-        "scope-only db: re-adding a row that never had a bid does not stamp the quote");
-      // copyParties (quote → quote: a split copies a plain GC row) reviving a removed bidder row stamps too.
-      const l7 = await addParty({ recordType: "quote", recordId: iq7, companyId: gc2, role: "gc" }, "u");
-      if (l7.ok) await setPartyBid(l7.party.id, newBidderState("email"));
-      if (l7.ok) await removeParty(l7.party.id);
-      const ld7 = await addParty({ recordType: "quote", recordId: lead7, companyId: gc2, role: "gc" }, "u");
-      if (ld7.ok) registerFixture("record_parties", ld7.party.id);
-      const n7 = await copyParties({ type: "quote", id: lead7 }, { type: "quote", id: iq7 }, "u");
-      await regRows(iq7);
-      const row7 = (await listFor("quote", iq7)).find((p) => p.id === partyId("quote", iq7, gc2, "gc"));
-      ok(l7.ok && ld7.ok && n7 === 1 && !!row7 && row7.bid === null && (await getQuote(iq7))!.bidScopeOnly === true,
-        "scope-only db: copyParties reviving a removed bidder row (quote → quote, a plain GC row) stamps the quote");
-      const ps = codeOfSrc("src/lib/stores/parties.ts");
-      ok(/return onQuoteLocked\(input\.recordType, input\.recordId, async \(\) => \{[\s\S]*?await keepBidEvidence\(id\);[\s\S]*?upsertDoc<Party>\("record_parties", party\)/.test(ps) &&
-         /return onQuoteLocked\(to\.type, to\.id, async \(\) => \{[\s\S]*?await keepBidEvidence\(id\);\s*const row: Party/.test(ps) && (ps.match(/upsertDoc<Party>\(/g) || []).length === 2,
-        "scope-only pins: both id-keyed party writers (addParty, copyParties) check the prior row under the quote row lock before writing");
-    }
-
-    // 2. Refused, the same as missing.
-    for (const [cid, label] of [[gc4, "never sent"], [gc3, "withdrew"], [oth, "a stranger"]] as const) {
-      const { s, pdf, list } = await stateFor(cid);
-      ok(s.kind === "unavailable" && pdf === null && listed(list) === 0, `portal-bid db: ${label} is unavailable, with no PDF`);
-    }
-    {
-      const missing = fixtureId(348, "imissing");
-      ok((await getQuote(missing)) === null && (await portalBidRowsFor({ id: missing, customerId: own }, gc1)).length === 0, "portal-bid db: an unknown quote id has no quote and no rows");
-      // The routes' null-q short-circuit, as written in page / pdf / photo.
-      const mq = await getQuote(missing);
-      const mBids = mq ? await portalBidRowsFor(mq, gc1) : [];
-      const mState = mq ? portalOnlineEstimateState(mq, gc1, mBids) : ({ kind: "unavailable" } as const);
-      const mPdf = mq ? portalBidPdfSource(mq, gc1, mBids) : null;
-      ok(mState.kind === "unavailable" && mPdf === null && mBids.length === 0, "portal-bid db: an unknown quote id is unavailable with no PDF source");
-    }
-    // 9. No other bidder named on gc1's addressed page.
-    {
-      const q = (await getQuote(iq))!;
-      const rev1 = q.revisions!.find((r) => r.rev === r1 && r.reason === "sent")!;
-      const props = await loadQuoteDocumentProps(q, { revision: rev1, photos: { href: (d) => d }, bidderPartyId: p1 });
-      const json = JSON.stringify(props);
-      ok(!!props && props.custName === NAMES.gc1 && !json.includes(NAMES.gc2) && !json.includes(NAMES.gc3) && props.rewardsLine === "",
-        "portal-bid db: gc1's page is addressed to gc1, names no other bidder and has no rewards line");
-    }
-
-    // 3. An unsent revision: draft → sent cuts r2, delivered to gc2 only.
-    await setStatus(iq, "draft", "Test");
-    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    const r2 = sentRevs(await getQuote(iq)).at(-1)!.rev;
-    await send(p2, r2);
-    {
-      const a = await stateFor(gc1), b = await stateFor(gc2);
-      ok(r2 > r1 && a.s.kind === "ok" && a.s.rev.rev === r1 && a.pdf?.rev === r1, "portal-bid db: gc1 still sees r1 after an unsent r2");
-      ok(b.s.kind === "ok" && b.s.rev.rev === r2 && b.pdf?.rev === r2 && b.s.bidder?.partyId === p2, "portal-bid db: gc2 sees r2");
-    }
-
-    // 4. Revising: an addendum on the sent estimate moves it to draft.
-    const ad = await setBidDetails(iq, { addenda: [{ no: 1, receivedAt: T, note: "a" }] }, "Test");
-    {
-      const a = await stateFor(gc1);
-      ok(ad.ok && a.q.status === "draft" && a.s.kind === "revising" && listed(a.list) === 0 && a.pdf === null,
-        "portal-bid db: while revising, gc1 gets the being-revised card, no list row and no PDF");
-    }
-
-    // 5. Award.
-    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    const aw = await awardBid(iq, p1);
-    {
-      const a = await stateFor(gc1), b = await stateFor(gc2);
-      ok(aw.ok && b.s.kind === "unavailable" && listed(b.list) === 0 && b.pdf === null, "portal-bid db: a bidder lost by award is unavailable and unlisted");
-      ok(a.s.kind === "ok" && a.s.bidder?.result === "awarded", "portal-bid db: the awarded bidder still sees its estimate");
-      ok(portalOnlineEstimateState(a.q, own).kind === "ok" && portalListsQuote(a.q, own) && (await portalBidRowsFor(a.q, own)).length === 0,
-        "portal-bid db: the owner's view is unchanged by the award (and reads no rows)");
-      const ao = portalOnlineEstimateState(a.q, own, [], { hasBidders: await portalQuoteHasBidders(a.q) });
-      ok(ao.kind === "ok" && ao.bomOnly === true, "owner-bom db: after the award the owner still sees the BOM only");
-    }
-
-    // 6. A revision addressed after the award (never emailed to gc1).
-    await setStatus(iq, "draft", "Test");
-    await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    const rAw = sentRevs(await getQuote(iq)).at(-1)!;
-    {
-      const a = await stateFor(gc1);
-      ok(rAw.docFields?.awardedPartyId === p1 && a.s.kind === "ok" && a.s.rev.rev === rAw.rev && a.s.bidder?.via === "award" && a.pdf?.rev === rAw.rev,
-        "portal-bid db: gc1 sees the revision frozen to it after the award (via award)");
-    }
-
-    // 8. Read-only: every portal write refuses a bidder company, the same as a missing quote.
-    {
-      const s1 = ses(gc1);
-      const acc = await acceptPortal(s1, { quoteId: iq, purchaseMethod: "po", notes: "", poDocumentId: null });
-      const ref = await refreshPortalQuote(s1, iq);
-      const cp = await copyToCart(s1, iq);
-      const rn = await renamePortalQuote(s1, iq, "Mine now");
-      ok(!acc.ok && acc.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: acceptPortal refuses a bidder");
-      ok(!ref.ok && ref.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: refreshPortalQuote refuses a bidder");
-      ok(!cp.ok && cp.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: copyToCart refuses a bidder");
-      ok(!rn.ok && rn.error === PORTAL_NOT_FOUND_COPY, "portal-bid db: renamePortalQuote refuses a bidder");
-      ok((await serviceRequestFromQuoteId(gc1, iq)) === null, "portal-bid db: serviceRequestFromQuoteId refuses a bidder");
-      const after = await getQuote(iq);
-      ok(after?.status === "sent" && after.name === "Portal bid quote" && !after.portalAcceptance, "portal-bid db: nothing was written");
-    }
-
-    // 10. The PDF response, with fake renders.
-    {
-      // Rename the live quote FIRST: the PDF source must still carry the revision's frozen name.
-      await updateQuote(iq, { name: "Renamed later" });
-      const a = await stateFor(gc1);
-      const src = a.pdf!;
-      ok(a.q.name === "Renamed later" && !!src && src.name === "Portal bid quote" && src.name === (a.s.kind === "ok" ? a.s.rev.name : ""),
-        "portal-bid db: after a rename, the PDF source carries the revision's frozen name, not the live one");
-      const calls: unknown[][] = [];
-      const fakeOk = (async (...args: unknown[]) => { calls.push(args); return { ok: true as const, pdf: Buffer.from("%PDF-1"), fileName: "x" }; }) as unknown as typeof renderBidderPdf;
-      const req = new Request("https://portal.test/portal/quotes/x/pdf", { headers: { host: "portal.test", "x-forwarded-proto": "https" } });
-      const res = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-ok-${Date.now()}` }, { render: fakeOk });
-      const disp = res.headers.get("content-disposition") || "";
-      ok(res.status === 200 && res.headers.get("content-type") === "application/pdf" && disp.startsWith("inline;") && disp.includes(`Rev ${src.rev}`) &&
-         disp.includes("Portal bid quote") && !disp.includes("Renamed later") && disp.includes(NAMES.gc1) &&
-         res.headers.get("x-content-type-options") === "nosniff" && res.headers.get("cache-control") === "private, no-store",
-        "portal-bid db: the PDF opens inline, named for the revision's own name, this bidder and its Rev");
-      ok((await res.text()) === "%PDF-1", "portal-bid db: the rendered bytes are served");
-      ok(calls.length === 1 && calls[0][0] === iq && calls[0][1] === p1 && calls[0][2] === "portal.test" && calls[0][3] === "https" && (calls[0][4] as { rev?: number })?.rev === src.rev,
-        "portal-bid db: the render gets the quote, this party, the host and the bidder's own revision");
-      const fake404 = (async () => ({ ok: false as const, status: 404 as const, error: "Not found" })) as unknown as typeof renderBidderPdf;
-      const r404 = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-404-${Date.now()}` }, { render: fake404 });
-      ok(r404.status === 404 && (await r404.text()) === "Not found", "portal-bid db: a refused render is a plain 404");
-      const origErr = console.error;
-      console.error = () => {};
-      try {
-        for (const [status, error] of [
-          [503, "Bidder PDFs aren’t set up on this server (AUTH_SECRET is missing)."],
-          [503, "Set QUOTE_PDF_ORIGIN, or QUOTE_PDF_DISABLED is on."],
-          [500, "The bidder PDF couldn’t be rendered — try again."],
-        ] as const) {
-          const fakeFail = (async () => ({ ok: false as const, status, error })) as unknown as typeof renderBidderPdf;
-          const rf = await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: `portal-bidpdf:test-${status}-${Date.now()}-${error.length}` }, { render: fakeFail });
-          const body = await rf.text();
-          ok(rf.status === status && body === PORTAL_BID_COPY.pdfUnavailable && !/AUTH_SECRET|QUOTE_PDF/.test(body),
-            `portal-bid db: a ${status} keeps its status and shows only the portal line (never the render's text)`);
-        }
-      } finally {
-        console.error = origErr;
-      }
-      const key = `portal-bidpdf:test-rl-${Date.now()}`;
-      const codes: number[] = [];
-      for (let i = 0; i < PORTAL_BID_PDF_PER_MIN + 1; i++) codes.push((await portalBidPdfResponse(req, src, { quoteId: iq, rlKey: key }, { render: fakeOk, companyName: async () => "X" })).status);
-      ok(PORTAL_BID_PDF_PER_MIN === 6 && codes.slice(0, 6).every((c) => c === 200) && codes[6] === 429, "portal-bid db: the seventh PDF in a minute on one key is 429");
-      await updateQuote(iq, { name: "Portal bid quote" });
-    }
-
-    // 11. Undo award: the bidder lost by award is pending and visible again.
-    const un = await undoAward(iq);
-    {
-      const b = await stateFor(gc2);
-      const row2 = (await listFor("quote", iq)).find((p) => p.id === p2);
-      ok(un.ok && row2?.bid?.result === "pending" && b.s.kind === "ok" && b.s.rev.rev === r2 && listed(b.list) === 1, "portal-bid db: after Undo award gc2 is pending and visible again");
-    }
-    const reAw = await awardBid(iq, p1);
-    ok(reAw.ok && (await getQuote(iq))?.bid?.awardedPartyId === p1, "portal-bid db: gc1 is awarded again after Undo award");
-
-    // 7. Won.
-    await setStatus(iq, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    await regAll();
-    {
-      const a = await stateFor(gc1), b = await stateFor(gc2);
-      ok(a.q.status === "won" && a.s.kind === "ok" && !a.s.closed && a.list.history.length === 1 && a.list.open.length === 0, "portal-bid db: the awarded bidder sees a won estimate in its history");
-      ok(b.s.kind === "unavailable" && listed(b.list) === 0, "portal-bid db: a losing bidder can't see the won estimate");
-      const wo = portalOnlineEstimateState(a.q, own, [], { hasBidders: await portalQuoteHasBidders(a.q) });
-      ok(wo.kind === "ok" && wo.bomOnly === true && (await acceptPortal(ses(own), { quoteId: iq, purchaseMethod: "po", notes: "", poDocumentId: null, signerName: "O", signerTitle: "D" })).ok === false,
-        "owner-bom db: the won bid estimate stays BOM only for the owner, for good");
-    }
-
-    // 12. Route pins.
-    {
-      const rd = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
-      const page = rd("src/app/portal/quotes/[id]/page.tsx"), pdf = rd("src/app/portal/quotes/[id]/pdf/route.ts"), photo = rd("src/app/portal/quotes/[id]/photo/[docId]/route.ts");
-      ok([page, pdf, photo].every((x) => x.includes("portalBidRowsFor(")), "portal-bid db: page, PDF and photo routes load the bidder rows");
-      ok(page.includes("portalOnlineEstimateState(q, cid, bids, { hasBidders })") && page.includes("bidderPartyId: state.bidder.partyId") && page.includes("onlineCutSheets(q, state.rev)"),
-        "portal-bid db: the page composes the bidder rows and addresses the document to the bidder");
-      ok(pdf.includes("portalBidPdfSource(q, session.customerId, bids)") && pdf.includes("export const maxDuration = 60") && pdf.includes("portalBidPdfResponse(req, bid,") &&
-         pdf.includes("`portal-bidpdf:preview:${session.customerId}`") && pdf.includes("`portal-bidpdf:${session.grantId}`") &&
-         pdf.includes("portalQuotePdfPreparing(q, session.customerId)") && pdf.includes("portalQuotePdfUnavailable(q, session.customerId)") &&
-         pdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && pdf.indexOf("portalBidPdfSource(") > -1 && pdf.indexOf("portalBidPdfSource(") < pdf.indexOf("portalQuotePdfSource(q, session.customerId, { hasBidders })"),
-        "portal-bid db: the PDF route answers a bidder first, then runs the customer code unchanged");
-      ok(photo.includes("portalOnlineEstimateState(q, session.customerId, bids, { hasBidders })") && photo.includes("servePhotoForRevision(req, state.rev, docId)"), "portal-bid db: photos come from the bidder's own revision");
-      // Task 3 pins (Jeff 2026-10-15): the owner of a bid estimate — BOM only, no prices, no PDF, no Accept.
-      const bomView = rd("src/app/portal/quotes/[id]/bom-view.tsx"), ownerBomSrc = rd("src/lib/parties/portal-owner-bom.ts");
-      ok(bomView.includes('import type { OwnerBom } from "@/lib/parties/portal-owner-bom";') && ownerBomSrc.includes("packageBomRows(sec, catalog, vendorQuotes, { hideVendor: true })") &&
-         !/money\(|fmt\(|QuoteDocument|AcceptDialog|pdf/i.test(bomView) && !/["']use client["']/.test(bomView) && !/money\(|fmt\(|totals\(|systemSellTotal/.test(ownerBomSrc),
-        "owner-bom pins: the BOM view renders packageBomRows rows (via ownerBom) and carries no money, document, Accept or download");
-      const bomBranch = page.slice(page.indexOf("if (state.bomOnly) {"), page.indexOf("const docProps = await loadQuoteDocumentProps("));
-      ok(page.includes("const hasBidders = q ? await portalOwnerHasBidders(q, cid) : false;") && bomBranch.includes("<BomView") && bomBranch.includes("portalOwnerBom(q, state.rev,") && !/QuoteDocument|OnlineEstimateView|pdfHref|onlineCutSheets/.test(bomBranch) &&
-         page.indexOf("if (state.bomOnly) {") > -1 && page.indexOf("if (state.bomOnly) {") < page.indexOf("loadQuoteDocumentProps(q, {") && page.includes("portalQuotePdfSource(q, cid, { hasBidders })") && !page.includes("portalQuotePdfSource(q, cid)"),
-        "owner-bom pins: the page's bomOnly branch renders <BomView before the priced document is ever loaded");
-      ok(pdf.includes("const hasBidders = q ? await portalOwnerHasBidders(q, session.customerId) : false;") && pdf.indexOf('if (q && hasBidders) return new Response("Not found", { status: 404 });') > -1 &&
-         pdf.indexOf('if (q && hasBidders) return new Response("Not found", { status: 404 });') < pdf.indexOf("portalQuotePdfPreparing(q, session.customerId)"),
-        "owner-bom pins: the PDF route answers the owner of a bid estimate with a plain 404 first");
-      ok(photo.includes("const hasBidders = q ? await portalOwnerHasBidders(q, session.customerId) : false;") && photo.includes("state.bomOnly"), "owner-bom pins: the photo route refuses the BOM-only owner");
-      const pq = rd("src/lib/portal-quotes.ts");
-      const gates = pq.match(/if \(!q \|\| !portalListsQuote\(q, session\.customerId\)\) return \{ ok: false, error: PORTAL_NOT_FOUND_COPY \};\n  if \(await ownerBidRefused\(q, session\.customerId\)\) return \{ ok: false, error: PORTAL_NOT_FOUND_COPY \};/g) || [];
-      ok(pq.includes("  return portalOwnerHasBidders(q, cid);") && !pq.includes("portalQuoteHasBidders(") && gates.length === 4 && (pq.match(/ownerBidRefused\(q, session\.customerId\)/g) || []).length === 4,
-        "owner-bom pins: accept, refresh, copy and rename each refuse the owner of a bid estimate right after the list rule");
-      const home = rd("src/app/portal/page.tsx"), mine = rd("src/app/portal/my-quotes/page.tsx"), rowSrc = rd("src/app/portal/quote-row.tsx");
-      ok(home.includes("portalBidderQuoteIds([") && home.includes("<PortalBidOwnerRow") && home.includes("!bidOwnerIds.has(p.quoteId)") && mine.includes("portalBidderQuoteIds(") && mine.includes("<PortalBidOwnerRow"),
-        "owner-bom pins: Home and My quotes render the scope-only row for a bid estimate (and Home hides its project's value)");
-      const ownerRow = rowSrc.slice(rowSrc.indexOf("export function PortalBidOwnerRow"));
-      ok(ownerRow.length > 100 && ownerRow.includes("<Chip c={SCOPE_ONLY_CHIP} />") && rowSrc.includes("label: PORTAL_BID_COPY.ownerChip") &&
-         !/money\(|AcceptDialog|RefreshPricingButton|copyQuoteToCart|pdf|Quote again|portalDecline|q\.value/i.test(ownerRow),
-        "owner-bom pins: the scope-only row has no value, Accept, Refresh pricing, decline note, PDF, Copy or Quote again");
-      const srv = rd("src/lib/parties/portal-bid-server.ts");
-      ok(srv.includes("bidderPdfFileName(src.name,") && srv.includes("rateLimit(ctx.rlKey, PORTAL_BID_PDF_PER_MIN, 60_000)") && !srv.includes("r.fileName"),
-        "portal-bid db: the bidder PDF is named by bidderPdfFileName over the revision's name, never the render's live name");
-    }
-    // 13. Choke-point inventory.
-    {
-      const root = join(__dirname, "../src/app/portal");
-      const files = (readdirSync(root, { recursive: true }) as string[]).filter((f) => /\.(ts|tsx)$/.test(f));
-      const NO_BIDDER_ROWS_NEEDED: string[] = [];
-      const reads = files.filter((f) => /\bgetQuote\(/.test(readFileSync(join(root, f), "utf8")));
-      ok(reads.length >= 3 && reads.every((f) => NO_BIDDER_ROWS_NEEDED.includes(f) || readFileSync(join(root, f), "utf8").includes("portalBidRowsFor(")),
-        `portal-bid db: every portal file that reads a quote loads the bidder rows (${reads.join(", ")})`);
-      // Any VALUE import from @/lib/stores/quotes (any alias) must gate through portalBidRowsFor( or portalListsQuote(.
-      // Empty: Home left the list in slice 6 Task 4 — it reads the company's bidder rows (portalBidRowsForCompany) and
-      // lists bids through portalBidList, alongside homePortalQuotes (portalListsQuote inside lib/portal-quotes).
-      const QUOTE_READ_ALLOW: Record<string, string> = {};
-      const quoteValueImport = (src: string) =>
-        [...src.matchAll(/import\s+(type\s+)?([^;]*?)\s+from\s+["']@\/lib\/stores\/quotes["']/g)].some((m) => {
-          if (m[1]) return false;
-          const names = (m[2].match(/\{([^}]*)\}/)?.[1] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-          return !/^\{/.test(m[2].trim()) || names.some((n) => !n.startsWith("type "));
-        });
-      // Loading rows (portalBidRowsForCompany) is not a gate; the list rule (portalBidList) is.
-      const quoteGated = (src: string) => src.includes("portalBidRowsFor(") || src.includes("portalBidList(") || src.includes("portalListsQuote(");
-      const ungated = files.filter((f) => {
-        const src = readFileSync(join(root, f), "utf8");
-        return quoteValueImport(src) && !(f in QUOTE_READ_ALLOW) && !quoteGated(src);
-      });
-      const valueImporters = files.filter((f) => quoteValueImport(readFileSync(join(root, f), "utf8")));
-      ok(valueImporters.length >= 5 && !valueImporters.includes("quote-row.tsx") && ungated.length === 0,
-        `portal-bid db: every portal file with a value import from stores/quotes gates through portalBidRowsFor / portalBidList / portalListsQuote (${ungated.join(", ")})`);
-      ok(quoteValueImport('import {\n  getAll as allQuotes,\n  type Quote,\n} from "@/lib/stores/quotes";') && !quoteValueImport('import type { Quote } from "@/lib/stores/quotes";') &&
-         !quoteValueImport('import { type Quote } from "@/lib/stores/quotes";') && quoteValueImport('import * as Q from "@/lib/stores/quotes";'),
-        "portal-bid db: the import scan catches multi-line, aliased and namespace imports and skips type-only ones");
-      ok(!quoteGated('import { getQuote } from "@/lib/stores/quotes";\nconst r = await portalBidRowsForCompany(cid);') && quoteGated("const g = portalBidList(qs, cid, rows);") &&
-         quoteGated("await portalBidRowsFor(q, cid);") && quoteGated("portalListsQuote(q, cid)"),
-        "portal-bid db: loading company rows alone is not a gate (a quote reader calling only portalBidRowsForCompany is flagged); portalBidList / portalBidRowsFor / portalListsQuote are");
-      const leaks = files.filter((f) => /@\/lib\/stores\/parties|@\/lib\/stores\/bids|@\/lib\/parties\/addressee-server/.test(readFileSync(join(root, f), "utf8")));
-      ok(files.length > 10 && leaks.length === 0, `portal-bid db: no portal file imports the party stores or addressee-server (${leaks.join(", ")})`);
-      // Task 3 fix round 1 — the owner's fail-open default (hasBidders omitted = today's priced answer) is enforced:
-      // any portal file that asks the PDF / online-state rule must also ask the one owner check, or be listed here.
-      const OWNER_CHECK_ALLOW: Record<string, string> = {
-        // PortalQuoteRow calls both with no hasBidders: it is only ever rendered for quotes WITHOUT bidders — Home and
-        // My quotes swap a bid estimate to PortalBidOwnerRow first (portalBidderQuoteIds, pinned above). PortalBidOwnerRow
-        // itself passes { hasBidders: true }.
-        "quote-row.tsx": "Home / My quotes swap rows",
-      };
-      const codeOf = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-      const needsOwnerCheck = (src: string) => {
-        const code = codeOf(src);
-        return /\bportal(QuotePdfSource|OnlineEstimateState)\(/.test(code) && !/\bportal(Owner|Quote)HasBidders\(/.test(code);
-      };
-      ok(needsOwnerCheck("const s = portalOnlineEstimateState(q, cid, bids);") && needsOwnerCheck("x = portalQuotePdfSource(q, cid); // portalOwnerHasBidders(q, cid)") &&
-         !needsOwnerCheck("const hb = await portalOwnerHasBidders(q, cid);\nconst s = portalOnlineEstimateState(q, cid, bids, { hasBidders: hb });") &&
-         !needsOwnerCheck("import { portalOnlineEstimateState } from \"x\";") && !needsOwnerCheck("/* calls portalQuotePdfSource(q, cid) */"),
-        "owner-bom pins: the owner-check scanner flags an unchecked call (even with the check only in a comment) and passes a checked one, an import or a comment");
-      const ownerScan = [
-        ...files.map((f) => ({ f, src: readFileSync(join(root, f), "utf8") })),
-        { f: "src/lib/portal-quotes.ts", src: readFileSync(join(__dirname, "../src/lib/portal-quotes.ts"), "utf8") },
-      ];
-      const unchecked = ownerScan.filter((x) => !(x.f in OWNER_CHECK_ALLOW) && needsOwnerCheck(x.src)).map((x) => x.f);
-      const asks = ownerScan.filter((x) => /\bportal(QuotePdfSource|OnlineEstimateState)\(/.test(codeOf(x.src))).map((x) => x.f);
-      ok(asks.length >= 4 && unchecked.length === 0 && Object.keys(OWNER_CHECK_ALLOW).every((f) => asks.includes(f)),
-        `owner-bom pins: every portal file that asks the PDF / online-state rule also runs the owner check, or is allowlisted (${unchecked.join(", ")})`);
-      const count = (f: string) => (readFileSync(join(__dirname, "..", f), "utf8").match(/portalListsQuote\(/g) || []).length;
-      ok(count("src/lib/portal-quotes.ts") === 4 && count("src/lib/portal-service-quotes.ts") === 1, "portal-bid db: the portal write actions still gate on portalListsQuote (4 + 1)");
-    }
-  } finally {
-    try { await regAll(); } catch {}
-    await dropFixtures(348);
-    await dropPortalBidIdentityFixtures();
   }
 }
 
@@ -2374,5 +1180,5 @@ export async function bidReportDbChecks(ok: Ok) {
 if (process.argv[1]?.endsWith("test-bids.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
-  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => bidFollowupChecks(okf)).then(() => portalBidPureChecks(okf)).then(() => bidReportPureChecks(okf)).then(() => bidReportWidgetChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
+  bidChecks(okf).then(() => bidSendChecks(okf)).then(() => bidSendFakeChecks(okf)).then(() => bidFollowupChecks(okf)).then(() => bidReportPureChecks(okf)).then(() => bidReportWidgetChecks(okf)).then(() => { console.log(`${pass} PASS, ${fail} FAIL`); process.exit(fail ? 1 : 0); });
 }

@@ -27,12 +27,10 @@ export function EstimatorHeader({
   s,
   step,
   onActed,
-  onStep,
 }: {
   s: EstimatorState;
   step: EstimateStep;
   onActed: (action: NextStepAction) => void;
-  onStep: (to: EstimateStep) => void;
 }) {
   const {
     applySync,
@@ -346,7 +344,7 @@ export function EstimatorHeader({
           {loadedId && (
             <PopoutButton kind="estimate" id={loadedId} url={quoteBuilderHref({ id: loadedId })} tone="dark" />
           )}
-          <HeaderMoreMenu s={s} onStep={onStep} />
+          <HeaderMoreMenu s={s} />
         </div>
         {qdOpen && (
           <div

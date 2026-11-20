@@ -34,20 +34,12 @@ import { shortMoneyDash, shortMoneyZero } from "./money";
 import BoardView from "@/components/board/board-view";
 import WorklistRow from "./worklist-row";
 import LeadDrawer from "./lead-drawer";
-import { MeetingsCard } from "@/components/meetings/meetings-card";
-import { AssessmentsCard } from "@/components/assessments/assessment-cards";
 import { PartiesCard } from "@/components/parties/parties-card";
 import { LeadEstimates } from "@/components/parties/lead-estimates";
 import { OwnerDot } from "./avatar";
 import { setStageAction } from "./actions";
-import { getSettings } from "@/lib/settings";
-import { estimateSuggestEnabled, suggestionReadyHref } from "@/lib/assist/suggest-entry-server";
-import { assistSettingsOf } from "@/lib/assist/config";
-import { activeVisitForLead, mergedVisitReasons } from "@/lib/stores/site-visits";
-import { stageMeta as surveyStageMeta, surveysForLead } from "@/lib/stores/surveys";
-import { VISIT_STAGE_META, type VisitStage } from "@/lib/lead-thread";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
-import type { AvatarVM, ChipVM, LeadCustomerLiteVM, LeadThreadVM, WorklistRowVM } from "./types";
+import type { AvatarVM, ChipVM, LeadCustomerLiteVM, WorklistRowVM } from "./types";
 import type { BoardCardVM } from "@/components/board/types";
 
 /**
@@ -266,12 +258,11 @@ export default async function LeadsPage({
   const scopeName = who === "mine" ? me.name : who; // "" = unscoped
   const showParam = one(sp.show); // booth capture — "" = all shows
 
-  const [allLeads, users, fuListAll, unassignedAll, settings, shows] = await Promise.all([
+  const [allLeads, users, fuListAll, unassignedAll, shows] = await Promise.all([
     getAll(),
     activeUsers(),
     followUps(scopeName ? { owner: scopeName } : {}),
     unassigned(),
-    getSettings(),
     listShows(),
   ]);
   const roster: Ident[] = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
@@ -362,18 +353,6 @@ export default async function LeadsPage({
       : "detail"
     : null;
   const sourceOptions = SOURCES.map((s) => ({ value: s as string, label: SOURCE_META[s].label }));
-  // Estimate suggestion (spec 2026-10-13 §3) — the drawer's Suggest estimate
-  // (pilot + `estimate`), and the lead's latest suggestion when it has one.
-  // The settings are already loaded: a user outside the pilot (or with the
-  // feature off) skips both reads; otherwise the gate's key check and the
-  // ready lookup run side by side, and the link is dropped if the gate says no.
-  const assistSettings = assistSettingsOf(settings);
-  const suggestPossible = drawerMode === "detail" && !!leadRec && assistSettings.users.includes(me.id) && !!assistSettings.features.estimate;
-  const [suggestEnabled, suggestReadyRaw] =
-    suggestPossible && leadRec
-      ? await Promise.all([estimateSuggestEnabled(me.id, { settings: assistSettings }), suggestionReadyHref("lead", leadRec.id)])
-      : [false, null];
-  const suggestReady = suggestEnabled ? suggestReadyRaw : null;
 
   // #12 — the New Lead form's "pick an existing customer" prefill. Only
   // fetched when the new-lead form is actually open, same as the thread
@@ -404,40 +383,6 @@ export default async function LeadsPage({
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  // #34 thread — drawer-scoped: two targeted store calls for the ONE open
-  // lead only, never a per-row scan.
-  const thread: LeadThreadVM = { visit: null, survey: null };
-  if (leadRec) {
-    const [visit, linkedSurveys] = await Promise.all([
-      activeVisitForLead(leadRec.id),
-      surveysForLead(leadRec.id),
-    ]);
-    if (visit) {
-      const vmMeta = VISIT_STAGE_META[visit.stage as VisitStage];
-      thread.visit = {
-        id: visit.id,
-        stage: visit.stage,
-        label: vmMeta.label,
-        ink: vmMeta.ink,
-        soft: vmMeta.soft,
-        bd: vmMeta.bd,
-        assignedTo: visit.assignedTo,
-        startAt: visit.startAt,
-      };
-    }
-    const survey = linkedSurveys[0] || null; // newest linked survey (updatedAt-desc)
-    if (survey) {
-      const sMeta = surveyStageMeta((survey.stage || "requested") as string);
-      thread.survey = {
-        id: survey.id,
-        stage: (survey.stage || "requested") as string,
-        label: sMeta.label,
-        ink: sMeta.ink,
-        soft: sMeta.soft,
-        bd: sMeta.bd,
-      };
-    }
-  }
 
   /* ---------- 1a — board ---------- */
   const boardColumns = STAGES.map((k) => ({
@@ -900,17 +845,11 @@ export default async function LeadsPage({
           meName={me.name}
           rosterNames={roster.map((r) => r.name)}
           sourceOptions={sourceOptions}
-          thread={thread}
-          visitReasons={mergedVisitReasons(settings.visitReasons)}
           customers={leadCustomers}
           canDelete={canDelete}
-          canSuggest={suggestEnabled}
-          suggestionHref={suggestReady}
           meetingsSlot={
             drawerMode === "detail" && leadRec ? (
               <>
-                <MeetingsCard kind="work" id={leadRec.id} viewerId={me.id} style={{ marginTop: 18 }} />
-                <AssessmentsCard leadId={leadRec.id} customerId={leadRec.customerId ?? leadRec.convertedCustomerId ?? undefined} compact />
                 <PartiesCard recordType="lead" recordId={leadRec.id} />
                 <LeadEstimates leadId={leadRec.id} />
               </>

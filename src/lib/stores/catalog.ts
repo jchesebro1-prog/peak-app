@@ -1,11 +1,10 @@
-import { clearCollection, DOC_BATCH_CHUNK, getDoc, getDocRows, getDocsByIdAnyCase, insertDocIfAbsent, listDeletedDocs, listDocs, listDocsByField, listDocsFiltered, patchDoc, patchDocKey, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, insertDocIfAbsent, listDeletedDocs, listDocs, listDocsByField, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 import { isFabricPart, SOFT_GOODS_CATEGORY } from "@/lib/fabric-part";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
-import type { PortalVisibility } from "@/lib/portal-visibility";
+import type { PortalVisibility } from "@/lib/catalog-internal";
 import type { RackPartFacts } from "@/lib/rack/types";
-import type { TagFields } from "@/lib/design/conduit-riser/tags";
 import { orderNumberOf } from "@/lib/catalog-rename/sku";
 import { sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -218,15 +217,8 @@ export type CatalogPart = {
   specUpdatedAt?: number;
   specUpdatedBy?: string;
 
-  /** Customer portal visibility (#245 Task 5, spec §1.3) — Auto (the rule
-   *  decides, see src/lib/portal-visibility.ts), Show (always browsable), or
-   *  Hide (never quotable or browsable in the portal). Absent means "auto";
-   *  the part editor stores auto by omitting the key rather than writing the
-   *  string, same convention as the rest of this doc's optional fields, so
-   *  mergeUpsert never has to distinguish "never set" from "explicitly set
-   *  back to auto". Written only through mergeUpsert — no importer or
-   *  enricher patch object carries this key, so a price-book import,
-   *  DaVinci enrich, or ports-rule apply never clears a stored override. */
+  /** A stored override of the removed customer portal (Auto / Show / Hide). Nothing reads or edits it any more; a
+   *  save from the part editor leaves the stored value alone (the form no longer posts the key). */
   portalVisibility?: PortalVisibility;
   /** #293: the part's write-once customer paragraph (plain text, D488 rules)
    *  — sales prose for the Estimator's narrative, distinct from specBody (CSI
@@ -236,31 +228,16 @@ export type CatalogPart = {
   narrativeText?: string;
   narrativeUpdatedAt?: number;
   narrativeUpdatedBy?: string;
-  /** #321: the part's own Grid designator code (1–6 letters/digits; Bray's
-   *  CRO for a relay output) — wins over its device type's code when a device
-   *  is numbered. Absent = use the type's. Written ONLY through mergeUpsert
-   *  (the part editor) — no importer, enricher or price-book patch carries it. */
+  /** Grid-only fields of the removed Design tab — designator code, riser tag
+   *  defaults (BOX · FACE · MOUNT · HT · P/D) and a cable's outside diameter in
+   *  inches. Nothing edits or reads them now; stored values are left alone (no
+   *  form posts the keys, so mergeUpsert keeps them). */
   designatorCode?: string;
-  /** #321: the Grid riser tag's per-part defaults (BOX · FACE · MOUNT · HT · P/D);
-   *  a placement overrides per field. Absent = none. Written ONLY through
-   *  mergeUpsert (the part editor) — no importer or enricher carries it. */
-  tagDefaults?: TagFields;
-  /** #328 B1: a per-length (cable) part's outside diameter in inches — what the
-   *  conduit-fill math sums. Positive, ≤ 3.0, 3 decimals (cleanCableOd). Absent =
-   *  unknown, never 0. Written ONLY through mergeUpsert (the part editor, the
-   *  Riser data sheet's Cables tab) — no importer, enricher or price-book patch
-   *  carries it. */
+  tagDefaults?: { box?: string; face?: string; mount?: string; height?: string; pd?: unknown };
   cableOdIn?: number;
-  /** Grid notes #2: an admin's per-part Grid device type (a DeviceType key) —
-   *  wins over the raw category's type-map entry wherever the part is typed
-   *  (device-types typeOfPart). Absent = from the category. An archived or
-   *  unknown key reads as absent. Written ONLY by setPartDeviceTypeKeys (an
-   *  in-place SQL key update, called by the admin-only setPartsDeviceType).
-   *  Every other catalog write keeps the stored value: writePart (upsert,
-   *  mergeUpsert — the part form, importers, enrichers, price books, the spec
-   *  builder's create-on-the-fly, datasheet/doc flags) restores it and ignores
-   *  any carried in; insertIfAbsent (starter cables) never sets it; a #304
-   *  rename copies the whole doc, so the new SKU keeps it. */
+  /** The removed Grid's per-part device type key. Nothing sets or reads it
+   *  now; every catalog write keeps the stored value (writePart restores it
+   *  and ignores any carried in), and a #304 rename copies the whole doc. */
   deviceTypeKey?: string;
 } & RackPartFacts; // #296 — rack data, optional; absent = unknown, 0 = measured none. Written only through mergeUpsert; no price-book, enricher or importer patch carries these keys.
 
@@ -571,8 +548,7 @@ export async function mergeUpsert(
   // field itself) — the runtime contract is enforced by callers, same as
   // the pre-existing `{ ...part, ... } as SpecCatalogPart` pattern in
   // design/engagements/spec/actions.ts.
-  // Grid notes #2: a patch's deviceTypeKey is ignored — writePart keeps the
-  // stored one (setPartDeviceTypeKeys is its only writer).
+  // A patch's deviceTypeKey is ignored — writePart keeps the stored one.
   const merged = {
     ...(existing ?? {}),
     ...patch,
@@ -583,51 +559,6 @@ export async function mergeUpsert(
     sku: target,
   };
   return writePart(existing, merged as Omit<CatalogPart, "id"> & { id?: string }, opts);
-}
-
-export type DeviceTypeKeyChange = { sku: string; deviceTypeKey: string | undefined };
-
-/**
- * Grid notes #2 — THE writer of `CatalogPart.deviceTypeKey` (writePart and
- * insertIfAbsent never let another write set or clear it). Each change sets
- * (a type key) or clears (undefined) one live part's override IN PLACE
- * (doc-store patchDocKey: a scoped SQL UPDATE of that one key plus the
- * part's own `updatedAt`), so a price, spec or datasheet write landing
- * meanwhile is kept, and a part deleted or renamed meanwhile stays deleted.
- * Grouped by value, ≤ DOC_BATCH_CHUNK ids per statement. A failure mid-way
- * stops there: `saved` is how many parts actually changed.
- */
-export async function setPartDeviceTypeKeys(
-  changes: readonly DeviceTypeKeyChange[],
-  opts: { chunkSize?: number } = {}
-): Promise<{ saved: number; total: number; failed: boolean }> {
-  const want = new Map(changes.map((c) => [c.sku, c.deviceTypeKey]));
-  const total = want.size;
-  const byValue = new Map<string, string[]>();
-  for (const [sku, key] of want) {
-    const k = key ?? "";
-    byValue.set(k, [...(byValue.get(k) ?? []), sku]);
-  }
-  let saved = 0;
-  for (const [key, skus] of byValue) {
-    const size = Math.max(1, Math.min(opts.chunkSize ?? DOC_BATCH_CHUNK, DOC_BATCH_CHUNK));
-    for (let i = 0; i < skus.length; i += size) {
-      try {
-        const r = await patchDocKey("catalog_parts", skus.slice(i, i + size), "deviceTypeKey", key || undefined, { stamp: { updatedAt: Date.now() } });
-        saved += r.ids.length;
-      } catch (e) {
-        console.error("[catalog] device type write failed:", e);
-        return { saved, total, failed: true };
-      }
-    }
-  }
-  return { saved, total, failed: false };
-}
-
-/** Grid notes #2: every live part carrying its own device type — sku,
- *  category and key only (an SQL-narrowed read; overrides are rare). */
-export async function partsWithOwnDeviceType(): Promise<Array<Pick<CatalogPart, "id" | "sku" | "category" | "deviceTypeKey">>> {
-  return listDocsFiltered<CatalogPart>("catalog_parts", { nonEmpty: ["deviceTypeKey"], fields: ["sku", "category", "deviceTypeKey"] });
 }
 
 export type ProductParagraphResult =

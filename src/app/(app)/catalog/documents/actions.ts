@@ -19,8 +19,6 @@ import {
   setImageOrder,
 } from "@/lib/stores/part-documents";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
-import { listProjects } from "@/lib/stores/grid-projects";
-import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, catalogFetchTargets, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
@@ -38,10 +36,8 @@ import { groupCandidatesByDatasheet, thumbnailCandidates } from "@/lib/part-docs
 import { renderDatasheetThumbnail } from "@/lib/part-docs/thumbnail";
 import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { RENDER_WORST_CASE_MS } from "@/lib/quote-pdf/render";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
-import { syncDrivePhotos, type DrivePhotoSyncResult } from "@/lib/part-docs/drive-photo-sync";
 import { squareExistingPhotos } from "@/lib/part-docs/square-batch";
 import {
   FETCH_ACTION_BUDGET_MS,
@@ -71,13 +67,7 @@ export type DocActionResult<T = object> = ({ ok: true } & T) | { ok: false; erro
 
 const MAX_SKUS_PER_CALL = 500;
 
-/** Every document write here changes what the portal index derives (images,
- *  datasheet coverage) — drop this process's cached copy; other serverless
- *  instances converge within the index's 5-minute TTL. A Grid drawing
- *  (`symbol` / `riser`, #300) is not in that index, so a write touching only
- *  a drawing (`kind`) skips the ~37k-part rebuild. */
-function revalidate(kind?: PartDocKind): void {
-  if (!isDrawingKind(kind)) invalidatePortalIndex();
+function revalidate(): void {
   revalidatePath("/catalog/documents");
   revalidatePath("/catalog");
 }
@@ -181,7 +171,7 @@ export async function attachUploadedDocumentAction(input: {
     const primary = new Set(Array.isArray(sheet.primarySkus) ? sheet.primarySkus.map(String) : []);
     for (const sku of skus) await placeSheetImage(doc.id, sku, primary.has(sku));
   }
-  revalidate(doc.kind);
+  revalidate();
   return { ok: true, documentId: doc.id, linked };
 }
 
@@ -211,7 +201,7 @@ export async function replaceDocumentFileAction(input: {
     file = drawn.file;
   }
   await replaceDocumentFile(doc.id, file, user.name);
-  revalidate(doc.kind);
+  revalidate();
   return { ok: true };
 }
 
@@ -219,11 +209,8 @@ export async function replaceDocumentFileAction(input: {
 export async function detachDocumentAction(documentId: string, sku: string): Promise<DocActionResult> {
   await requireUser();
   if (!isDocumentId(documentId)) return { ok: false, error: "Not a document id." };
-  // Read first only for its kind (a drawing skips the portal-index rebuild);
-  // a missing document still falls through to detach's own refusal.
-  const doc = await getDocument(documentId);
   if (!(await detachDocument(documentId, String(sku || "").trim()))) return { ok: false, error: "That part was not linked to this document." };
-  revalidate(doc?.kind);
+  revalidate();
   return { ok: true };
 }
 
@@ -236,7 +223,7 @@ export async function attachExistingDocumentAction(documentId: string, skus: str
   const live = await liveSkus(skus || []);
   if (!live.length) return { ok: false, error: "Pick at least one catalog part." };
   const linked = await attachDocument(doc.id, live, user.name);
-  revalidate(doc.kind);
+  revalidate();
   return { ok: true, linked };
 }
 
@@ -566,7 +553,7 @@ export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: 
 
   const catalogScope = input?.scope === "catalog";
   // The quoted scope's three extra loads still run alongside the catalog list.
-  const quotedLoads = catalogScope ? null : Promise.all([allQuotes(), listProjects(), allGeneratedSpecs(), listFixtures()]);
+  const quotedLoads = catalogScope ? null : Promise.all([allQuotes(), listFixtures()]);
   const parts = await listCatalog();
   const bySku = new Map(parts.map((p) => [p.sku, p]));
   // Labor rows are rates, not products — they never take a datasheet or an
@@ -579,10 +566,10 @@ export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: 
   if (!quotedLoads) {
     skus = parts.filter((p) => p.category !== "Labor").map((p) => p.sku);
   } else {
-    const [quotes, gridProjects, generated, fixtures] = await quotedLoads;
+    const [quotes, fixtures] = await quotedLoads;
     // #332: Grid `asm:` assemblies count their members as quoted.
     const fixtureById = new Map(fixtures.map((f) => [f.id, f] as const));
-    skus = [...quotedPartStats({ quotes, gridProjects, generated, fixtureOf: (id) => fixtureById.get(id) }, eligible).keys()];
+    skus = [...quotedPartStats({ quotes, fixtureOf: (id) => fixtureById.get(id) }, eligible).keys()];
   }
 
   const state = await loadPartDocsState(parts);
@@ -619,7 +606,6 @@ export async function renderThumbnailsAction(input?: { skip?: string[]; scope?: 
   const remaining = groups.length - i;
 
   if (done > 0) {
-    invalidatePortalIndex();
     revalidatePath("/catalog/documents");
     revalidatePath("/catalog");
   }
@@ -635,16 +621,7 @@ export async function squarePhotosAction(input?: { skip?: string[] }): Promise<D
   }
   const skip = Array.isArray(input?.skip) ? input.skip.filter(isDocumentId) : [];
   const r = await squareExistingPhotos(await allDocuments(), user.name, { budgetMs: FETCH_ACTION_BUDGET_MS, skip });
-  if (r.done > 0) revalidate("image");
+  if (r.done > 0) revalidate();
   return { ok: true, ...r };
 }
 
-/** Admin "Sync now" (#283): one budgeted Peak Product Photos pass; the panel
- *  loops while `remaining > 0` and a call made progress. */
-export async function syncDrivePhotosAction(): Promise<DrivePhotoSyncResult> {
-  await requirePerm("manage_users");
-  const r = await syncDrivePhotos(FETCH_ACTION_BUDGET_MS);
-  revalidate();
-  revalidatePath("/catalog");
-  return r;
-}

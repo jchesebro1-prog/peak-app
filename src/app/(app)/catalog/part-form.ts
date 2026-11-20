@@ -1,11 +1,7 @@
 /**
  * Pure halves of catalog/actions.ts, so the harness can test them.
  */
-import { normalizeVisibility } from "@/lib/portal-visibility";
 import { isFabricPart } from "@/lib/fabric-part";
-import { cleanTypeCode } from "@/lib/design/device-types";
-import { cleanTagFields, type TagFields } from "@/lib/design/conduit-riser/tags";
-import { CABLE_OD_MAX_IN, cleanCableOd } from "@/lib/design/conduit-riser/cable-od";
 import { cleanRackFacts, rackFactsFromForm } from "@/lib/rack/part-facts";
 import type { RackPartFacts } from "@/lib/rack/types";
 
@@ -29,19 +25,10 @@ export type OptionalPartFields = {
   curtainAreaRate?: number;
   /** #227 — Fabric parts only: bolt width in inches. */
   boltWidthIn?: number;
-  /** #245 Task 5 — an explicit Show/Hide portal-visibility override; Auto is
-   *  stored as absent (undefined clears through mergeUpsert). */
-  portalVisibility?: "show" | "hide" | undefined;
   /** #292 — Fabric parts only: weight, its basis and flame rating (cut sheets). */
   oz?: number;
   ozBasis?: "lin-yd" | "sq-yd";
   flameRating?: string;
-  /** #321 — the part's own Grid designator code; blank/invalid clears it. */
-  designatorCode?: string;
-  /** #321 — the riser tag defaults; all blank clears them. */
-  tagDefaults?: TagFields;
-  /** #328 B1 — a per-length part's outside diameter (inches); blank/invalid clears it. */
-  cableOdIn?: number;
 } & RackPartFacts;
 
 export const FLAME_RATING_MAX = 120;
@@ -67,40 +54,11 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
     out.ozBasis = out.oz !== undefined && (b === "lin-yd" || b === "sq-yd") ? b : undefined;
   }
   if (fd.has("flameRating")) out.flameRating = String(fd.get("flameRating") || "").trim().slice(0, FLAME_RATING_MAX) || undefined;
-  if (fd.has("designatorCode")) out.designatorCode = cleanTypeCode(fd.get("designatorCode")) ?? undefined;
-  if (TAG_DEFAULT_KEYS.some((k) => fd.has(`tag_${k}`))) out.tagDefaults = tagDefaultsFromForm(fd);
-  if (fd.has("cableOdIn")) out.cableOdIn = cleanCableOd(fd.get("cableOdIn")) ?? undefined;
-  if (fd.has("portalVisibility")) {
-    const v = normalizeVisibility(fd.get("portalVisibility"));
-    out.portalVisibility = v === "auto" ? undefined : v;
-  }
   // #296: rack data — same rule (only submitted keys; a blank clears). An
   // invalid value is dropped here; rackFactsProblem refuses the save first.
   const rack = cleanRackFacts(rackFactsFromForm(fd));
   if (rack.ok) Object.assign(out, rack.patch);
   return out;
-}
-
-const TAG_DEFAULT_KEYS = ["box", "face", "mount", "height", "pd"] as const;
-
-/** #321: the part's tag defaults from `tag_*` inputs. A blank field is simply
- *  not set (a part default has no "deliberate blank"); nothing set → undefined. */
-export function tagDefaultsFromForm(fd: FormData): TagFields | undefined {
-  const raw: Record<string, string> = {};
-  for (const k of TAG_DEFAULT_KEYS) {
-    const v = String(fd.get(`tag_${k}`) ?? "").trim();
-    if (v) raw[k] = v;
-  }
-  return cleanTagFields(raw);
-}
-
-/** #328 B1: server-side gate for the cable outside diameter. null = fine (blank
- *  clears, or the form carries no such field); else the message the part modal shows. */
-export function cableOdProblem(fd: FormData): string | null {
-  if (!fd.has("cableOdIn")) return null;
-  const raw = String(fd.get("cableOdIn") ?? "").trim();
-  if (!raw || cleanCableOd(raw) !== null) return null;
-  return `Outside diameter must be a number above 0 and at most ${CABLE_OD_MAX_IN.toFixed(1)} inches.`;
 }
 
 /** #296: server-side gate for the Rack data section. null = fine (or the form

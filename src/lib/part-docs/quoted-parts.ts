@@ -63,8 +63,9 @@ export function quoteLineSkus(spec: unknown, fixtureOf?: FixtureLookup): string[
 export function quotedPartStats(
   sources: {
     quotes: unknown[];
-    gridProjects: unknown[];
-    generated: unknown[];
+    /** Grid designs and D94 generated specs — sources of the removed Design tab; nothing passes them now. */
+    gridProjects?: unknown[];
+    generated?: unknown[];
     /** #332: resolves Grid `asm:` assemblies (quote lines and placements) into their members. Absent = they don't expand. */
     fixtureOf?: FixtureLookup;
   },

@@ -12,9 +12,6 @@
 
 export const HOME_TABS = [
   { key: "dashboard", label: "Dashboard", href: "/" },
-  { key: "queue", label: "My Queue", href: "/queue" },
-  { key: "calendar", label: "Calendar", href: "/calendar" },
-  { key: "inbox", label: "Inbox", href: "/inbox" },
   { key: "reports", label: "Reports", href: "/reports" },
 ] as const;
 

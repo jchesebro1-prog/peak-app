@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { bidPanelAction, setBidDetailsAction, type BidDetailsResult } from "./bid-actions";
 import { postChanged } from "@/lib/popout/channel";
 import { addedAddendumNos, addendumReviseConfirm, type BidAddendum } from "@/lib/parties/bids";
-import { BID_SEND_COPY } from "@/lib/parties/bid-send";
 import type { BidPanelVM } from "@/lib/parties/bid-vm";
 
 /*
@@ -185,7 +184,7 @@ export default function BidChip({
           onSync?.(r.sync);
           postChanged("quote", quoteId); // the status moved — other windows refresh (as changeStatus does)
         }
-        // The Bidders card (Send & track) reloads its plan: "Send revision to all bidders" now applies.
+        // The Bidders card (Send & track) reloads: its rows now need the next revision.
         window.dispatchEvent(new CustomEvent("peak:bid-changed", { detail: { quoteId, source: "chip" } }));
         if (r.note) {
           setDueInput(toLocalInput(r.panel.dueAt));
@@ -295,7 +294,6 @@ export default function BidChip({
               )}
             </div>
             <div style={small}>Bidders are managed on Send &amp; track.</div>
-            {panel.scopeOnly && <div style={small}>{BID_SEND_COPY.scopeOnlyChip}</div>}
             {error && (
               <div role="alert" style={{ fontSize: 12, color: "#8a2f22" }}>
                 {error}

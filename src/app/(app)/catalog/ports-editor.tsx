@@ -66,8 +66,7 @@ export default function PortsEditor({
         Ports
       </div>
       <div style={{ fontSize: 11, color: "#aab0bb", marginBottom: 8 }}>
-        What this device plugs into. The Grid can only wire devices that have ports, and
-        it refuses to connect two that do not share a connection type.
+        What this device plugs into — reference data on the part (the Design program reads it; nothing in this app wires devices).
       </div>
 
       {davinci && (
@@ -89,7 +88,7 @@ export default function PortsEditor({
 
       {rows.length === 0 && (
         <div style={{ fontSize: 12, color: "#aab0bb", padding: "8px 0" }}>
-          No ports — this part cannot be wired in The Grid yet.
+          No ports recorded for this part.
         </div>
       )}
 

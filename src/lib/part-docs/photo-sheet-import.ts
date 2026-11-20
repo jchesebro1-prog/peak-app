@@ -1,16 +1,16 @@
 // SERVER ONLY — the photo-sheet import's server lane (URL + Drive items).
 import { blobEnabled, deleteBlob, putBlob } from "@/lib/blob";
-import { DOWNLOAD_TIMEOUT_MS, downloadDriveFile } from "@/lib/google/drive-photos";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { attachDocument, createDocument, documentLinksForParts, getDocument, getDocuments, setImageOrder } from "@/lib/stores/part-documents";
-import { drivePhotosToken } from "./drive-photo-sync";
+import { NO_DRIVE_REASON } from "./photo-sheet-io";
+
+const DOWNLOAD_TIMEOUT_MS = 30_000;
 import { fetchImageBytes } from "./fetch";
 import { fileNameForFetched, sniffImageType } from "./files";
 import { placeNewImage, type ImportRow } from "./photo-sheet";
 import { loadPhotoSheetContext, type ListDrive } from "./photo-sheet-io";
 import { planPhotoSheet, type DroppedFile, type PlannedDoc, type SheetDocOutcome } from "./photo-sheet-plan";
 import { squareProductImage, webpFileName } from "./shrink";
-import { MAX_FETCH_TIMEOUT_MS, MAX_PART_IMAGE_BYTES, newDocumentId, partDocBlobPath } from "./types";
+import { MAX_FETCH_TIMEOUT_MS, newDocumentId, partDocBlobPath } from "./types";
 import { buildImageIndex } from "./views";
 
 /**
@@ -86,11 +86,9 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
   const failed = new Set(input.failedKeys);
   const work = plan.docs.filter((d): d is Exclude<PlannedDoc, { via: "dropped" }> => d.via !== "dropped" && !failed.has(d.key));
 
-  let token: string | null | undefined;
-  const downloadDrive = deps.downloadDrive ?? (async (fileId: string, timeoutMs: number) => {
-    if (token === undefined) token = await drivePhotosToken();
-    if (!token) throw new Error("Drive photos aren't connected");
-    return downloadDriveFile(token, fileId, MAX_PART_IMAGE_BYTES, undefined, timeoutMs);
+  // Google Drive is no longer a photo source: with no injected lister the plan holds no Drive items, so this default is never reached.
+  const downloadDrive = deps.downloadDrive ?? (async (): Promise<Uint8Array> => {
+    throw new Error(NO_DRIVE_REASON);
   });
 
   /** True when every placement wrote its order. */
@@ -192,6 +190,5 @@ export async function runPhotoSheetBatch(input: SheetBatchInput, by: string, bud
       outcomes.push({ key: d.key, ok: false, error: `Stopped on this photo: ${errorText(e)}` });
     }
   }
-  if (outcomes.some((o) => o.ok)) invalidatePortalIndex();
   return { ok: true, outcomes, remaining: work.length - processed };
 }

@@ -1,11 +1,8 @@
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getSettings } from "@/lib/settings";
-import { purchasePerksForCompany } from "@/lib/stores/reward-perks";
-import { purchasePerksDocLine } from "@/lib/rewards/purchase-perks";
 import { keyProductPhotoDataUris, keyProductPhotoDocs, loadKeyProductModels, PHOTO_TYPES } from "@/lib/narrative/photos";
 import { quoteAsOfRevision } from "@/lib/quote-share/view";
 import { quoteDocumentDataFor } from "./quote-document-data";
-import { rewardsVisibleFor } from "@/lib/parties/addressee";
 import { documentAddressee } from "@/lib/parties/addressee-server";
 import type { Quote, QuoteRevision } from "@/lib/stores/quotes";
 import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
@@ -75,11 +72,9 @@ export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOp
   const src = opts.revision ? quoteAsOfRevision(q, opts.revision) : q;
   // #348 2b-ii — a bidder's v3 page is addressed to that bidder, strictly: no valid bidder row → null (fail closed).
   const bidderPartyId = opts.photos !== "inline" ? opts.bidderPartyId : undefined;
-  const [cust, settings, perks, addressee] = await Promise.all([
+  const [cust, settings, addressee] = await Promise.all([
     getCustomer(src.customerId),
     getSettings(),
-    // #282 perks+points — the customer's purchase perks line (program on only).
-    purchasePerksForCompany(src.customerId),
     bidderPartyId !== undefined ? documentAddressee(src, bidderPartyId, { strict: true }) : revisionAddressee(src, opts.revision),
   ]);
   if (bidderPartyId !== undefined && !addressee) return null;
@@ -88,5 +83,5 @@ export async function loadQuoteDocumentProps(q: Quote, opts: LoadQuoteDocumentOp
     opts.photos === "inline" ? keyProductPhotoDataUris(doc.sections, doc.document) : keyProductPhotoLinks(doc.sections, opts.photos.href, doc.document),
     loadKeyProductModels(doc.sections, doc.document),
   ]);
-  return { ...doc, keyProductPhotos, keyProductModels, rewardsLine: rewardsVisibleFor(addressee) ? purchasePerksDocLine(perks) : "" };
+  return { ...doc, keyProductPhotos, keyProductModels };
 }

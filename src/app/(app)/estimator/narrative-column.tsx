@@ -280,7 +280,7 @@ export default function NarrativeColumn(p: NarrativeColumnProps) {
         )}
       </div>
       {(sec.presentation || "itemized") === "itemized" && <div style={HINT}>Prints on the quote only in Narrative mode.</div>}
-      <ScopeOutputFields sec={sec} onChange={p.onChange} quoteId={p.quoteId} customerId={p.customerId} />
+      <ScopeOutputFields sec={sec} onChange={p.onChange} />
       <div style={LABEL}>Intro</div>
       <textarea
         ref={narrRef}

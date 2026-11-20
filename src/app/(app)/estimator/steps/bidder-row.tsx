@@ -34,26 +34,20 @@ export function BidderRow({
   b,
   panel,
   busy,
-  walking,
   savingFields,
   onPatch,
   onSubmitted,
   onAward,
-  onSend,
 }: {
   b: BidderVM;
   panel: BidPanelVM;
-  /** Any card mutation in flight, a bidder send walk included. */
+  /** Any card mutation in flight. */
   busy: boolean;
-  /** A bidder send walk is running: even the blur-saved inputs lock. */
-  walking: boolean;
   /** `${partyId}:${field}` keys with a blur-save in flight (each disables only its own input). */
   savingFields: readonly string[];
   onPatch: (partyId: string, patch: Record<string, unknown>, field?: string) => void;
   onSubmitted: (b: BidderVM) => void;
   onAward: (b: BidderVM) => void;
-  /** Send / Send revision / Retry — the card opens its email panel for this bidder. */
-  onSend: (b: BidderVM) => void;
 }) {
   const edit = panel.canEdit;
   const urlSaving = savingFields.includes(`${b.id}:bidSiteUrl`);
@@ -62,8 +56,6 @@ export function BidderRow({
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState("");
   const pdfInFlight = useRef(false);
-  // A blank or malformed address shows the No email chip instead of a Send button.
-  const canEmail = !!b.sendLabel && !b.noEmail;
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkNote, setLinkNote] = useState("");
   const [linkError, setLinkError] = useState("");
@@ -143,11 +135,6 @@ export function BidderRow({
         <span style={{ ...CHIP, background: "#eef0f4", color: "#3a3f4a" }}>{b.role === "gc" ? "GC" : "EC"}</span>
         <span style={resultChip(b)}>{b.resultLabel}</span>
         <span style={{ fontSize: 11.5, color: b.needsRev ? "#9a6a00" : "#5b616e", fontWeight: b.needsRev ? 600 : 400 }}>{b.statusText}</span>
-        {b.noEmail && (
-          <span title={BID_SEND_COPY.noEmailTitle} style={{ ...CHIP, background: "#fdf6e7", color: "#7a5a12" }}>
-            {BID_SEND_COPY.noEmailChip}
-          </span>
-        )}
         {b.opensText && (
           <span title={b.opensTitle} style={{ ...CHIP, background: "#eef6f0", color: "#1e6b34" }}>
             {b.opensText}
@@ -169,11 +156,6 @@ export function BidderRow({
           {pdfBusy ? `Preparing the PDF for ${b.companyName}…` : ""}
         </span>
       </div>
-      {b.failedText && (
-        <div role="alert" style={{ fontSize: 11.5, color: "#b42318" }}>
-          {b.failedText}
-        </div>
-      )}
       {pdfError && (
         <div role="alert" style={{ fontSize: 11.5, color: "#b42318" }}>
           {pdfError}
@@ -202,7 +184,7 @@ export function BidderRow({
                 aria-label={`Bid site link — ${b.companyName}`}
                 placeholder="https://…"
                 defaultValue={b.bidSiteUrl}
-                disabled={urlSaving || walking}
+                disabled={urlSaving}
                 onBlur={(e) => e.target.value.trim() !== b.bidSiteUrl && onPatch(b.id, { bidSiteUrl: e.target.value }, "bidSiteUrl")}
                 style={{ ...FIELD, width: 200 }}
               />
@@ -218,7 +200,7 @@ export function BidderRow({
             aria-label={`GC bid number — ${b.companyName}`}
             placeholder="GC bid #"
             defaultValue={b.gcBidNo}
-            disabled={noSaving || walking}
+            disabled={noSaving}
             onBlur={(e) => e.target.value.trim() !== b.gcBidNo && onPatch(b.id, { gcBidNo: e.target.value }, "gcBidNo")}
             style={{ ...FIELD, width: 100 }}
           />
@@ -229,21 +211,10 @@ export function BidderRow({
           Open bid site ↗
         </a>
       )}
-      {(canEmail || panel.canCopyLink) && (
+      {panel.canCopyLink && (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          {canEmail && (
-            <button
-              type="button"
-              aria-label={`${b.sendLabel} — ${b.companyName}`}
-              disabled={busy}
-              onClick={() => onSend(b)}
-              style={{ ...BTN, background: "var(--accent)", color: "#fff" }}
-            >
-              {b.sendLabel}
-            </button>
-          )}
           {panel.canCopyLink && (
-            <button type="button" aria-label={`Copy link — ${b.companyName}`} disabled={linkBusy || walking} onClick={() => void copyLink()} style={BTN}>
+            <button type="button" aria-label={`Copy link — ${b.companyName}`} disabled={linkBusy} onClick={() => void copyLink()} style={BTN}>
               {BID_SEND_COPY.copyLink}
             </button>
           )}
@@ -261,7 +232,7 @@ export function BidderRow({
       )}
       {edit && (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          {b.result === "pending" && b.submitVia === "website" && (
+          {b.result === "pending" && (
             <button type="button" aria-label={`Mark submitted — ${b.companyName}`} disabled={busy} onClick={() => onSubmitted(b)} style={BTN}>
               {b.needsRev ? `Mark Rev ${panel.rev} submitted` : "Mark submitted"}
             </button>

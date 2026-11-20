@@ -39,7 +39,7 @@ export async function GET(req: Request) {
   const nextCursors: Record<string, number> = {};
   for (const coll of collections) {
     const res = await listSince(coll, Number(cursors[coll] || 0));
-    changes[coll] = pulledChanges(coll, res.changes); // #344 C-final D: a survey's _saveSeqs never reaches the device
+    changes[coll] = pulledChanges(coll, res.changes); // a booth capture's inline card image and claim stamp never reach the device
     nextCursors[coll] = res.cursor;
   }
   return NextResponse.json({ changes, cursors: nextCursors });
