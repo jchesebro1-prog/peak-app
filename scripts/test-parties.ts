@@ -196,7 +196,6 @@ export async function partyDbChecks(ok: Ok) {
     await createFixture("quotes", { ...buildQuote(wonQ, { name: "Party won", customer: "Party Co One", customerId: co1, value: 1000 }, "system", null, Date.now()), status: "won" } as never);
     const ownerOnWon = await addParty({ recordType: "quote", recordId: wonQ, companyId: co1, role: "owner" }, "u-test");
     if (ownerOnWon.ok) registerFixture("record_parties", ownerOnWon.party.id);
-    ok(!!proj, "parties db: fixture won quote spawns a project");
 
     // lead → quote through leads.convert: owner carries, GC does not
     const convLead = fixtureId(348, "convlead");

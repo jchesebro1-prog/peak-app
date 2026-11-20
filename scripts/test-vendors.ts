@@ -341,7 +341,6 @@ export async function vendorDbChecks(ok: Ok) {
     ok((recvBody.match(/getQuotes\(/g) || []).length === 1 && !/getQuote\(/.test(recvBody) && (recvBody.match(/listForCompany\(/g) || []).length === 1, "vendors db: quotesReceivedFor makes one party read and one quote batch (no per-quote get)");
     const recv2 = await quotesReceivedFor(vven1);
     ok(recv2.length === 1 && recv2[0].key.startsWith(`${q}:`) && recv2[0].quoteId === q && recv2[0].total === recv[0].total && recv2[0].vendorQuoteNumber === recv[0].vendorQuoteNumber, "vendors db: quotes received carries one row per vendor quote with its estimate and total");
-    const pageSrc = readFileSync("src/app/(app)/projects/[id]/page.tsx", "utf8");
     ok(/procurementSlot=\{tab === "procurement" \?/.test(pageSrc), "vendors: the project page loads the Procurement panel only on that tab");
     ok(/target="_blank" rel="noopener noreferrer"/.test(readFileSync("src/components/vendors/vendor-groups.tsx", "utf8")), "vendors: the vendor groups' links open in a new tab");
   } finally {

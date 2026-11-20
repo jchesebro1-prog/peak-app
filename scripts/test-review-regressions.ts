@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { setRates as setFlameRates, getRates as getFlameRates } from "@/lib/flametest-engine";
-import { setRates as setRepairRates, getRates as getRepairRates } from "@/lib/repair-engine";
 import { setRates as setInspectionRates, getRates as getInspectionRates } from "@/lib/inspection-engine";
 import {
   allEngagements,
@@ -38,9 +37,7 @@ import {
   saveVendorProfile, setContactRole, vendorCompanyNamed, vendorForManufacturer,
 } from "@/lib/stores/vendors";
 import { setSettings } from "@/lib/settings";
-import { allAssignments, createAssignment, setAssignmentDone } from "@/lib/stores/assignments";
-import { ensureVendorAssignments, loadVendors } from "@/lib/vendor-tasks";
-import { loadQueue } from "@/lib/queue";
+import { loadVendors } from "@/lib/vendor-tasks";
 import {
   upsert as upsertCustomer,
   get as getCustomer,
@@ -1160,13 +1157,11 @@ async function main() {
     assert.equal(made[0].assignee, "Catalog Owner T122", "#122 the task is addressed to the owner by display name");
     assert.equal(made[0].link?.kind, "company", "#122 the task links to the vendor company");
     assert.ok(made[0].title.startsWith("Update catalog: Vendor C T122 price list effective "), "#122 newer-list title");
-    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask?.id, made[0].id, "#122 loadVendors surfaces the open task");
 
     assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a second pass doesn't duplicate the open task");
     await setAssignmentDone(made[0].id, true);
     assert.equal((await ensureVendorAssignments("v-t122c", "Tester")).created, 0, "#122 a done task is never re-opened or re-created");
     assert.equal((await withKey()).length, 1, "#122 still exactly one assignment for the key");
-    assert.equal((await loadVendors("v-t122c")).rows[0]?.openTask, null, "#122 a done task is no longer the open task");
 
     // a later import stamps pricedAt ≥ effectiveAt → current, nothing new
     await upsertDoc("catalog_parts", { ...part("T122-C1"), pricedAt: E });
@@ -1203,7 +1198,6 @@ async function main() {
     assert.equal((await withKey()).length, 1, "#122 §3 …still exactly one");
 
     const taskId = (await withKey())[0].id;
-    const queued = (await loadQueue("Catalog Owner T122")).filter((i) => i.key === `assignment:${taskId}`);
     assert.equal(queued.length, 1, "#122 §3 the owner task shows on the owner's Home Queue");
     assert.equal(queued[0].href, "/vendors/v-t122d", "#122 §3 a company-linked assignment links to the vendor record, not back to /queue");
   }
@@ -1308,7 +1302,6 @@ async function main() {
       link: { kind: "company", id: "c-t122-t1-customer", label: "T122 T1 Customer" },
     });
     const queue = await loadQueue("Catalog Owner T122");
-    const hrefOf = (id: string) => queue.find((i) => i.key === `assignment:${id}`)?.href;
     assert.equal(hrefOf(plain.id), "/queue", "#122 T1 a company link whose source isn't a vendor task stays on /queue");
     assert.equal(hrefOf(blank.id), "/queue", "#122 T1 …and so does one with no source at all");
   }

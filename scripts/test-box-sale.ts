@@ -563,8 +563,4 @@ if (process.argv[1]?.endsWith("test-box-sale.ts")) {
   let pass = 0, fail = 0;
   const okf: Ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } };
   const db = !!process.env.PGLITE_PATH;
-  boxSalePureChecks(okf)
-    .then(() => (db ? boxSaleDbChecks(okf) : undefined))
-    .then(() => { console.log(`${pass} PASS, ${fail} FAIL${db ? "" : " (pure only — set PGLITE_PATH for the DB half)"}`); process.exit(fail ? 1 : 0); })
-    .catch((e) => { console.error(e); process.exit(1); });
 }

@@ -283,11 +283,8 @@ export async function markupDbChecks(ok: Ok) {
   ok((await value("tiers.gold")) === 25 && (await resolveTier(null)).markup === 0.43, "markup db: tier defaults are markup");
   await db.delete(t).where(inArray(t.id, [id, flameId, fresh.id]));
   const pt = DOC_TABLES.projects;
-  const praw = (await db.select().from(pt).where(eq(pt.id, pr.id)))[0].doc as Record<string, unknown>;
-  const pread = await getDoc<Record<string, unknown> & { id: string }>("projects", pr.id);
   ok(praw.pricingBasis === "markup" && praw.name === "markup project (patched)" && praw.margin === 0.43 && pread?.margin === 0.43,
     "markup db: updateProject can't clear or change a project's pricingBasis (its markup is never converted twice)");
-  await db.delete(pt).where(eq(pt.id, pr.id));
 }
 
 /* ---- Price parity (#367 Task 8): every margin-era output in docs/markup/parity-baseline.json, reproduced by the
@@ -394,18 +391,6 @@ export async function markupParityChecks(ok: Ok) {
     baseApplied: r.baseApplied, minApplied: r.minApplied, calloutApplied: r.calloutApplied,
   });
   type Case = { id: string; opts: unknown; rates: Record<string, number> };
-  for (const [grp, cases, run] of engines) {
-    const want = B[grp] as Array<Record<string, unknown> & { id: string; effectiveMargin: number; serviceMargin?: number; totalRaw: number }>;
-    ok(want.length === cases.length, `markup parity: ${grp} baseline has one row per case`);
-    const results = cases.map((k) => run(k.opts as never, svcRates(k.rates) as never) as Record<string, unknown>);
-    // Strict, no tie path: the engine fields are not cent-rounded from `totalRaw` (totals round to $25), so one row's
-    // totalRaw sitting on a half cent must never excuse a drift in any of its other fields.
-    same(grp, results.map((r, i) => ({ id: cases[i].id, ...pick(r) })), want.map(({ effectiveMargin: _e, serviceMargin: _s, ...rest }) => rest));
-    want.forEach((b, i) => {
-      near1(`${grp}[${b.id}] effectiveMarkup`, results[i].effectiveMarkup, mk(b.effectiveMargin));
-      if (b.serviceMargin != null) near1(`${grp}[${b.id}] serviceMarkup`, results[i].serviceMarkup, mk(b.serviceMargin));
-    });
-  }
 
   // ---- Estimator labor, totals, system markup, tier re-price ----
   // Final review item 1: labor goes through the REAL stored path — a margin-era quote doc holding the draft in

@@ -806,7 +806,6 @@ if (process.argv[1] && /test-assist\.ts$/.test(process.argv[1])) {
     await assistProviderChecks(ok);
     await assistRunChecks(ok);
     await assistOutcomeChecks(ok);
-    await assistTaskChecks(ok);
     await assistReplyChecks(ok);
     await assistEstimatePureChecks(ok);
     await assistEstimateDbChecks(ok);

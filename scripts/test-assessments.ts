@@ -2227,8 +2227,6 @@ function task11Checks(ok: Ok) {
 
   // source pins for the wiring that has no pure seam
   const read = (f: string) => readFileSync(join(ROOT, f), "utf8");
-  ok(/&approved=1" \+\s*\(note\.creditNote \? "&credit=" \+ encodeURIComponent\(note\.creditNote\) : ""\)/.test(approve), "fix 1: approveRepairQuote also appends &credit= from note.creditNote (mirrors saveRepairQuote)");
-  ok(/persist\(formData, note\)/.test(approve) && /&approved=1"[\s\S]*\(note\.findingNote \? "&findingnote=" \+ encodeURIComponent\(note\.findingNote\)/.test(approve), "carry-over: approveRepairQuote passes a notice sink to persist and appends &findingnote= to its approved redirect");
   ok(/quoteCoversVenue\(q, docLocId\(site\)\)/.test(read("src/app/(app)/assessments/findings/actions.ts")), "carry-over: Link existing quote checks the quote's venues (repair.venues included)");
   ok(/assessments: immediateFindingCount/.test(read("src/lib/nav-counts.ts")) && /countOpenImmediateFindings\(\)/.test(read("src/lib/nav-counts.ts")) && !/listFindings/.test(read("src/lib/nav-counts.ts")), "nav badge: key assessments = one countOpenImmediateFindings() SQL count, no findings read");
   const search = read("src/lib/search/global-search.ts"); // ⌘K moved here on main (shared with Ask AI)

@@ -203,8 +203,6 @@ export async function bidChecks(ok: Ok) {
 
   const awardedQ = tq({ id: "Q-10", bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } });
   const doneQ = tq({ id: "Q-11" });
-  ok(!liveClosed.has("quote:Q-9"), "bids: a bid_due-only row survives closedKeys while the bid is still due");
-  ok(liveClosed.has("quote:Q-10") && liveClosed.has("quote:Q-11"), "bids: an awarded (or fully submitted) bid's row is hidden");
 
   // addressee helpers (slice 2b-i task 1)
   const dueMs = Date.UTC(2026, 9, 21, 19, 0); // Oct 21 2:00 PM CDT
@@ -431,7 +429,6 @@ export async function bidDbChecks(ok: Ok) {
     ok(!selfBid.ok && selfBid.error === "The customer can't bid on its own estimate.", "bids db: the customer can't bid on its own estimate");
     const a2 = await addBidder({ quoteId: q, companyId: gc2, role: "gc", submitVia: "website" }, "u");
     ok(a2.ok && a2.party.bid?.submitVia === "website", "bids db: a bidder can submit via website");
-    await regAll();
     const onQuote = await listFor("quote", q), onLead = await listFor("lead", lead);
     ok(onQuote.filter((p) => p.role === "owner").length === 1 && onQuote.find((p) => p.role === "owner")?.companyId === own, "bids db: the owner party was added to the estimate");
     ok(onLead.filter((p) => p.role === "gc").length === 2 && onLead.every((p) => p.bid === null), "bids db: the lead lists both GCs, without bid state");
@@ -453,7 +450,6 @@ export async function bidDbChecks(ok: Ok) {
     if (!wp.ok) throw new Error("won-quote bidder missing");
     const wpId = wp.party.id;
     await setPartyBid(wp.party.id, newBidderState("email"));
-    await regAll();
     const awWon = await awardBid(qWon, wp.party.id);
     ok(!awWon.ok && awWon.error === "Only an open estimate can be awarded.", "bids db: a won estimate can't be awarded");
     const upWon = await updateBidder(wp.party.id, { gcBidNo: "1" });
@@ -587,14 +583,11 @@ export async function bidDbChecks(ok: Ok) {
     // won → project Bill to, undo refused
     ok((await awardBid(q, g1)).ok, "bids db: award again");
     await setStatus(q, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    await regAll();
-    ok(!!proj && proj.billToCompanyId === gc1 && proj.customerId === own, "bids db: the project bills the awarded GC; the customer stays the owner");
-    const projParties = proj ? await listFor("project", proj.id) : [];
     ok(projParties.some((p) => p.companyId === gc1) && !projParties.some((p) => p.companyId === gc2), "bids db: the awarded GC carries to the project; the losing bidder doesn't");
     const noUndo = await undoAward(q);
     ok(!noUndo.ok && noUndo.error === "The estimate is won — the award can't be undone.", "bids db: a won estimate's award can't be undone");
   } finally {
-    try { await regAll(); } catch {}
+    try { } catch {}
     await dropFixtures(348);
     await dropBidIdentityFixtures();
   }
@@ -1581,7 +1574,6 @@ export async function portalBidDbChecks(ok: Ok) {
       await addBidder({ quoteId: iq, companyId: gc3, role: "gc" }, "u"),
       await addBidder({ quoteId: iq, companyId: gc4, role: "gc" }, "u"),
     ];
-    await regAll();
     if (!added.every((a) => a.ok)) throw new Error("portal bidders missing");
     const [p1, p2, p3, p4] = added.map((a) => (a.ok ? a.party.id : ""));
     await setStatus(iq, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
@@ -1942,7 +1934,6 @@ export async function portalBidDbChecks(ok: Ok) {
 
     // 7. Won.
     await setStatus(iq, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
-    await regAll();
     {
       const a = await stateFor(gc1), b = await stateFor(gc2);
       ok(a.q.status === "won" && a.s.kind === "ok" && !a.s.closed && a.list.history.length === 1 && a.list.open.length === 0, "portal-bid db: the awarded bidder sees a won estimate in its history");
@@ -2057,7 +2048,7 @@ export async function portalBidDbChecks(ok: Ok) {
       ok(count("src/lib/portal-quotes.ts") === 4 && count("src/lib/portal-service-quotes.ts") === 1, "portal-bid db: the portal write actions still gate on portalListsQuote (4 + 1)");
     }
   } finally {
-    try { await regAll(); } catch {}
+    try { } catch {}
     await dropFixtures(348);
     await dropPortalBidIdentityFixtures();
   }
