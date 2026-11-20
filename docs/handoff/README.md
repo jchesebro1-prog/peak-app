@@ -21,6 +21,14 @@ programs plus written specs the long-term coding team can fold into their own ap
 - Estimator edits (revisions, backups) are on hold; focus is the spin-offs.
 - Design tab split agreed: Assembly Builder, Lineset Builder and Motor Library stay with the Estimator; the Grid, Quick Design, Specs and Consulting spin off.
 
+### Update, 2026-11-20 (Jeff)
+
+- A won estimate is only a status change; it creates nothing.
+- Tasks are removed entirely. Rewards are removed. The Daylite import is removed. Google Drive is removed as a catalog photo source. Consulting is removed (no read-only consulting quotes).
+- The Assessments module (`AS-####`, findings register) is added to Peak Service.
+- Flame results: IFR and Replace.
+- Not answered, so Claude's recommendation applies: spec text stays editable on catalog parts; client packages no longer include a specification file; Grid-only catalog fields (riser tags, cable diameter, designator code, symbol drawings) are removed.
+
 ## Deliverables
 
 | # | Item | Output | Status |
@@ -43,7 +51,7 @@ The offline program follows `flame-inspections-spec.md` except where a single of
 - Renewal emails are text to copy; nothing is sent.
 - Venue Assessments are drawn from `venue-assessment-form.json`, embedded in the file. Sketch pads are replaced by a photo upload per pad; the 3D preview, travel auto-fill from routing, the optional findings merge/split tools and Fill down / Mark range spare on the line set schedule are not ported.
 - Not included: the dashboard map, calendar holds, the customer portal, repairs flagged from inspections, the three report layout variants (one layout each), rewards credit.
-- The flame result column the app stores as `retreated` is labelled IFR, as the app's letters do. The spec flags this naming as an open question for Jeff.
+- Flame results are counted as Passed, IFR and Replace (Jeff, 2026-11-20). They are stored in the app's fields `passed`, `retreated` (IFR) and `failed` (Replace).
 
 ## Peak Design program vs. the app
 
