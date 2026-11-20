@@ -285,7 +285,6 @@ async function cmdEnrich(hosted: boolean) {
     const state = get(r, cols.state);
     const zip = get(r, cols.zip);
 
-    const coId = deriveCompanyId(name);
     const [co] = await db.select().from(companies).where(eq(companies.id, coId)).limit(1);
     if (!co) {
       missingCo++;
@@ -306,9 +305,6 @@ async function cmdEnrich(hosted: boolean) {
       coUpdated++;
     }
 
-    // Venue address — only where the import already created one. Never an
-    // insert: a vendor with no venue stays venue-less (spec §3).
-    const siteId = baseSiteId(coId);
     const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
     if (!site) {
       venueAbsent++;

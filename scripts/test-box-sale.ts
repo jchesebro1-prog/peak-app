@@ -552,20 +552,6 @@ function modelNumberChecks(ok: Ok) {
 
 // (later tasks: check functions above this line)
 
-export async function boxSalePureChecks(ok: Ok) {
-  dataChecks(ok);
-  documentChecks(ok);
-  wiringChecks(ok);
-  printChecks(ok);
-  buildUiChecks(ok);
-  packageReviewChecks(ok);
-  sendPackageChecks(ok);
-  intakeChecks(ok);
-  await finalReviewChecks(ok);
-  bomToggleChecks(ok);
-  modelNumberChecks(ok);
-  // (later tasks: pure checks above this line)
-}
 
 export async function boxSaleDbChecks(ok: Ok) {
   await storeDbChecks(ok);

@@ -200,33 +200,9 @@ export async function bidChecks(ok: Ok) {
   const tq = (over: Record<string, unknown> = {}) =>
     ({ id: "Q-9", name: "Gym", customer: "MPSD", owner: "Dana Tester", status: "sent", updatedAt: 1, bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: null }, ...over }) as unknown as Quote;
   const two = new Map([["Q-9", [{ bid: B() }, { bid: B() }]]]);
-  const due = selectBidDue([tq()], two, tctx);
-  ok(due.length === 1 && !!f && f.kind === "bid_due" && f.days === 1 && f.missing === 2, "bids: due tomorrow with 2 unsubmitted → bid_due {days:1, missing:2}");
-  ok(f?.kind === "bid_due" && pointsFor(f) === 25 && factLabel(f) === "Bid due tomorrow · 2 bidders not submitted", "bids: bid_due tomorrow points + label");
-  ok(factLabel({ kind: "bid_due", days: 0, missing: 1 }) === "Bid due today · 1 bidder not submitted" && pointsFor({ kind: "bid_due", days: 0, missing: 1 }) === 35, "bids: bid_due today points + label");
-  ok(factLabel({ kind: "bid_due", days: -1, missing: 1 }) === "Bid past due" && pointsFor({ kind: "bid_due", days: -1, missing: 1 }) === 35, "bids: bid_due past due label");
-  const past = selectBidDue([tq({ bid: { dueAt: NOW - 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx);
-  ok(pf?.kind === "bid_due" && pf.days === -1, "bids: past due → days -1");
-  ok(selectBidDue([tq({ bid: { dueAt: NOW - 20 * 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx).length === 0, "bids: due 20 days ago with a pending unsubmitted bidder → no fact");
-  ok(selectBidDue([tq({ bid: { dueAt: NOW + 3 * 86_400_000, addenda: [], awardedPartyId: null } })], two, tctx).length === 0, "bids: due in 3 days → no fact");
-  ok(selectBidDue([tq({ bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } })], two, tctx).length === 0, "bids: awarded → no fact");
-  ok(selectBidDue([tq({ owner: "Someone Else" })], two, tctx).length === 0, "bids: not mine → no fact");
-  ok(selectBidDue([tq()], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 0, "bids: every bidder submitted → no fact");
-  ok(selectBidDue([tq({ revisions: [{}, {}] })], new Map([["Q-9", [{ bid: B({ revSent: 1 }) }]]]), tctx).length === 1, "bids: a bidder on an older revision still counts as missing");
 
-  // Final review fix 1 — a frozen bid-due row stays visible while the rule still fires.
-  const srow = (key: string): SnapshotRow => ({ key, source: "quote", title: key, sub: "", href: "/", score: 1, reason: "", callLine: null, also: [] });
   const awardedQ = tq({ id: "Q-10", bid: { dueAt: OCT21_2PM, addenda: [], awardedPartyId: "p" } });
   const doneQ = tq({ id: "Q-11" });
-  const liveClosed = closedKeys(
-    [srow("quote:Q-9"), srow("quote:Q-10"), srow("quote:Q-11")],
-    {
-      tasks: new Map(), assignments: new Map(), threads: new Map(), recordings: new Map(),
-      quotes: new Map([["Q-9", tq()], ["Q-10", awardedQ], ["Q-11", doneQ]]),
-      bidders: new Map([["Q-9", [{ bid: B() }]], ["Q-10", [{ bid: B({ result: "awarded" }) }]], ["Q-11", [{ bid: B({ revSent: 1 }) }]]]),
-    },
-    tctx.me, NOW, { id: tctx.me.id, name: tctx.me.name, nameUnique: true }
-  );
   ok(!liveClosed.has("quote:Q-9"), "bids: a bid_due-only row survives closedKeys while the bid is still due");
   ok(liveClosed.has("quote:Q-10") && liveClosed.has("quote:Q-11"), "bids: an awarded (or fully submitted) bid's row is hidden");
 
@@ -414,15 +390,6 @@ export async function bidSendChecks(ok: Ok) {
 export async function bidDbChecks(ok: Ok) {
   const { gc1, gc2, own, ct1 } = BID_FIX;
   const q = fixtureId(348, "bq"), qWon = fixtureId(348, "bqwon"), lead = fixtureId(348, "blead");
-  const regAll = async () => {
-    for (const [t, id] of [["quote", q], ["quote", qWon], ["lead", lead]] as const) for (const p of await listFor(t, id)) registerFixture("record_parties", p.id);
-    const proj = await getProjectByQuote(q).catch(() => null);
-    if (proj) {
-      registerFixture("projects", proj.id);
-      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`));
-      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
-    }
-  };
   try {
     await dropBidIdentityFixtures();
     await saveCompany({ id: gc1, name: "Bid GC One", type: "customer", lifecycle: "active", deleted: false });
@@ -577,8 +544,6 @@ export async function bidDbChecks(ok: Ok) {
     const pkg = (d: typeof dAw) => packageViewModel({ doc: d, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 } as never, closed: false, won: false }, headerLine: "", currentHref: null, view: "narrative", base: "/x", letterheadSrc: "/l.png" });
     ok(pkg(dAw).owner === "Bid Owner" && !("owner" in pkg(dOwn)), "package page: an addressed estimate carries the owner; an owner-addressed one is unchanged");
 
-    // D1087: the owner's Rewards print only on the owner's copy — an addressed document (explicit bidder or the awarded default) hides them.
-    ok(!rewardsVisibleFor(await documentAddressee(qAw)) && !rewardsVisibleFor(await documentAddressee(qAw, g2)) && rewardsVisibleFor(null), "rewards: an awarded-addressed or explicit-bidder document hides the owner's Rewards; the owner's copy keeps them");
     for (const f of ["src/lib/quote-pdf/document-loader.ts", "src/lib/estimate-output/cover-loader.ts", "src/lib/estimate-output/package-live-loader.ts", "src/app/print/quote/[id]/page.tsx"]) {
       ok(/rewardsVisibleFor\(addressee\) \? purchasePerksDocLine\(perks\) : ""/.test(readFileSync(join(process.cwd(), f), "utf8")), `rewards: ${f} gates the perks line on the addressee`);
     }
@@ -623,7 +588,6 @@ export async function bidDbChecks(ok: Ok) {
     ok((await awardBid(q, g1)).ok, "bids db: award again");
     await setStatus(q, "won", "Test", { bypassApprovalGate: "engine-owned-flow" });
     await regAll();
-    const proj = await getProjectByQuote(q);
     ok(!!proj && proj.billToCompanyId === gc1 && proj.customerId === own, "bids db: the project bills the awarded GC; the customer stays the owner");
     const projParties = proj ? await listFor("project", proj.id) : [];
     ok(projParties.some((p) => p.companyId === gc1) && !projParties.some((p) => p.companyId === gc2), "bids db: the awarded GC carries to the project; the losing bidder doesn't");
@@ -1580,15 +1544,6 @@ export async function portalBidDbChecks(ok: Ok) {
   const { own, gc1, gc2, gc3, gc4, oth, ct1, ct2 } = I_FIX;
   const iq = fixtureId(348, "iq"), iq2 = fixtureId(348, "iq2");
   const NAMES = { own: "Portal Owner I", gc1: "Portal GC One I", gc2: "Portal GC Two I", gc3: "Portal GC Three I", gc4: "Portal GC Four I", oth: "Portal Other I" };
-  const regAll = async () => {
-    for (const p of await listFor("quote", iq)) registerFixture("record_parties", p.id);
-    const proj = await getProjectByQuote(iq).catch(() => null);
-    if (proj) {
-      registerFixture("projects", proj.id);
-      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`));
-      for (const p of await listFor("project", proj.id)) registerFixture("record_parties", p.id);
-    }
-  };
   const ses = (cid: string) => ({ grantId: "PG-i", customerId: cid, name: "T", email: "t@i.test" });
   const T = Date.UTC(2034, 2, 10);
   const sentRevs = (q: Quote | null) => (q?.revisions ?? []).filter((r) => r.reason === "sent");

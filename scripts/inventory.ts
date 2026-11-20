@@ -55,20 +55,6 @@ import { flameJobsSeed } from "../src/db/seeds/flame-jobs";
 import { inspectionsSeed } from "../src/db/seeds/inspections";
 import { designsSeed } from "../src/db/seeds/designs";
 
-/** Mirrors DEMO_SEEDS in src/db/seed-data.ts, the surface a go-live reset wipes. */
-const SEEDS: Array<[CollectionName, () => Array<{ id: string }>]> = [
-  ["customers", customersSeed as () => Array<{ id: string }>],
-  ["catalog_parts", catalogSeed as unknown as () => Array<{ id: string }>],
-  ["quotes", quotesSeed as unknown as () => Array<{ id: string }>],
-  ["leads", leadsSeed as unknown as () => Array<{ id: string }>],
-  ["surveys", surveysSeed as unknown as () => Array<{ id: string }>],
-  ["comms", commsSeed as unknown as () => Array<{ id: string }>],
-  ["flame_jobs", flameJobsSeed as unknown as () => Array<{ id: string }>],
-  ["repair_jobs", repairJobsSeed as unknown as () => Array<{ id: string }>],
-  ["inspections", inspectionsSeed as unknown as () => Array<{ id: string }>],
-  ["projects", projectsSeed as unknown as () => Array<{ id: string }>],
-  ["designs", designsSeed as unknown as () => Array<{ id: string }>],
-];
 
 function pad(s: string, n: number) {
   return s.length >= n ? s : s + " ".repeat(n - s.length);

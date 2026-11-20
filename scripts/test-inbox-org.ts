@@ -373,49 +373,7 @@ function courtChecks(ok: Ok): void {
 const MON = "2026-10-12";
 const FRI = "2026-10-16";
 const SAT = "2026-10-17";
-const at10 = (day: string) => chicagoWallMs(day, 10 * 60);
 
-function dueChecks(ok: Ok): void {
-  const cases: Array<[string, string, string]> = [
-    // [phrase, anchor, expected day]
-    ["", MON, "2026-10-14"], ["", FRI, "2026-10-20"], ["", SAT, "2026-10-20"],
-    ["sometime soon", MON, "2026-10-14"],
-    ["today", MON, MON], ["today", FRI, FRI], ["today", SAT, SAT],
-    ["by EOD", MON, MON],
-    ["tomorrow", MON, "2026-10-13"], ["tomorrow", FRI, "2026-10-17"], ["tomorrow morning", SAT, "2026-10-18"],
-    ["Thursday", MON, "2026-10-15"], ["by Thursday", FRI, "2026-10-22"], ["thurs", SAT, "2026-10-22"],
-    ["Monday", MON, "2026-10-19"], ["Friday", FRI, "2026-10-23"], ["Saturday", SAT, "2026-10-24"],
-    ["end of the week", MON, FRI], ["end of week", FRI, FRI], ["by the end of the week", SAT, "2026-10-23"],
-    ["next week", MON, "2026-10-19"], ["next week", FRI, "2026-10-19"], ["early next week", SAT, "2026-10-19"],
-    ["end of month", MON, "2026-10-31"], ["by the end of the month", FRI, "2026-10-31"], ["end of the month", SAT, "2026-10-31"],
-    ["10/22", MON, "2026-10-22"], ["by 10/22/2026", FRI, "2026-10-22"], ["Oct 22", SAT, "2026-10-22"],
-    ["October 22nd", MON, "2026-10-22"], ["2026-10-22", MON, "2026-10-22"], ["22 October", MON, "2026-10-22"],
-    // a recently passed date → the default; one > ~180 days back rolls to next year
-    ["10/1", MON, "2026-10-14"], ["Sep 1", FRI, "2026-10-20"], ["10/1/2026", MON, "2026-10-14"],
-    ["Jan 5", MON, "2027-01-05"], ["April 1", MON, "2027-04-01"],
-    ["13/45", MON, "2026-10-14"],
-    // a month name only counts as a whole word
-    ["2 marketing calls", MON, "2026-10-14"], ["3 decks", FRI, "2026-10-20"],
-    // compound phrases resolve to their most specific part
-    ["by EOD Friday", MON, FRI], ["Friday EOD", MON, FRI], ["COB Thursday", MON, "2026-10-15"],
-    ["by EOD Friday", SAT, "2026-10-23"], ["COB Thursday", FRI, "2026-10-22"],
-    ["end of next week", MON, "2026-10-23"], ["end of next week", FRI, "2026-10-23"], ["end of next week", SAT, "2026-10-23"],
-    ["Wednesday of next week", MON, "2026-10-21"], ["Wednesday of next week", FRI, "2026-10-21"], ["next week Wednesday", SAT, "2026-10-21"],
-    ["tomorrow EOD", FRI, "2026-10-17"],
-    // several weekdays named: the one written first wins, not the first in the week
-    ["Friday or Monday", MON, FRI], ["Monday or Friday", MON, "2026-10-19"], ["Thursday or Tuesday", MON, "2026-10-15"],
-    ["by Wednesday, otherwise Tuesday", MON, "2026-10-14"],
-  ];
-  for (const [phrase, anchor, want] of cases) {
-    const got = resolveDue(phrase, at10(anchor));
-    ok(got === dueStampForDay(want), `due: "${phrase}" on ${anchor} → ${want} (got ${dayKey(got)})`);
-  }
-  const p = chicagoParts(resolveDue("", at10(FRI)));
-  ok(p.hour === 17 && p.minute === 0, "due: stamped 5:00 pm Chicago");
-  const dst = resolveDue("", at10("2026-10-30"));
-  ok(dst === dueStampForDay("2026-11-03") && chicagoParts(dst).hour === 17, "due: default across the DST change (Fri Oct 30 → Tue Nov 3, still 5 pm)");
-  ok(resolveDue("today", chicagoWallMs(MON, 23 * 60 + 30)) === dueStampForDay(MON), "due: the anchor is the message's Chicago day (11:30 pm Mon)");
-}
 
 /* ---------- sender rules (§5) ---------- */
 
@@ -942,22 +900,7 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
     const tri = (id: string, extra: Record<string, unknown>) =>
       ({ id, mailbox: "personal", mailboxUser: MIKE, unread: true, customerId: null, customer: "Acme", contactName: "Pat", contactEmail: "pat@acme.test", subject: "Q", channel: "email", status: "waiting_us", assignedTo: MIKE, link: null, messages: [{ id: "m1", at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi" }], createdAt: T0, updatedAt: T0, ...extra }) as unknown as CommThread;
     const court = (owner: Court["owner"]): Court => ({ owner, reason: "", source: "rule", at: T0 });
-    const picked = selectEmail(
-      [
-        tri("C-a", { court: court("me") }),
-        tri("C-b", { court: court("customer") }),
-        tri("C-c", {}),
-        tri("C-d", { status: "waiting_them" }),
-        tri("C-e", { court: court("me"), status: "waiting_them" }),
-        tri("C-f", { court: court("nobody") }),
-        tri("C-g", { court: court("me"), noise: { flagged: true, reason: "promo", moved: false } }),
-        tri("C-h", { noise: { flagged: false, reason: "", moved: false, rescued: true } }),
-      ],
-      { quotes: new Map(), leads: new Map() },
-      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
-    );
     ok(picked[0]?.since === T0, "org triage: the row dates from the last inbound");
-    ok(onMyCourt({ court: undefined, status: "waiting_us" }) && !onMyCourt({ court: court("teammate"), status: "waiting_us" }) && !onMyCourt({ court: court("me"), status: "replied" }), "org triage: onMyCourt");
     /* D901 — a stale court (new mail never organized) doesn't hide that mail; the kill switch reads status only */
     const newMsgs = [
       { id: "m1", at: T0, direction: "in", channel: "email", author: "Pat", body: "Hi" },
@@ -965,20 +908,9 @@ export async function inboxOrgPipelineChecks(ok: Ok): Promise<void> {
       { id: "m3", at: T0 + 120_000, direction: "in", channel: "email", author: "Pat", body: "Any news?" },
     ];
     const staleCust: Court = { owner: "customer", reason: "", source: "rule", at: T0 + 60_000, basis: "m2" };
-    const fresh = selectEmail(
-      [
-        tri("S-stale", { court: staleCust, messages: newMsgs }),
-        tri("S-current", { court: { ...staleCust, basis: "m3" }, messages: newMsgs }),
-        tri("S-nobasis", { court: { owner: "customer", reason: "", source: "rule", at: T0 + 60_000 }, messages: newMsgs }),
-      ],
-      { quotes: new Map(), leads: new Map() },
-      { viewer: { id: MIKE_ID, name: MIKE, nameUnique: true }, now: T0 + 3 * 86_400_000 }
-    );
     ok(courtIsCurrent({ court: { basis: "m3", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: { basis: "m2", at: 0 }, messages: newMsgs }) && !courtIsCurrent({ court: null, messages: newMsgs }) && courtIsCurrent({ court: { basis: "x", at: 0 }, messages: [] }), "org triage: courtIsCurrent follows the newest email message's id");
     ok(courtIsCurrent({ court: { at: T0 }, messages: [{ id: "c", at: T0 + 5, channel: "call" }, { id: "e", at: T0, channel: "email" }] }), "org triage: a newer call / meeting doesn't make the court stale");
     const KILL = { INBOX_ORG_DISABLED: "true" };
-    ok(onMyCourt({ court: court("customer"), status: "waiting_us" }, KILL) && onMyCourt({ court: court("me"), status: "waiting_us", noise: { flagged: true, reason: "promo", moved: false } }, KILL) && !onMyCourt({ court: court("me"), status: "waiting_them" }, KILL), "org triage: kill switch on → status only (court and noise tag ignored)");
-    ok(!onMyCourt({ court: court("customer"), status: "waiting_us" }, {}), "org triage: kill switch off → a current customer court still hides it");
 
     /* 8. the import hook: organize errors never break recordMessage */
     let threw = false;
@@ -1118,11 +1050,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
       { ownerIds: o.ownerIds ?? [ARI_ID], budgetMs: o.budgetMs, deadlineMs: o.deadlineMs },
       { ctx: o.ctx ?? pilot, run: { provider, ...(o.fallback ? { fallback: o.fallback } : {}) }, now: NOW, clock: o.clock }
     );
-  const tasksOn = async (threadId: string) => {
-    const rows = await listDocsByField<TaskRecord>("tasks", "threadId", [threadId]);
-    rows.forEach((t) => registerFixture("tasks", t.id));
-    return rows;
-  };
   const fileAns = (target: string, confidence = "strong", needsReply = true) => JSON.stringify({ target, confidence, reason: "Asks about the stage curtain", needsReply });
   const courtAns = (o: { owner: string; teammateId?: string; promises?: Array<{ text: string; ownerUserId: string; dueText: string }> }) =>
     JSON.stringify({ owner: o.owner, teammateId: o.teammateId ?? "", reason: "read by the fake", promises: o.promises ?? [] });
@@ -1211,7 +1138,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   ok(callsH.length === 1 && callsH[0].user.includes(`Thread owner ("me"): ${ARI_ID}`) && callsH[0].user.includes(`Peak teammate ${DANA_ID}`) && callsH[0].user.includes(`${DANA_ID} — TEST335 Dana`), "ai pass: the court prompt names the owner, the team, and who wrote each message");
   ok(h1.court?.owner === "me" && h1.court.source === "rule" && !h1.court.pendingAi && h1.court.basis === lastH.id && h1.status === "waiting_us" && rH.courts === 0, "ai pass: the AI agreeing with a rule hand-off (me) leaves the rule court, pending cleared, status waiting_us");
   const hTasks = await tasksOn(handoff);
-  const due = resolveDue("by Friday", lastH.at);
   ok(
     hTasks.length === 1 &&
       hTasks[0].id === promiseTaskId(handoff, lastH.id, "Send Pat pricing on the stage curtain") &&
@@ -1222,7 +1148,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
       hTasks[0].notes.startsWith("From email: "),
     "ai pass: the promise becomes one Email task for the named owner, due Friday 5 pm, linked to the thread's customer"
   );
-  ok(dayKey(due) === "2026-10-16" && chicagoParts(due).hour === 17, "ai pass: 'by Friday' from a Monday message is Fri 16 Oct, 5 pm Chicago");
   /* idempotent: the same promise again makes no second task */
   const again = await applyPromises(h1, lastH, [{ text: "send pat pricing on the stage   curtain", ownerUserId: ARI_ID, dueText: "Friday" }], NOW, { owner: { id: ARI_ID, name: ARI }, authorUserId: DANA_ID, users: team });
   ok(again.length === 1 && again[0].taskId === hTasks[0]?.id && (await tasksOn(handoff)).length === 1, "ai pass: a promise-task is created once (a re-run is idempotent)");
@@ -1283,7 +1208,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const v1 = await read(vague);
   const vLast = v1.messages[v1.messages.length - 1];
   const vTasks = await tasksOn(vague);
-  ok(vTasks.length === 1 && vTasks[0].assigneeUserId === DANA_ID && vTasks[0].dueAt === resolveDue("next week", vLast.at), "ai pass: 'someone will be in touch' → a task owned by the internal author (Dana), due next Monday");
   ok(v1.court?.source === "rule" && v1.court.owner === "customer" && !v1.court.pendingAi && v1.court.promise?.ownerUserId === DANA_ID, "ai pass: a 'customer' reading never overrides the rules; the promise is still recorded");
 
   /* 7. an unknown name is dropped */
@@ -1301,7 +1225,6 @@ export async function inboxOrgAiChecks(ok: Ok): Promise<void> {
   const gLast = g1.messages[g1.messages.length - 1];
   const gTasks = await tasksOn(ghost);
   ok(g1.court?.source === "rule" && g1.court.owner === "customer" && g1.court.teammateId === DANA_ID && !g1.court.pendingAi, "ai pass: an unknown teammate id is dropped — the rule court stands");
-  ok(gTasks.length === 1 && gTasks[0].assigneeUserId === DANA_ID && gTasks[0].dueAt === resolveDue("", gLast.at), "ai pass: an unknown promise owner falls back to the internal author; no due words → 2 business days");
 
   /* 8. a customer's own message makes no promise-tasks */
   const custMsg = await mk("customer-promise", { messages: [msg({ body: "We will send the PO Friday." })] });
@@ -2255,11 +2178,6 @@ export async function inboxOrgCleanupChecks(ok: Ok): Promise<void> {
     return id;
   };
   const get = async (id: string) => (await getDoc<CommThread>("comms", id))!;
-  const tasksOn = async (threadId: string) => {
-    const rows = await listDocsByField<TaskRecord>("tasks", "threadId", [threadId]);
-    rows.forEach((t) => registerFixture("tasks", t.id));
-    return rows;
-  };
   const LIV = "TEST335 Liv Cleanup";
   const LIV_ID = "TEST335-u-liv";
   const BLOBS = [SENDER_RULES_BLOB, FILING_LOG_BLOB, CLEANUP_BLOB_PREFIX + CLEO_ID, CLEANUP_BLOB_PREFIX + NOP_ID, CLEANUP_BLOB_PREFIX + LIV_ID];

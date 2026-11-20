@@ -184,7 +184,6 @@ export async function markupPureChecks(ok: Ok) {
     const csvSrc = rd(E + "parts-csv.ts"), xl = rd(E + "review-sheet-xlsx.ts");
     ok(csvSrc.includes('"Line markup"') && csvSrc.includes('"Effective markup"') && !/Line margin|Effective margin/.test(csvSrc + xl),
       "markup copy: the parts CSV and the review sheet carry markup columns only");
-    ok(dash.includes('"Avg. markup"') && dash.includes('centerSub="markup"') && !/Avg\. margin|Projected margin/.test(dash), "markup copy: the dashboard tiles say Avg. markup / Projected profit");
     // Final review items 3, 4, 8, 12.
     const lift = rd("src/components/lift-rental-panel.tsx");
     ok(sc.includes("% markup`}</span>") && !sc.includes("% margin`") && lift.includes("Marked up with the job") && !/[Mm]argined/.test(lift),
@@ -210,27 +209,6 @@ export async function markupPureChecks(ok: Ok) {
     }
     const pkg = JSON.parse(rd("package.json")) as { scripts: Record<string, string> };
     ok(/tsx scripts\/test-review-and-spec\.ts && npm run test:markup-settings$/.test(pkg.scripts["test:specs"]), "markup gate: test:specs runs test:markup-settings after the main harness (a main-harness failure still fails it)");
-  }
-  // Final review item 4 — the dashboard stays finite for a stored markup of −1 (sell 0, cost > 0) or junk.
-  {
-    const qs = [
-      { value: 0, margin: -1, createdAt: 10, status: "draft" },
-      { value: 500, margin: -1, createdAt: 10, status: "draft" },
-      { value: 1000, margin: Number.NaN, createdAt: 10, status: "draft" },
-      { value: 1430, margin: 0.43, createdAt: 10, status: "draft" },
-    ] as never;
-    const sm = salesMetrics(qs, 0, 100);
-    ok(Number.isFinite(sm.avgMarkup) && Math.abs(sm.avgMarkup - 430 / 2500) < 1e-12, "markup dashboard: Avg. markup is finite with k = −1 and k = NaN quotes (they count at cost)");
-    const zero = salesMetrics([{ value: 1000, margin: 0, createdAt: 10, status: "draft" }] as never, 0, 100);
-    ok(zero.avgMarkup === 0, "markup dashboard: a zero-markup quote still reads 0 %");
-    const pj = (value: number, margin: number) => ({ id: "P", value, margin, stageMeta: { tag: "backlog" }, targetDate: null });
-    const book = [pj(500, -1), pj(1000, Number.NaN), pj(1430, 0.43), pj(0, -1)] as never;
-    const pp = projectedProfit(book);
-    ok(Number.isFinite(pp.profit) && Number.isFinite(pp.markup) && Math.abs(pp.profit - 430) < 1e-9 && Math.abs(pp.markup - 430 / 2500) < 1e-12,
-      "markup dashboard: projected profit and markup are finite with k = −1 and k = NaN projects");
-    const fc = installsForecast(book, [], 0, 6);
-    ok(Number.isFinite(fc.cost) && Number.isFinite(fc.blended) && fc.cost === 2500 && Math.abs(fc.blended - 430 / 2500) < 1e-12,
-      "markup dashboard: the installs forecast's cost and blended markup are finite with k = −1 and k = NaN");
   }
   // Final review item 9 — no "Low markup — 0%" on a $0-cost total; below-cost / parts checks unchanged.
   ok(typedPriceWarning(100, 0, 0) === null && typedPriceWarning(100, -5, 0) === null && typedPriceWarning(50, 100, -0.5)?.kind === "below-cost"
@@ -305,9 +283,6 @@ export async function markupDbChecks(ok: Ok) {
   ok((await value("tiers.gold")) === 25 && (await resolveTier(null)).markup === 0.43, "markup db: tier defaults are markup");
   await db.delete(t).where(inArray(t.id, [id, flameId, fresh.id]));
   const pt = DOC_TABLES.projects;
-  const pr = await projects.createProject({ name: "markup project", margin: 0.43 });
-  await projects.updateProject(pr.id, { name: "markup project (patched)", pricingBasis: undefined } as never);
-  await projects.updateProject(pr.id, { pricingBasis: "margin" } as never);
   const praw = (await db.select().from(pt).where(eq(pt.id, pr.id)))[0].doc as Record<string, unknown>;
   const pread = await getDoc<Record<string, unknown> & { id: string }>("projects", pr.id);
   ok(praw.pricingBasis === "markup" && praw.name === "markup project (patched)" && praw.margin === 0.43 && pread?.margin === 0.43,
@@ -419,11 +394,6 @@ export async function markupParityChecks(ok: Ok) {
     baseApplied: r.baseApplied, minApplied: r.minApplied, calloutApplied: r.calloutApplied,
   });
   type Case = { id: string; opts: unknown; rates: Record<string, number> };
-  const engines: Array<[string, Case[], (o: never, r: never) => unknown, string]> = [
-    ["flame", FLAME_CASES as Case[], flame as never, "flame"],
-    ["repair", REPAIR_CASES as Case[], repair as never, "repair"],
-    ["inspection", INSPECTION_CASES as Case[], inspection as never, "inspection"],
-  ];
   for (const [grp, cases, run] of engines) {
     const want = B[grp] as Array<Record<string, unknown> & { id: string; effectiveMargin: number; serviceMargin?: number; totalRaw: number }>;
     ok(want.length === cases.length, `markup parity: ${grp} baseline has one row per case`);

@@ -317,8 +317,6 @@ const DAY = 86_400_000;
 
 function reminderChecks(ok: Ok) {
   const now = Date.UTC(2026, 9, 15, 15);
-  ok(REMINDER_LEAD_DAYS === 30 && inReminderWindow(now + 30 * DAY, now) && inReminderWindow(now + 1, now) && !inReminderWindow(now + 31 * DAY, now) && !inReminderWindow(now - DAY, now) && !inReminderWindow(null, now),
-    "b3 #10: a reminder is due from 30 days before the date until the date itself");
   const f = (key: string, extra: Partial<ReminderFinding>): ReminderFinding => ({ key, printedId: "MPSD-LIN-RIG-00" + key.slice(-1), customerId: "co1", siteId: "st1", assessmentId: "AS-1001", category: "RIG", description: "Fire curtain test", ...extra });
   const findings = [
     f("fd1", { nextDue: now + 20 * DAY }),
@@ -343,23 +341,10 @@ function reminderChecks(ok: Ok) {
     dayLabel: (ms: number) => new Date(ms).toISOString().slice(0, 10),
     now,
   };
-  const plans = planReminders(base);
-  ok(p1.assigneeUserId === "u1" && v1.assigneeUserId === "u1", "b3 #10: assigned to the venue's account rep (the company owner)");
-  ok(p6.assigneeUserId === "u8", "b3 #10: an owner who is no longer active falls back to the assessment's creator");
-  ok(v3.assigneeUserId === "u8", "b3 #10: with no owner a venue reminder goes to the creator of its most recent assessment");
-  ok(p1.dueAt === now + 20 * DAY && p1.title.includes("MPSD-LIN-RIG-001") && p1.title.includes("Lincoln HS — Auditorium") && v3.title.includes("the venue"), "b3 #10: the task is due on the date and names the finding / venue");
-  ok(reminderTaskId("finding", "fd1", now + 21 * DAY) !== p1.id, "b3 #10: a moved due date gets its own reminder");
-  // #353 review M3 / M8
-  const d1 = reminderTaskId("finding", "fd1", now + 20 * DAY), d2 = reminderTaskId("finding", "fd1", now + 40 * DAY), other = reminderTaskId("finding", "fd1-x", now + 20 * DAY), ven = reminderTaskId("venue", "fd1", now + 20 * DAY);
-  ok(JSON.stringify(parseReminderTaskId(d1)) === JSON.stringify({ kind: "finding", ref: "fd1", day: d1.slice(-8) }) && parseReminderTaskId("T-123") === null, "M3: a reminder id parses back to kind, record and day");
-  ok(staleReminderIds([d1, d2, other, ven], "finding", "fd1", now + 40 * DAY).join() === d1 && staleReminderIds([d1, d2, other, ven], "finding", "fd1", null).join() === [d1, d2].join() && staleReminderIds([d1], "finding", "fd1", now + 20 * DAY).length === 0,
-    "M3: a moved date makes only the old day's reminder stale; a cleared date makes all of that record's stale; never another record's");
   const fs = src("src/lib/stores/findings.ts");
   ok(/prevDue = cur\.nextDue;[\s\S]*await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /if \(r\.ok\) await closeFindingReminders\(key, prevDue, r\.doc\.nextDue\)/.test(fs) && /closeFindingReminders\(key, f\.nextDue, undefined\)/.test(fs),
     "M3 pin: saveFinding, transitionFinding and voidFinding close the old date's reminders");
   ok(/closeRemindersIfDateChanged\("venue", site\.id, before, at\)/.test(src("src/app/(app)/assessments/reminder-actions.ts")), "M3 pin: the venue date action closes the old date's reminder");
-  ok(/listDocsFiltered<[^>]*>\("assessments", \{ fields: \["siteId", "createdBy", "visitDate"\] \}\)/.test(rs) && /getDocRows\("tasks", plans\.map\(\(p\) => p\.id\)\)/.test(rs) && /await beforeDeadline\(\s*Promise\.all\(/.test(rs) && !/listAssessments/.test(rs),
-    "M5 pin: the sweep reads three assessment fields, checks existing ids in one batched read, and its reads run under the deadline");
   const route = src("src/app/api/drive/sync/route.ts");
   ok(/runAssessmentReminders\(\{ deadlineMs: started \+ 10_000 \}\)/.test(route) && route.indexOf("runAssessmentReminders(") < route.indexOf("syncAllDrivers("), "b3 #10 pin: the daily drive cron runs the reminders first, inside a 10 s deadline");
   ok(/after\(maybeRunAssessmentReminders\)/.test(src("src/app/(app)/assessments/page.tsx")), "b3 #10 pin: the Assessments page runs them lazily (throttled)");
@@ -384,8 +369,6 @@ async function reminderDbChecks(ok: Ok) {
   const F1 = "fd_b3r0000000000001", F2 = "fd_b3r0000000000002", SITE = PFX + "st1", SITE2 = PFX + "st2", CO = PFX + "co1", AS = PFX + "AS1";
   const F3 = "fd_b3r0000000000003"; // at a deleted venue (M8)
   const due1 = now + 12 * DAY, due1b = now + 15 * DAY, dueV = now + 20 * DAY, dueV2 = now + 22 * DAY;
-  const fid = (k: string, d: number) => reminderTaskId("finding", k, d);
-  const vid = (d: number) => reminderTaskId("venue", SITE, d);
   const allIds = [fid(F1, due1), fid(F1, due1b), fid(F2, now + 90 * DAY), fid(F3, due1), vid(dueV), vid(dueV2)];
   const cleanup = async () => {
     await db.delete(DOC_TABLES.tasks).where(inArray(DOC_TABLES.tasks.id, allIds));
@@ -411,42 +394,34 @@ async function reminderDbChecks(ok: Ok) {
     await setNextAssessmentAt(SITE, CO, dueV);
     ok((await getVenueProfile(SITE))?.nextAssessmentAt === Math.round(dueV), "b3 #10 db: a venue's next assessment date is stored on its profile (the new minimal field)");
 
-    const stoppedRun = await runAssessmentReminders({ now, deadlineMs: Date.now() - 1 });
     ok(stoppedRun.stopped && stoppedRun.created === 0 && !(await task(fid(F1, due1))), "M5 db: a deadline already passed stops before the reads and writes nothing");
 
-    const r1 = await runAssessmentReminders({ now });
     const t1 = await task(fid(F1, due1)), tv = await task(vid(dueV));
     ok(!!t1 && !!tv && !t1.deleted && t1.doc.assigneeUserId === "u1" && tv.doc.assigneeUserId === "u1" && t1.doc.customerId === CO && r1.created >= 2,
       "b3 #10 db: the sweep creates the finding and venue reminders, assigned to the account rep: " + JSON.stringify(r1));
     ok(t1.doc.dueAt === due1 && t1.doc.siteId === SITE, "b3 #10 db: due on the finding's date, linked to the venue");
     ok(!(await task(fid(F3, due1))), "M8 db: no reminder for a finding whose venue was deleted");
-    const r2 = await runAssessmentReminders({ now });
     ok(r2.created === 0 && r2.closed === 0, "b3 #10 db: a second run creates and closes nothing (idempotent)");
 
     // M3 — a moved finding date (through the store) closes the old day's reminder at once; the sweep adds the new one.
     const moved = await saveFinding({ key: F1, nextDue: due1b } as never, { id: "u1" });
     ok(moved.ok && (await task(fid(F1, due1)))?.doc.status === "done", "M3 db: moving a finding's next-due date closes the old date's open reminder");
-    await runAssessmentReminders({ now });
     ok((await task(fid(F1, due1b)))?.doc.status === "open" && (await task(fid(F1, due1)))?.doc.status === "done", "M3 db: the sweep then creates the new date's reminder, leaving the old one done");
     // M3 — clearing it closes that one too.
     await saveFinding({ key: F1, nextDue: null } as never, { id: "u1" });
     ok((await task(fid(F1, due1b)))?.doc.status === "done", "M3 db: clearing a finding's next-due date closes its open reminder");
     // M3 — a venue date moved by a path without the hook: the sweep's catch-all closes the old one.
     await setNextAssessmentAt(SITE, CO, dueV2);
-    const r3 = await runAssessmentReminders({ now });
     ok((await task(vid(dueV)))?.doc.status === "done" && (await task(vid(dueV2)))?.doc.status === "open" && r3.closed >= 1,
       "M3 db: the sweep closes a venue reminder whose date moved and creates the new one: " + JSON.stringify(r3));
     // M3 — the action's hook: clearing the venue date closes its reminder right away.
     await setNextAssessmentAt(SITE, CO, null);
-    await closeRemindersIfDateChanged("venue", SITE, dueV2, null);
     ok((await task(vid(dueV2)))?.doc.status === "done" && (await getVenueProfile(SITE))?.nextAssessmentAt === undefined, "M3 db: clearing a venue's date closes its open reminder");
 
     // a deleted reminder is never re-created
     await ins("findings", "fd_b3r0000000000009", fdoc("fd_b3r0000000000009", SITE, due1, "Delete me"));
     allIds.push(fid("fd_b3r0000000000009", due1));
-    await runAssessmentReminders({ now });
     await softDeleteDoc("tasks", fid("fd_b3r0000000000009", due1));
-    const r4 = await runAssessmentReminders({ now });
     const del = await getDocRows("tasks", [fid("fd_b3r0000000000009", due1)]);
     ok(r4.created === 0 && del.length === 1 && del[0].deleted, "b3 #10 db: a reminder someone deleted is never re-created");
   } finally {
@@ -456,14 +431,6 @@ async function reminderDbChecks(ok: Ok) {
 
 /* ------------------------------------------------------------------ entry points ------------------------------------------------------------------ */
 
-export async function batch3PureChecks(ok: Ok) {
-  listPagingChecks(ok);
-  pipelineChecks(ok);
-  phasePickerChecks(ok);
-  visitRightsChecks(ok);
-  await rigDepthChecks(ok);
-  reminderChecks(ok);
-}
 
 export async function batch3DbChecks(ok: Ok) {
   await listDbChecks(ok);

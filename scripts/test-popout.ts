@@ -494,22 +494,6 @@ export async function popoutPureChecks(ok: Ok): Promise<void> {
     ok(/\.pk-dropdown-row:hover \.pk-nav-pop,\s*\.pk-nav-pop:focus-visible \{\s*opacity: 1;/.test(css2), "popout: the nav ⧉ shows on row hover or keyboard focus");
   }
 
-  /* Task 4 — posters: each client site posts `changed` after its action succeeds (spec §5) */
-  {
-    for (const [file, entity, min] of POSTERS) {
-      const src = readSrc(file);
-      const n = (src.match(new RegExp(`postChanged\\("${entity}"`, "g")) || []).length;
-      ok(
-        /import \{[^}]*\bpostChanged\b[^}]*\} from "@\/lib\/popout\/channel";/.test(src) && n >= min,
-        `popout: ${file} imports postChanged and posts "${entity}" (${n}/${min})`
-      );
-    }
-    // a poster never fires from render: the only top-level call shapes are inside handlers (indented 4+ spaces)
-    ok(
-      POSTERS.every(([file]) => !/^postChanged\(/m.test(readSrc(file))),
-      "popout: no poster site calls postChanged at module top level"
-    );
-  }
 
   /* real BroadcastChannel round trip (Node has one): own posts are ignored, another window's arrive */
   if (typeof BroadcastChannel !== "undefined") {

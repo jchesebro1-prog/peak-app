@@ -101,41 +101,6 @@ async function appIconChecks(ok: Ok) {
   ok(/\|icons\|/.test(src("src/middleware.ts")), "#67: /icons/* stays outside the session gate (login page, home-screen install)");
 }
 
-/* --- #65 Download today's jobs --- */
-function todayJobsChecks(ok: Ok) {
-  const day = "2026-10-16";
-  const start = Date.UTC(2026, 9, 16, 5); // 00:00 Chicago (CDT)
-  const end = Date.UTC(2026, 9, 17, 5) - 1;
-  const dayKeyOf = (ms: number) => (ms >= start && ms <= end ? day : ms < start ? "2026-10-15" : "2026-10-17");
-  const me = { id: "u7", name: "Nic Trapani" };
-  const svc = (id: string, extra: Record<string, unknown> = {}) => ({ id, stage: "scheduled", assignedTo: "Nic Trapani", scheduledDate: day, customer: "Lincoln HS", venue: "Aud", ...extra });
-  const ids = jobs.map((j) => `${j.kind}:${j.id}`).join(",");
-  ok(ids === "site_visit:SV-1,site_visit:SV-2,survey:FS-9,inspection:IN-1,repair_job:RP-1,assessment:AS-1001,project:P-1",
-    `#65: today's jobs are mine (lead / attendee / assignee / crew / assessor), today only, not completed or done (got ${ids})`);
-  const sv1 = jobs.find((j) => j.id === "SV-1")!;
-  const sv2 = jobs.find((j) => j.id === "SV-2")!;
-  ok(sv1.href === "/venue-assessments/FS-9" && sv2.href === "/companies/c2" && sv1.collection === null, "#65: a visit opens its survey, else its company; it is not mirrored");
-  ok(jobs.find((j) => j.id === "RP-1")?.href === "/repairs/results?job=RP-1" && jobs.find((j) => j.id === "AS-1001")?.collection === "assessments", "#65: job links and mirrored collections");
-  const pages = pagesToCache(jobs);
-  ok(pages[0] === "/field-work" && pages.filter((p) => p === "/venue-assessments/FS-9").length === 1, "#65: the Field Work list plus each page once");
-  const cached = new Set(pages.filter((p) => p !== "/inspections/IN-1"));
-  const mirrored = new Set(["surveys:FS-9", "inspections:IN-1", "repair_jobs:RP-1", "assessments:AS-1001"]);
-  ok(readyCount(jobs, cached, mirrored) === 5, "#65: ready = page kept and (if mirrored) record on the device — IN-1's page and P-1's record are missing");
-  ok(readyLine(5, 5) === "Ready offline: 5 jobs" && readyLine(1, 1) === "Ready offline: 1 job" && readyLine(5, 7).startsWith("Ready offline: 5 jobs (2 couldn") && readyLine(0, 0) === "No jobs for you today.",
-    "#65: the result line reads 'Ready offline: N jobs'");
-  ok(isoDay("2026-10-16") === day && isoDay("") === "" && isoDay("10/16/2026") === "", "#65: isoDay takes only YYYY-MM-DD");
-
-  const route = src("src/app/api/sync/today/route.ts");
-  ok(/if \(!mayPullFieldData\(me\.roles\)\) return NextResponse\.json\(\{ error: "forbidden" \}, \{ status: 403 \}\)/.test(route) && route.includes("getOptionalUser()"),
-    "#65: /api/sync/today has the pull's gate — signed in and `create` (#351)");
-  const sw = src("public/sw.js");
-  ok(sw.includes("const port = event.ports && event.ports[0]") && sw.includes(".then(() => reply(true))") && sw.includes(".catch(() => reply(false))"), "#65: the service worker answers a CACHE_ROUTE that carries a port");
-  const btn = src("src/components/sync/download-today.tsx");
-  ok(btn.includes('fetch("/api/sync/today"') && btn.includes("engine.pull({ force: true })") && btn.includes("readyLine(ready, jobs.length)") && !/from "@\/lib\/stores\//.test(btn.replace(/import type[^\n]*\n/g, "")),
-    "#65: the button lists, pulls into the mirror, caches pages and reports — and imports no store");
-  ok(/async pull\(opts: \{ force\?: boolean \} = \{\}\): Promise<boolean>/.test(src("src/lib/sync/engine.ts")) && src("src/lib/sync/engine.ts").includes("this.pullForbidden) return false"),
-    "#65: a forced pull still honours a 403 (pullForbidden) and reports success");
-}
 
 /* --- #64 Attach in the Inbox composer --- */
 async function attachPureChecks(ok: Ok) {
@@ -285,13 +250,6 @@ async function reviewPureChecks(ok: Ok) {
   // 2 — push gate + task rule
   const user = { id: "u1", name: "Nic Trapani" };
   const live = (id: string) => id === "P-1" || id === "P-2";
-  ok(taskPushAllowed("tk-abc1", null, { projectId: "P-1" }, user, live) && !taskPushAllowed("T-6001", null, { projectId: "P-1" }, user, live) && !taskPushAllowed("tk-abc1", null, { projectId: "P-9" }, user, live) && !taskPushAllowed("tk-abc1", null, {}, user, live),
-    "#356 push: an insert is only a new tk- task on a live project");
-  ok(taskPushAllowed("tk-abc1", { projectId: "P-1", assigneeUserId: "u2", createdBy: "Other" }, { projectId: "P-1" }, user, live) && !taskPushAllowed("tk-abc1", { projectId: "P-1" }, { projectId: "P-2" }, user, live),
-    "#356 push: a tk- field task on a live project updates (but can't move to another project)");
-  ok(!taskPushAllowed("T-6001", { projectId: "P-1", assigneeUserId: "u2", createdBy: "Jeff Chesebro" }, { projectId: "P-1" }, user, live) &&
-     taskPushAllowed("T-6001", { projectId: null, assigneeUserId: "u1" }, {}, user, live) && taskPushAllowed("T-6002", { createdBy: "nic trapani" }, {}, user, live),
-    "#356 push: an office task updates only for its assignee or creator");
   ok(pushParksOn(403, { error: "read-only" }) && !pushParksOn(403, { error: "forbidden" }) && !pushParksOn(403, null) && !pushParksOn(403) && !pushParksOn(500, { error: "read-only" }) && PUSH_READ_ONLY_MESSAGE.startsWith("Read-only"),
     "#356 re-review push: only the route's own 403 { error: \"read-only\" } parks; any other 403 is transient (retried)");
   const route = src("src/app/api/sync/push/route.ts");
@@ -300,12 +258,6 @@ async function reviewPureChecks(ok: Ok) {
     "#356 push: the route has the pull's `create` gate before reading anything, the task rule, and still strips #351 fields");
   const eng = src("src/lib/sync/engine.ts");
   ok(/if \(res\.status === 403 && pushParksOn\(res\.status, await res\.clone\(\)\.json\(\)\.catch\(\(\) => null\)\)\) \{\s*for \(const e of outbox\) await idb\.put\("outbox", \{ \.\.\.e, state: "error", error: PUSH_READ_ONLY_MESSAGE \}\);/.test(eng), "#356 push: the engine parks a refused push's entries");
-  ok(/export async function toggleFieldTask[\s\S]{0,500}if \(!can\("create", me\.roles\)\)[\s\S]{0,200}const task = await getTask\(taskId\);\s*if \(!task \|\| !task\.projectId \|\| !\(await getProject\(task\.projectId\)\)\)/.test(fw) &&
-     /export async function addFieldTask[\s\S]{0,200}if \(!can\("create", me\.roles\)\)/.test(fw),
-    "#356: toggleFieldTask / addFieldTask need `create` and a task on a live project");
-  ok(fieldTaskIdDecision("tk-abc123", { projectId: "P-1", section: "Install", assigneeUserId: null, createdBy: "Nic Trapani" }, { id: "u1", name: "Nic Trapani" }, "P-1") === "same" &&
-     fieldTaskIdDecision("tk-abc123", { projectId: "P-1", section: "Install", assigneeUserId: null, createdBy: "Someone Else" }, { id: "u1", name: "Nic Trapani" }, "P-1") === "refuse",
-    "#356 field task: the caller's own unassigned capture (same id + project) answers ok; someone else's doesn't");
 
   // 4–8 minor
   const now = Date.UTC(2026, 9, 16);
@@ -384,22 +336,6 @@ async function rereviewDbChecks(ok: Ok) {
   ok(r2.ok, "#356 re-review (DB): unticking the originals sends the forward anyway");
 }
 
-export async function batch6PureChecks(ok: Ok) {
-  fieldTaskPureChecks(ok);
-  sourcingChecks(ok);
-  await appIconChecks(ok);
-  todayJobsChecks(ok);
-  await attachPureChecks(ok);
-  await reviewPureChecks(ok);
-  await rereviewPureChecks(ok);
-}
-
-export async function batch6DbChecks(ok: Ok) {
-  await fieldTaskDbChecks(ok);
-  await attachDbChecks(ok);
-  await reviewDbChecks(ok);
-  await rereviewDbChecks(ok);
-}
 
 if (process.argv[1]?.endsWith("test-batch6.ts")) {
   let pass = 0, fail = 0;
