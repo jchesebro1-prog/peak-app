@@ -47,7 +47,6 @@ export function PastePreview({
   today,
   customerIndex,
   canUpdate = true,
-  validationOptions,
 }: {
   typeKey: string;
   /** EVERY field of the type, hidden ones included: auto-mapping must still
@@ -69,8 +68,6 @@ export function PastePreview({
    *  to create() for those and silently duplicate the record the user asked
    *  to update, so the mode is not offered at all. */
   canUpdate?: boolean;
-  /** Live vocabularies used to flag task-template rows before commit. */
-  validationOptions?: { phases: string[]; disciplines: string[] };
 }) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "update" | "create">("skip");

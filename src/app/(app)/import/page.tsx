@@ -550,10 +550,6 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           closeHref={hrefFor({ type: null, r: null })}
           anotherHref={hrefFor({ type: openType.key, r: null })}
           customerIndex={customerIndex}
-          validationOptions={{
-            phases: mergedConsultingPhases(settings.consultingPhases),
-            disciplines: mergedConsultingDisciplines(settings.consultingDisciplines),
-          }}
         />
       )}
     </>
@@ -567,7 +563,6 @@ function ImportFlowModal({
   closeHref,
   anotherHref,
   customerIndex,
-  validationOptions,
 }: {
   type: NonNullable<ReturnType<typeof getTypeMeta>>;
   resultRaw: string;
@@ -575,7 +570,6 @@ function ImportFlowModal({
   closeHref: string;
   anotherHref: string;
   customerIndex: CustomerRef[];
-  validationOptions: { phases: string[]; disciplines: string[] };
 }) {
   const done = parseResult(resultRaw);
 
@@ -735,7 +729,6 @@ function ImportFlowModal({
                   today={isoDateOf(Date.now())}
                   customerIndex={customerIndex}
                   canUpdate={UPDATABLE_TYPES.has(type.key)}
-                  validationOptions={validationOptions}
                 />
               </>
             )}

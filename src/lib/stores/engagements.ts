@@ -438,9 +438,6 @@ export async function patchEngagement(
  * rest of the app makes for a deleted parent's activity feed.
  */
 export async function removeEngagement(id: string): Promise<void> {
-  const { tasksForEngagement, removeTask } = await import("./tasks");
-  const openTasks = (await tasksForEngagement(id)).filter((t) => t.status !== "done");
-  for (const t of openTasks) await removeTask(t.id);
   await softDeleteDoc("consulting_engagements", id);
 }
 

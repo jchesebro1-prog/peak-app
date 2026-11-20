@@ -10,12 +10,9 @@ import { leadsSeed } from "./seeds/leads";
 import { surveysSeed } from "./seeds/surveys";
 import { commsSeed } from "./seeds/comms";
 import { flameJobsSeed } from "./seeds/flame-jobs";
-import { repairJobsSeed } from "./seeds/repair-jobs";
 import { inspectionsSeed } from "./seeds/inspections";
-import { projectsSeed } from "./seeds/projects";
 import { designsSeed } from "./seeds/designs";
 import { gridProjectsSeed } from "./seeds/grid-projects";
-import { equipmentLocationsSeed, equipmentItemsSeed } from "./seeds/equipment";
 import { vendorProfilesSeed } from "./seeds/vendors";
 import { defaultDashboardLayout } from "@/lib/dashboard-layout";
 import { assignEstimateNumbers } from "@/lib/stores/estimate-numbers";
@@ -117,13 +114,9 @@ const DEMO_SEEDS: Array<[CollectionName, () => Doc[]]> = [
   ["surveys", surveysSeed as unknown as () => Doc[]],
   ["comms", commsSeed as unknown as () => Doc[]],
   ["flame_jobs", flameJobsSeed as unknown as () => Doc[]],
-  ["repair_jobs", repairJobsSeed as unknown as () => Doc[]],
   ["inspections", inspectionsSeed as unknown as () => Doc[]],
-  ["projects", projectsSeed as unknown as () => Doc[]],
   ["designs", designsSeed as unknown as () => Doc[]],
   ["grid_projects", gridProjectsSeed as unknown as () => Doc[]],
-  ["equipment_locations", equipmentLocationsSeed as unknown as () => Doc[]],
-  ["equipment_items", equipmentItemsSeed as unknown as () => Doc[]],
   ["vendor_profiles", vendorProfilesSeed as unknown as () => Doc[]],
 ];
 

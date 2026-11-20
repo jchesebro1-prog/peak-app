@@ -4,7 +4,7 @@ import {
   type GeoAdapter,
   type TripTravel,
   type TripVenueInput,
-} from "@/lib/repair-engine";
+} from "@/lib/trip-travel";
 import {
   FLY_CREW_DEFAULTS,
   planTravel,

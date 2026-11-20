@@ -511,22 +511,6 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
-    key: "repair", label: "Repair pricing", live: true,
-    sub: "Rigging / curtain / motor repair & service calls",
-    note: "Live — editing any rate here reprices every repair quote immediately (shared with the repair estimating engine).",
-    items: [
-      rate("repair.laborRate", "Labor rate (repair & service)", 75, "$/hr", { min: 0, max: 300, step: 1, store: "repair", key: "laborRate" }),
-      rate("repair.mileageRate", "Mileage rate", 1, "$/mi", { min: 0, max: 2, step: 0.01, store: "repair", key: "mileageRate", help: "Round-trip miles from the default quote origin, shared across venues on one trip." }),
-      rate("repair.minCallout", "Minimum service call", 350, "$", { min: 0, max: 2000, step: 5, store: "repair", key: "minCallout", help: "Floor on the service sell (labor + travel), before parts." }),
-      rate("repair.partsMargin", "Parts markup", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "partsMargin", pctStored: true, help: "Markup on parts.  partsSell = partsCost × (1 + partsMarkup)" }),
-      rate("repair.margin", "Repair markup (labor + travel)", 43, "%", { min: 0, max: 150, step: 1, store: "repair", key: "margin", pctStored: true }),
-      rate("repair.emergencyMult", "Emergency / after-hours ×", 1.5, "×", { min: 1, max: 3, step: 0.05, store: "repair", key: "emergencyMult", help: "Multiplies the labor rate for emergency or after-hours work." }),
-      rate("repair.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "repair", key: "travelRoundMin" }),
-      rate("repair.flyCrew", "Crew when the trip flies", 2, "people", { min: 1, max: 10, step: 1, store: "repair", key: "flyCrew", help: "Default crew for a repair priced as flights — never fewer than the quote's own crew size. Overridable on each quote." }),
-      formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ×  (1 + markup) )  +  parts × (1 + parts markup)  ·  travel = flights when one trip's drive cost ≥ threshold  ·  rounded to the nearest $25"),
-    ],
-  },
-  {
     key: "inspection", label: "Inspection pricing", live: true,
     sub: "Rigging inspections — Level 1 annual · Level 2 every 5 years",
     note: "Live — editing any rate here reprices every inspection quote immediately (shared with the inspection estimating engine). Placeholder numbers — adjust as pricing firms up.",
@@ -546,7 +530,7 @@ export const GROUPS: PricingGroup[] = [
   },
   {
     key: "travel", label: "Travel & mileage", live: true,
-    sub: "Drive estimate + flights over drive (flame-test, repair and inspection quotes)",
+    sub: "Drive estimate + flights over drive (flame-test and inspection quotes)",
     note: "Live — road factor and speed feed the offline drive fallback (live OSRM routing still overrides them when a cached/live route is available). The flight rates price any flame-test, repair or inspection trip whose drive cost (mileage + drive time) reaches the threshold; 0 = never fly. Each service's default flying crew lives in its own group above.",
     items: [
       rate("travel.roadFactor", "Straight-line → road factor", 1.25, "×", { min: 1, max: 2, step: 0.05, store: "travel", key: "roadFactor", help: "Bumps as-the-crow-flies distance up to road distance." }),

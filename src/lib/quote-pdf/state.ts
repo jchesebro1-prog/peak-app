@@ -127,7 +127,6 @@ const ERROR_MAX = 300;
 export function pdfKindForQuoteType(quoteType: string | null | undefined): PdfKind | null {
   if (!quoteType || quoteType === "system") return "quote";
   if (quoteType === "flame_test") return "flame";
-  if (quoteType === "repair") return "repair";
   if (quoteType === "inspection") return "inspection";
   return null;
 }
