@@ -5,11 +5,10 @@
  * also stores structured `curtainInputs` and, with a track, a shared
  * `curtainTrackKey`.
  */
-import type { CurtainRequest } from "@/lib/portal-cart-types";
+import type { CurtainRequest } from "@/lib/curtain-request";
 import { parseEstimatorCurtainDesc } from "@/lib/curtain-cut-sheets/parse";
 import { newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
 import { ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_TOP_FINISH, isBottomFinish, isMountTypeId, isTopFinish } from "@/lib/curtain-cut-sheets/vocab";
-import { curtainSpecKey } from "@/lib/specs/record-keys";
 import type { CurtainCalc } from "./pricing";
 import { replaceCurtainLine } from "./track-bom";
 import type { CurtainDraft, SpecItem, SpecSection } from "./types";
@@ -133,7 +132,6 @@ export function curtainItem(d: CurtainDraft, c: Pick<CurtainCalc, "fab" | "costE
     price: c.priceEach,
     curtain: true,
     curtainInputs,
-    specKey: curtainSpecKey(undefined, name) || undefined,
   };
   if (ids.trackKey) item.curtainTrackKey = ids.trackKey;
   return item;

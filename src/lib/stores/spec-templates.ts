@@ -93,9 +93,7 @@ export async function seedStarterTemplates(by = "Peak"): Promise<number> {
  * revalidatePath. Cheap on the hot path: one listDocs per collection.
  */
 export async function ensureStarterTemplates(by = "Peak"): Promise<number> {
-  const { allCurtainTemplates, seedStarterCurtainTemplates } = await import("@/lib/stores/spec-curtain-templates");
   let made = 0;
   if ((await allTemplates()).length === 0) made += await seedStarterTemplates(by);
-  if ((await allCurtainTemplates()).length === 0) made += await seedStarterCurtainTemplates(by);
   return made;
 }

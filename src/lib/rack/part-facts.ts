@@ -3,7 +3,7 @@
  * coverage helper. Pure (no store/db imports) — client components import it.
  * Absent = unknown, never zero; 0 means "measured, none".
  */
-import { isInternalCategory } from "@/lib/portal-visibility";
+import { isInternalCategory } from "@/lib/catalog-internal";
 import { partModel } from "@/lib/catalog-rename/sku";
 import {
   AIRFLOWS,

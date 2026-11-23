@@ -1,103 +1,27 @@
 import { requireUser } from "@/lib/session";
-import { CATEGORIES, briefRemindersOn, getPrefs, invitesOn } from "@/lib/stores/notif-prefs";
-import { assistSettingsOf } from "@/lib/assist/config";
-import { briefOnFor } from "@/lib/brief/reminders";
-import BriefRemindersToggle from "./brief-reminders-toggle";
-import {
-  gmailEnabled,
-  hasCalendarScope,
-  hasDriveScope,
-  hasDriveReadScope,
-  personalKey,
-} from "@/lib/gmail/config";
-import { getKrispConnectionInfo } from "@/lib/krisp/connections";
-import { getSyncState } from "@/lib/meetings/sync-state";
+import { CATEGORIES, getPrefs } from "@/lib/stores/notif-prefs";
 import { getSettings } from "@/lib/settings";
 import { getUser } from "@/lib/users";
 import NotifControls from "./notif-controls";
-import InviteToggle from "./invite-toggle";
 import OfficePicker from "./office-picker";
-import DriveBufferCard from "./drive-buffer-card";
-import WorkHoursCard from "./work-hours-card";
-import { getScheduleDefaults, getSchedulingSettings, getUserSchedulePrefs, getUserWorkHours } from "@/lib/stores/schedule-prefs";
-import KrispCard, { type KrispCardInfo } from "./krisp-card";
 import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import { getDashboardOverride } from "@/lib/stores/notif-prefs";
-import SignatureCard from "./signature-card";
-import { signatureFor } from "@/lib/stores/signatures";
-import InboxOrgCard from "./inbox-org-card";
-import { keepInInbox } from "@/lib/stores/inbox-org";
-import { loadSenderRuleRows } from "@/lib/inbox-org/rule-list-server";
 
 export const metadata = { title: "Account settings — Quartzite-6" };
 
 export default async function AccountPage() {
   const user = await requireUser();
   const prefs = await getPrefs(user.name);
-  const invites = await invitesOn(user.name);
-  // #335 — archive-on-reply opt-out + my own sender rules
-  const [keepInbox, mySenderRules] = await Promise.all([keepInInbox(user.name), loadSenderRuleRows({ scope: "mine", userId: user.id })]);
-
   // D144 — "Based out of" (self-service; Settings -> Team's admin form
   // edits the same users.officeId field but needs manage_users).
-  const [settings, myRow, dashboardOverride, signature, scheduleDefaults, schedulePrefs, scheduling, myWorkHours] = await Promise.all([
+  const [settings, myRow, dashboardOverride] = await Promise.all([
     getSettings(),
     getUser(user.id),
     getDashboardOverride(user.name),
-    signatureFor(user.name),
-    getScheduleDefaults(),
-    getUserSchedulePrefs(user.id),
-    getSchedulingSettings(),
-    getUserWorkHours(user.id),
   ]);
-  // null hides the toggle: only an Assist pilot user with Daily brief on has a brief to be reminded of
-  const briefReminders = briefOnFor(user.id, assistSettingsOf(settings)) ? await briefRemindersOn(user.name) : null;
   const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
   const myOfficeId = myRow?.officeId || "";
 
-  // C7 — self-serve mailbox connect: teammates manage their OWN inbox here
-  // (the admin Settings page manages shared boxes). Connection status +
-  // calendar grant for MY personal mailbox only.
-  const gmailOn = gmailEnabled();
-  const myKey = personalKey(user.id);
-  // #283 — "Enable Drive photos" is offered only when MY mailbox is the one
-  // Settings → Mailboxes picked as the catalog photos account.
-  const isPhotosAccount = !!settings.catalogPhotosMailbox && settings.catalogPhotosMailbox === myKey;
-  let conn: { address: string; initialImportDone: boolean; calendarOn: boolean; driveOn: boolean; photosOn: boolean } | null = null;
-  if (gmailOn) {
-    const { getConnectionInfo } = await import("@/lib/gmail/connections");
-    const info = await getConnectionInfo(myKey);
-    if (info)
-      conn = {
-        address: info.address,
-        initialImportDone: info.initialImportDone,
-        calendarOn: hasCalendarScope(info.scope),
-        // Recordings spec §5.1 — drive.file granted, so this account can be
-        // picked as the recordings archive in Settings → Recordings.
-        driveOn: hasDriveScope(info.scope),
-        // #283 — drive.readonly granted, so this account can be picked as the
-        // catalog photos account in Settings → Mailboxes.
-        photosOn: hasDriveReadScope(info.scope),
-      };
-  }
-
-  // Recordings spec §1.2 — my own Krisp key (encrypted; the card never sees it).
-  // #323 — plus the meetings sync state on the same connection row (Sync now / Load older).
-  const [krispRow, meetingsSync] = await Promise.all([getKrispConnectionInfo(user.id), getSyncState(user.id)]);
-  const krisp: KrispCardInfo | null = krispRow
-    ? {
-        krispEmail: krispRow.krispEmail,
-        krispName: krispRow.krispName,
-        connectedAt: krispRow.connectedAt,
-        lastUsedAt: krispRow.lastUsedAt,
-        lastError: krispRow.lastError,
-        meetings: {
-          syncedAt: meetingsSync?.syncedAt ?? null,
-          lastError: meetingsSync?.lastError ?? null,
-          backfillFrom: meetingsSync?.backfillFrom ?? null,
-        },
-      }
-    : null;
   const rows = CATEGORIES.map((c) => ({
     key: c.key,
     label: c.label,
@@ -179,10 +103,8 @@ export default async function AccountPage() {
         </span>
       </div>
 
-      {/* ---- based out of (D144 — feeds Calendar's auto travel-time block) ---- */}
+      {/* ---- based out of (D144) ---- */}
       <OfficePicker offices={officeOptions} initialOfficeId={myOfficeId} />
-      <DriveBufferCard initial={schedulePrefs.driveBufferMin} companyDefault={scheduleDefaults.driveBufferMin} />
-      <WorkHoursCard initial={myWorkHours} companyDefault={scheduling.workHours} />
 
       <DashboardLayoutEditor
         mode="personal"
@@ -193,96 +115,6 @@ export default async function AccountPage() {
       {/* ---- to-do notifications ---- */}
       <NotifControls rows={rows} />
 
-      {/* ---- email signature (#127) ---- */}
-      <SignatureCard initial={signature} />
-
-      {/* ---- my mailbox (C7 — self-serve Gmail connect) ---- */}
-      <div className="pk-card" style={{ padding: "17px 18px", marginTop: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 600 }}>My mailbox</div>
-            <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, lineHeight: 1.5 }}>
-              {!gmailOn
-                ? "Gmail isn't enabled on this deployment yet — the Inbox stays simulated."
-                : conn
-                  ? conn.address +
-                    (conn.initialImportDone ? " · history imported" : " · use Send / Receive in the Inbox to import history") +
-                    (conn.calendarOn ? " · calendar on" : "") +
-                    (conn.driveOn ? " · Drive archive on" : "") +
-                    (conn.photosOn ? " · Drive photos on" : "")
-                  : "Connect your own Gmail so the Inbox sends and receives as you — and your dashboard calendar lights up."}
-            </div>
-          </div>
-          {gmailOn && !conn && (
-            <a
-              className="pk-btn-accent"
-              href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey)}
-              style={{ flexShrink: 0, textDecoration: "none" }}
-            >
-              Connect my mailbox
-            </a>
-          )}
-          {gmailOn && conn && !conn.calendarOn && (
-            <a
-              className="pk-btn-outline"
-              href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey) + "&calendar=1"}
-              title="Re-runs the Google consent with Calendar access added — enables the dashboard calendar and direct site-visit events"
-              style={{ flexShrink: 0, textDecoration: "none" }}
-            >
-              Enable calendar
-            </a>
-          )}
-          {gmailOn && conn && !conn.driveOn && (
-            <a
-              className="pk-btn-outline"
-              href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey) + "&drive=1"}
-              title="Re-runs the Google consent with Drive (app-created files only) added — lets this Google account hold the site-visit recordings archive"
-              style={{ flexShrink: 0, textDecoration: "none" }}
-            >
-              Enable Drive archive
-            </a>
-          )}
-          {/* #283 least privilege: only the configured catalog photos account
-              is ever asked for drive.readonly. */}
-          {gmailOn && conn && isPhotosAccount && !conn.photosOn && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, color: "#8c919c" }}>
-                Your account is the catalog photos account — allow read-only Drive access.
-              </span>
-              <a
-                className="pk-btn-outline"
-                href={"/api/gmail/connect?mailbox=" + encodeURIComponent(myKey) + "&drivephotos=1"}
-                title="Lets the catalog read the Peak Product Photos folder (read-only)"
-                style={{ flexShrink: 0, textDecoration: "none" }}
-              >
-                Enable Drive photos
-              </a>
-            </span>
-          )}
-          {gmailOn && conn && conn.driveOn && (
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#1f7a52", background: "#e8f3ee", border: "1px solid #cfe6db", padding: "3px 10px", borderRadius: 20, flexShrink: 0 }}>
-              Drive archive on
-            </span>
-          )}
-          {gmailOn && conn && conn.calendarOn && (
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#1f7a52", background: "#e8f3ee", border: "1px solid #cfe6db", padding: "3px 10px", borderRadius: 20, flexShrink: 0 }}>
-              Connected
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ---- inbox organization (#335 §4, §5) ---- */}
-      <InboxOrgCard keepInInbox={keepInbox} rules={mySenderRules} />
-
-      {/* ---- my Krisp key (Recordings spec §1.2 / §6) ---- */}
-      <KrispCard info={krisp} />
-
-      {/* ---- site-visit calendar invites (D76) ---- */}
-      <InviteToggle initialOn={invites} />
-
-      {/* ---- AI daily brief phone reminders (Assist pilot + Daily brief only) ---- */}
-      {briefReminders !== null && <BriefRemindersToggle initialOn={briefReminders} />}
     </div>
   );
 }

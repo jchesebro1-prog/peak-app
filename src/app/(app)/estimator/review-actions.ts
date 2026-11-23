@@ -102,7 +102,6 @@ export async function reviewDocsAction(quoteId: string): Promise<ReviewDocsResul
     console.warn("[review] package documents unavailable", e instanceof Error ? e.message : e);
   }
   const panel = await loadPackagePanel(q, false, {
-    findGrid: async () => null, // this view doesn't use the Grid lookup — skip the project scan
     datasheetGaps: async () => (docs ? [...docs.bySku.values()].filter((x) => !x.datasheetOk).length : 0),
   });
   return {

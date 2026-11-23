@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { clearCatalogPriceList, get as getPart, mergeUpsert, remove as removePart } from "@/lib/stores/catalog";
 import { mfrKey, parseEffectiveDate } from "@/lib/catalog-books";
 import { checkSize } from "@/lib/catalog-import-guard";
@@ -12,7 +11,7 @@ import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { runCatalogImport } from "./import";
 import { parsePortsField, serializePorts } from "@/lib/catalog-ports";
 import type { Port } from "@/lib/catalog-connect";
-import { validateSameAs, optionalPartFields, specSortValue, fabricRateProblem, fabricFactsProblem, rackFactsProblem, cableOdProblem } from "./part-form";
+import { validateSameAs, optionalPartFields, specSortValue, fabricRateProblem, fabricFactsProblem, rackFactsProblem } from "./part-form";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
@@ -23,7 +22,6 @@ export async function deleteCatalogPriceListAction(formData: FormData): Promise<
   await requirePerm("manage_users");
   if (String(formData.get("confirmation") || "") !== "DELETE") return;
   await clearCatalogPriceList();
-  invalidatePortalIndex();
   revalidatePath("/catalog");
   redirect("/catalog?reset=1");
 }
@@ -39,7 +37,6 @@ export async function deletePartAction(sku: string): Promise<Result> {
   // #304: remove() deletes only a live doc at this exact id — an old SKU
   // retired by a rename (or an already-deleted part) acts on nothing.
   if (!(await removePart(clean))) return { ok: false, error: "That part was renamed or already deleted." };
-  invalidatePortalIndex();
   revalidatePath("/catalog");
   return { ok: true };
 }
@@ -102,8 +99,6 @@ export async function upsertPart(formData: FormData): Promise<void> {
   if (factsProblem) redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(factsProblem)}`);
   const rackProblem = rackFactsProblem(formData);
   if (rackProblem) redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(rackProblem)}`);
-  const odProblem = cableOdProblem(formData);
-  if (odProblem) redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(odProblem)}`);
 
   // Compared through serializePorts — the same stable key order the editor's
   // hidden field uses — so re-saving the modal without touching the ports is a
@@ -125,7 +120,6 @@ export async function upsertPart(formData: FormData): Promise<void> {
     note: String(formData.get("note") || "").trim() || undefined,
     ...(ports ? { ports } : {}),
   });
-  invalidatePortalIndex();
   revalidatePath("/", "layout");
   redirect("/catalog");
 }
@@ -173,7 +167,6 @@ export async function importCatalog(formData: FormData): Promise<void> {
   });
   if (!res.ok) return fail(res.error);
 
-  invalidatePortalIndex();
   revalidatePath("/", "layout");
   const qs = new URLSearchParams();
   qs.set("mfr", res.mfr);
@@ -303,8 +296,6 @@ export async function writePartSpecFieldsAction(input: {
     console.error("writePartSpecFieldsAction", e);
     return { ok: false, error: "Could not save the spec text. Try again." };
   }
-  invalidatePortalIndex();
   revalidatePath("/catalog");
-  revalidatePath("/design/specs/library");
   return { ok: true };
 }

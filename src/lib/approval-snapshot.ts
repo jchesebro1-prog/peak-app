@@ -5,25 +5,14 @@
  * line set changes. Staleness is DERIVED, never stored — the same principle
  * as D92's approvalIsStale for consulting phases.
  *
- * Pure and CLIENT-SAFE: imports only the pure rewards credit-line helpers.
- * Rewards credit lines are excluded and the sell is the GROSS (pre-credit)
- * value, so a credit re-clamp on save (#282) never clears an approval.
+ * Pure and CLIENT-SAFE (no imports).
  *
  * auto_limit approvals are deliberately NOT snapshot-checked here — #242's
  * own rule (autoSnapshotUnchanged / still fits the owner's limit) governs them.
  */
-import { grossQuoteValue, isRewardCreditItem } from "@/lib/rewards/credit-line";
-
 export type ApprovalSnapshot = { sell: number; linesKey: string };
 
-export type FingerprintInput = {
-  value?: unknown;
-  spec?: unknown;
-  quoteType?: unknown;
-  flameTest?: unknown;
-  inspection?: unknown;
-  repair?: unknown;
-};
+export type FingerprintInput = { value?: unknown; spec?: unknown };
 
 type ReviewWithSnapshot = { state?: string; method?: string | null; approvedAgainst?: ApprovalSnapshot | null };
 
@@ -56,7 +45,7 @@ function linesKeyOf(spec: unknown): string {
       rows.push(secRow.join("|"));
       const items = Array.isArray(sec.items) ? (sec.items as Array<Record<string, unknown>>) : [];
       for (const it of items) {
-        if (!it || typeof it !== "object" || isRewardCreditItem(it)) continue;
+        if (!it || typeof it !== "object") continue;
         rows.push(["it", s(it.sku), b(it.custom), n(it.qty), n(it.price), n(it.extSellOverride), b(it.option), b(it.labor)].join("|"));
       }
     }
@@ -73,7 +62,8 @@ function linesKeyOf(spec: unknown): string {
 
 /** What an approval is granted against, right now. */
 export function approvalFingerprint(q: FingerprintInput): ApprovalSnapshot {
-  return { sell: grossQuoteValue(q as never), linesKey: linesKeyOf(q.spec) };
+  const v = typeof q.value === "number" && Number.isFinite(q.value) ? q.value : 0;
+  return { sell: Math.round(v * 100) / 100, linesKey: linesKeyOf(q.spec) };
 }
 
 /** True when the quote still matches its approval snapshot. A review with no

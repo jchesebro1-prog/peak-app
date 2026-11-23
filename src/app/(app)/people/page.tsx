@@ -128,7 +128,7 @@ export default async function PeoplePage({
           <div className="pk-card" style={{ padding: "60px 30px", textAlign: "center" }}>
             <div style={{ fontSize: 16, fontWeight: 600, color: "#3a3f4a" }}>No people yet</div>
             <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6 }}>
-              People are the contacts your quotes, projects and portals link to.
+              People are the contacts your quotes and leads link to.
             </div>
             <Link
               href="/people?edit=new"

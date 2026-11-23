@@ -4,7 +4,6 @@ import { keyProductsNeedingText, scopesWithoutGoals } from "@/lib/estimate-outpu
 import { docGaps } from "@/lib/package-doc/gaps";
 import { documentApplies } from "@/lib/package-doc/print";
 import type { PackageDoc } from "@/lib/package-doc/types";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { needsRequote } from "@/lib/narrative/old-vendor-line";
 import type { NextStepTone } from "@/lib/quote-next-step";
 import type { QuoteStatus } from "@/lib/stores/quotes";
@@ -45,7 +44,7 @@ function buildBadge(sections: SpecSection[]): StepBadge {
   let empty = 0;
   let unpriced = 0;
   for (const s of sections) {
-    const lines = s.items.filter((it) => !isRewardCreditItem(it));
+    const lines = s.items;
     if (lines.length === 0) empty++;
     unpriced += lines.filter((it) => !(Number(it.price) > 0)).length;
   }
@@ -91,7 +90,7 @@ function reviewBadge(review: ReadinessInput["review"]): StepBadge {
 
 /** #352 review M3 — lines Load system flagged "Old vendor price — re-quote" (still carrying the note). */
 export function requoteCount(sections: SpecSection[]): number {
-  return sections.reduce((n, s) => n + s.items.filter((it) => !isRewardCreditItem(it) && needsRequote(it)).length, 0);
+  return sections.reduce((n, s) => n + s.items.filter(needsRequote).length, 0);
 }
 
 function sendBadge(i: ReadinessInput): StepBadge {

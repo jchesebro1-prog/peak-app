@@ -13,7 +13,6 @@ import { requirePerm, requireUser } from "@/lib/session";
 import { clearEtcKey, etcBlockedReason, etcStatus, readEtcConnection, recordEtcTest, saveEtcKey, setEtcAccount, type EtcStatus } from "@/lib/dealer-api/connections";
 import { listAccounts, type EtcAccount } from "@/lib/dealer-api/etc/client";
 import { applyBatch, ETC_IMPORT_BUDGET_MS, pullAll, type EtcBatchResult, type EtcPullResult } from "@/lib/dealer-api/etc/apply";
-import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { invalidateSystemLibrary } from "@/lib/narrative/system-library-index";
 
 type Fail = { ok: false; error: string };
@@ -98,7 +97,6 @@ export async function importEtcBatchAction(): Promise<EtcBatchResult> {
   const r = await applyBatch({ budgetMs: ETC_IMPORT_BUDGET_MS });
   if (r.ok) {
     // The portal catalog and the system library cache parts and prices.
-    invalidatePortalIndex();
     invalidateSystemLibrary();
   }
   if (r.ok && r.finished) revalidatePath("/catalog");

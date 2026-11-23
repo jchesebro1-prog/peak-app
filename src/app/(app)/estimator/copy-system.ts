@@ -1,6 +1,5 @@
 import { rewriteQuoteSpec, type RenameMap } from "@/lib/catalog-rename/rewrite";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { remapCurtainTrackKeys } from "@/lib/curtain-cut-sheets/track-link";
 import { syncLaborDraftMarkups } from "./labor-group";
 import { lineMarkupOf, round2 } from "./pricing";
@@ -119,8 +118,7 @@ export function copySectionForTarget(
   // #366: the copy starts from NORMAL cost — the source's project discounts are its own (the landing estimate
   // re-applies its map), and a stale discounted cost would read as a catalog cost change and move the sell.
   const [undiscounted] = applyProjectDiscounts([section], {});
-  // #282 phase 2: the Rewards credit is the source quote's — a copy never carries it.
-  const items = (undiscounted.items || []).filter((it) => !isRewardCreditItem(it) && !isBonusItem(it)).map((it): SpecItem => {
+  const items = (undiscounted.items || []).filter((it) => !isBonusItem(it)).map((it): SpecItem => {
     const comps = Array.isArray(it.components) ? it.components : [];
 
     /* #274: a track line is a tier-seeded line whose "catalog cost" is its

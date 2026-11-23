@@ -1,10 +1,10 @@
 import { getDoc } from "@/db/doc-store";
-import type { EstimateEmailEntry, Quote } from "@/lib/stores/quotes";
-import { get as getQuote, markBidScopeOnly, patchQuoteBid, recordEstimateEmail, setStatus, statusFailureMessage, withQuoteRowLock } from "@/lib/stores/quotes";
+import type { Quote } from "@/lib/stores/quotes";
+import { get as getQuote, patchQuoteBid, setStatus, statusFailureMessage, withQuoteRowLock } from "@/lib/stores/quotes";
 import { addParty, listFor, setPartyBid } from "@/lib/stores/parties";
 import type { BidderState, Party } from "@/lib/parties/rules";
 import {
-  addedAddendumNos, addendumMovesToDraft, applyBidderPatch, awardPlan, bidderFailedState, bidderSentState, canAward, canUndoAward, currentRev, markSubmittedState, newBidderState, nextBidderOpens, sanitizeBidDetails,
+  addedAddendumNos, addendumMovesToDraft, applyBidderPatch, awardPlan, canAward, canUndoAward, currentRev, markSubmittedState, newBidderState, nextBidderOpens, sanitizeBidDetails,
   sanitizeBidderPatch, undoAwardPlan, type QuoteBid,
 } from "@/lib/parties/bids";
 
@@ -84,9 +84,6 @@ export async function addBidder(
     const added = await addParty({ recordType: "quote", recordId: q.id, companyId: input.companyId, contactId: input.contactId ?? null, role: input.role }, by);
     if (!added.ok) return added;
     const party = added.party.bid ? added.party : (await setPartyBid(added.party.id, newBidderState(input.submitVia))) ?? added.party;
-    // #348 slice 6 (Jeff 2026-10-15): "Scope only" for good — stamped in the same transaction as the bidder row, and
-    // never cleared (removeParty leaves it), so the owner's portal never shows this estimate's prices again.
-    await markBidScopeOnly(q.id);
     return { ok: true as const, party, q, existed: wasBidder };
   });
   if (!gate.ok) return gate;
@@ -179,40 +176,6 @@ export async function undoAward(quoteId: string): Promise<{ ok: true } | { ok: f
 async function bidderOnQuote(quoteId: string, partyId: string): Promise<Bidder | null> {
   const p = await getDoc<Party>("record_parties", partyId);
   return p && p.recordType === "quote" && p.recordId === quoteId && isBidder(p) ? p : null;
-}
-
-/**
- * #348 2b-ii — record one bidder email (sent, or failed after the thread existed): the estimate-email entry
- * (remembers the bidder; idempotent by thread, no updatedAt bump) and the bidder's own state. Does not require
- * `pending` — a bidder awarded while its email was in flight still gets the true `revSent`. Row lock first.
- * Returns whether the party write happened.
- */
-export async function recordBidderSend(
-  quoteId: string,
-  partyId: string,
-  entry: EstimateEmailEntry,
-  outcome: { kind: "sent" } | { kind: "failed"; error: string; unknown?: boolean },
-  by: string
-): Promise<boolean> {
-  return withQuoteRowLock(quoteId, async () => {
-    const p = await bidderOnQuote(quoteId, partyId);
-    // The email already went out (or its draft exists): record it even when the bidder vanished mid-send — only the party write is skipped.
-    await recordEstimateEmail(quoteId, { ...entry, partyId });
-    if (!p) return false;
-    const next = outcome.kind === "sent"
-      ? bidderSentState(p.bid, entry.rev, by, entry.threadId, entry.at)
-      : bidderFailedState(p.bid, { at: entry.at, error: outcome.error, unknown: outcome.unknown }, entry.threadId);
-    return !!(await setPartyBid(partyId, next));
-  });
-}
-
-/** A send that failed before the email went out: stamp the failure on the bidder, nothing else (plus the leftover
- *  draft's `threadId` when one exists). */
-export async function markBidderSendFailed(quoteId: string, partyId: string, f: { at: number; error: string; unknown?: boolean; threadId?: string }): Promise<boolean> {
-  return withQuoteRowLock(quoteId, async () => {
-    const p = await bidderOnQuote(quoteId, partyId);
-    return p ? !!(await setPartyBid(partyId, bidderFailedState(p.bid, f, f.threadId))) : false;
-  });
 }
 
 /** One more open of this bidder's link. Counts on the party only — never Quote.shareOpens, never patchQuote. */

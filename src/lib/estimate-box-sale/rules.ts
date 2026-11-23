@@ -73,6 +73,12 @@ export function boxSaleSaveProblem(boxSale: boolean, sections: ReadonlyArray<Pic
   return boxSale && boxSaleLaborSystems(sections).length > 0 ? BOX_SALE_LABOR_MESSAGE : null;
 }
 
+/** The refusal for marking a stored box sale that carries labor as sent (any path), else null. */
+export function boxSaleSendProblem(q: { boxSale?: boolean | null; quoteType?: string | null; spec?: unknown }): string | null {
+  const sections = (q.spec as { sections?: ReadonlyArray<Pick<SpecSection, "name" | "kind" | "items">> } | null | undefined)?.sections;
+  return boxSaleSaveProblem(boxSaleOf(q as Parameters<typeof boxSaleOf>[0]), sections);
+}
+
 /** The Estimator's and + New quote's copy. */
 export const BOX_SALE_COPY = {
   label: "Box goods sale",

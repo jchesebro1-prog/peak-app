@@ -3,8 +3,6 @@ import { getDb, withTransaction } from "@/db";
 import { appSettings } from "@/db/schema";
 import { DEFAULT_SETTINGS } from "@/db/seed-data";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
-import { resolveVenueDoctrine, type VenueDoctrineEntry } from "@/lib/venue-doctrine";
-import type { VenueClass } from "@/lib/stores/venue-classes";
 
 /**
  * AppSettings — port of settings.js. The DB row stores a sparse patch over
@@ -39,30 +37,21 @@ export type AppSettingsData = {
   seedDemo: boolean;
   feedbackEmail: string;
   offices: Office[];
-  /** Site-intake type catalog overrides, keyed by category (e.g.
-   * "lighting.fixture") — see DEFAULT_INTAKE_CATALOG in survey-intake.ts. */
-  intakeCatalog?: Record<string, string[]>;
-  /** Site-visit reason picklist overrides (D76) — see DEFAULT_VISIT_REASONS
-   *  in stores/site-visits.ts; empty/absent means use the defaults. */
-  visitReasons?: string[];
-  /** Consulting phase-menu overrides (D90) — see DEFAULT_CONSULTING_PHASES
-   *  in stores/engagements.ts; empty/absent means use the defaults. */
-  consultingPhases?: string[];
-  /** #145 D165/D166 — phase weight by phase NAME; absent reads as 1. */
-  consultingPhaseWeights?: Record<string, number>;
-  /** #145 D165 — the discipline vocabulary; whole-list override. */
-  consultingDisciplines?: string[];
-  /** Consulting proposal assumptions library (#35) — see
-   *  DEFAULT_CONSULTING_ASSUMPTIONS in lib/consulting-stages.ts;
-   *  empty/absent means use the (DRAFT-seed) defaults. The estimator's
-   *  shared assumptions model (spec §4, wave ③) will consume this key. */
+  /** Stored settings of the removed Venue Assessments / site visits (the intake type catalog, the visit-reason
+   *  picklist, the Final thoughts tags). Nothing reads or edits them any more; the values stay in the settings row. */
+  intakeCatalog?: unknown;
+  visitReasons?: unknown;
+  surveyInternalTags?: unknown;
+  /** Stored settings of the removed Consulting module (phase menu, phase weights, discipline vocabulary, review
+   *  checklists). Nothing reads or edits them any more; the values stay in the settings row. */
+  consultingPhases?: unknown;
+  consultingPhaseWeights?: unknown;
+  consultingDisciplines?: unknown;
+  reviewChecklistTemplates?: unknown;
+  /** The assumptions library the Estimator offers (Settings → Sales → Assumptions library) — see
+   *  DEFAULT_CONSULTING_ASSUMPTIONS in lib/assumptions.ts; empty/absent means use the defaults. The key keeps the
+   *  name it had when the Consulting builder shared it. */
   consultingAssumptions?: string[];
-  /** Peak-standards review checklists (D91), keyed by phase name — see
-   *  DEFAULT_REVIEW_CHECKLISTS in stores/engagements.ts. Kept here beside
-   *  consultingPhases rather than in its own collection: same kind of small
-   *  admin-edited config list. A phase absent from this map falls back to
-   *  the defaults; a phase mapped to [] deliberately has no checklist. */
-  reviewChecklistTemplates?: Record<string, string[]>;
   /** Brand marks (IDEAS #32) — small data-URL images uploaded in Settings →
    *  Branding. `logoLight` sits on the dark nav bar; `logoDark` heads white
    *  documents (letters + reports) in place of the baked-in letterhead. */
@@ -73,12 +62,9 @@ export type AppSettingsData = {
    *  and the plain-name PDFs. Absent = ON; only an explicit false turns it
    *  off. Each document can override it (src/lib/letterhead.ts). */
   peakHeader?: boolean;
-  /** Document-template wording overrides (IDEAS — centralized templates),
-   *  a sparse map { [templateId]: { [fieldId]: string } } over the built-in
-   *  defaults in lib/templates.ts. Edited in the Templates screen. */
-  templates?: import("@/lib/templates").TemplateOverrides;
-  /** Per-template "last edited by/when" stamp (replace-in-place). */
-  templatesMeta?: Record<string, { by: string; at: number }>;
+  /** Stored wording overrides of the removed Templates screen (it held only consulting documents). Unread. */
+  templates?: unknown;
+  templatesMeta?: unknown;
   /** Catalog category → group/trade mapping overrides (punch #39), sparse
    *  patch over DEFAULT_CATEGORY_MAP in lib/catalog-taxonomy.ts, resolved
    *  via resolveCategoryMap. Absent = defaults; a stored entry wins over the
@@ -104,9 +90,6 @@ export type AppSettingsData = {
    *  resolveDocumentCategories in lib/document-categories returns the seed
    *  when absent. Edited in Settings → Admin → Document categories. */
   documentCategories?: import("@/lib/document-categories").DocumentCategory[];
-  /** #344 — Venue Assessments Final thoughts: internal tags. FULL REPLACEMENT on save; resolveSurveyTags in
-   *  lib/survey-tags returns the starter list when absent. Edited in Settings → Field. */
-  surveyInternalTags?: import("@/lib/survey-tags").SurveyTag[];
   /** #216 — Settings → Venue types. FULL REPLACEMENT list; resolved by
    *  venueTypesFrom (lib/venue-types) — absent = the seed (5 built-ins +
    *  Gym Stage). sites.venue_kind stores a type key. */
@@ -116,9 +99,8 @@ export type AppSettingsData = {
    *  a missing key = blank = always needs review. FULL REPLACEMENT on save,
    *  read through reviewLimitsFrom (lib/review-limits); absent = {}. */
   reviewLimits?: import("@/lib/review-limits").ReviewLimits;
-  /** Venue-class soft-goods and lighting guidance (D132), stored sparsely
-   * over the source-sheet defaults in lib/venue-doctrine.ts. */
-  venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
+  /** Stored venue-class guidance of the removed Venue Assessments (D132). Nothing reads or edits it any more. */
+  venueDoctrine?: unknown;
   /** Pre-#210 Assemblies-tab records. Since the fixture builder they are
    *  converted into `subassemblies` fixture rows (src/lib/fixtures-migrate.ts)
    *  and this array is a read-only backup — never written by the app. */
@@ -131,33 +113,13 @@ export type AppSettingsData = {
    *  part's effective date is the LATEST of its own `pricedAt`, its
    *  `priceDate` and this — see effectivePriceDate. Absent = no book dates. */
   priceListEffective?: Record<string, number>;
-  /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
-   *  save (the wireTypes idiom): resolveCategoryShapes in
-   *  lib/design/grid-symbols returns the seed when absent and exactly the
-   *  stored map when present. Edited in Design → Grid Settings
-   *  (/design/grid/settings) — moved off Settings → Admin (D154 shipped
-   *  there; the card was dropped from Settings without a new home until
-   *  this route). */
-  gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
-  /** Stock symbols (spec 2026-09-25) — SPARSE per-category icon overrides
-   *  (category → grid-icons id) MERGED over DEFAULT_CATEGORY_ICONS by
-   *  resolveCategoryIcons; absent/null = the shipped defaults. Edited in
-   *  Design → Grid Settings → Category icons. gridCategoryShapes above is
-   *  now read only as a legacy fallback (symbolLook). */
-  gridCategoryIcons?: Record<string, string> | null;
-  /** Stock symbols — SPARSE colour overrides keyed by catalog group, trade
-   *  or "Other" (SYMBOL_COLOR_KEYS), merged over DEFAULT_SYMBOL_COLORS by
-   *  resolveSymbolColors. Edited in Design → Grid Settings → Symbol colours. */
-  gridSymbolColors?: Record<string, string> | null;
-  /** Drawing set (#209) — the "Standard general notes" printed on every
-   *  set's cover (T-001) unless that set has its own. One note per line;
-   *  null/absent = none. Edited in Design → Grid Settings. */
-  gridStandardNotes?: string | null;
-  /** Device designators (#321): digits an issued number is padded to —
-   *  2 = `CRO-01` (Bray's drawings), 1 = `CRO-1`. Absent = 2. Changing it never
-   *  rewrites a stored designator; Renumber (Devices tab) does. Edited in
-   *  Design → Grid Settings → Designator numbers. */
-  designatorDigits?: 1 | 2;
+  /** Stored Grid Settings of the removed Grid (category symbols and icons, symbol colours, the standard general
+   *  notes, designator digits). Nothing reads or edits them any more; the values stay in the settings row. */
+  gridCategoryShapes?: unknown;
+  gridCategoryIcons?: unknown;
+  gridSymbolColors?: unknown;
+  gridStandardNotes?: unknown;
+  designatorDigits?: unknown;
   /** Pipelines (spec 2026-09-24 §3) — FULL REPLACEMENT lists (the wireTypes
    *  idiom). resolvePipelines in lib/pipelines returns the Daylite seeds when
    *  absent or invalid. Edited in Settings → Pipelines. */
@@ -166,30 +128,6 @@ export type AppSettingsData = {
   defaultQuotePipelineId?: string;
   /** One-time pipeline fixes already applied to the stored lists (Jeff 2026-10-15 #42: "bid-spec-lead-qualify"). */
   pipelineFixes?: string[];
-  /** Recordings → Drive archive (Krisp recordings spec §1.3). Connection key
-   *  of the mailbox whose Google account owns the archive; null = not
-   *  configured, the nightly archive job waits. */
-  recordingsArchiveMailbox: string | null;
-  /** #283 — connection key of the mailbox whose Google account can read the
-   *  Peak Product Photos folder (drive.readonly); null = not set. */
-  catalogPhotosMailbox: string | null;
-  /** Cached Drive id of the root `Peak Recordings` folder (spec §5.2). */
-  recordingsArchiveFolderId: string | null;
-  /** Cached per-customer Drive subfolder ids, keyed by customerId (spec §5.2). */
-  recordingsArchiveFolders: Record<string, string>;
-  /** Pilot gate (spec §1.3, Settings → Beta): user ids allowed to see the
-   *  Record button. Empty = everyone. See canRecord(). */
-  recordingsBetaUsers: string[];
-  /** #334 Assist pilot (Settings → Beta): allow-listed user ids. Empty = NOBODY (unlike recordingsBetaUsers). Read via assistSettingsOf(). */
-  assistUsers?: string[];
-  /** #334: per-feature switches; a missing key counts as on, except the
-   *  opt-in ones (file, promise, brief, ask, vendorpdf — OPT_IN_FEATURES), which count as off. */
-  assistFeatures?: { tasks?: boolean; reply?: boolean; estimate?: boolean; file?: boolean; promise?: boolean; brief?: boolean; ask?: boolean; vendorpdf?: boolean };
-  /** #334: monthly API spend cap in dollars (default 200). */
-  assistMonthlyCapUsd?: number;
-  /** Outcome of the last nightly archive pass (lib/krisp/archive.ts) — shown
-   *  on Settings → Recordings. Optional: absent until the job has run once. */
-  recordingsArchiveLastRun?: RecordingsArchiveLastRun | null;
   /** #122 — Settings → Catalog: who receives the vendor price-list tasks
    *  (spec §1). null/absent = the default rule in resolveCatalogOwner()
    *  (the user named "Jena Tolksdorf" if present, else the first Admin). */
@@ -198,93 +136,6 @@ export type AppSettingsData = {
   dashboardDefaults: DashboardLayout;
 };
 
-export type RecordingsArchiveLastRun = {
-  at: number;
-  archived: number;
-  failed: number;
-  skipped: string | null;
-};
-
-/** #321: the digits an issued designator number is padded to (default 2). */
-export function designatorDigitsOf(s: { designatorDigits?: 1 | 2 | null } | null | undefined): 1 | 2 {
-  return s?.designatorDigits === 1 ? 1 : 2;
-}
-
-/**
- * Pilot gate for the Record button (Recordings spec §1.3 / §7): an empty
- * `recordingsBetaUsers` list means the feature is open to everyone; a
- * non-empty list restricts it to those user ids. Pure — settings come from
- * getSettings() so the caller can gate a whole render in one read.
- */
-export function canRecord(
-  userId: string,
-  settings: Pick<AppSettingsData, "recordingsBetaUsers">
-): boolean {
-  const allowed = Array.isArray(settings.recordingsBetaUsers) ? settings.recordingsBetaUsers : [];
-  return allowed.length === 0 || allowed.includes(userId);
-}
-
-/** #145 — the intake four (survey-intake.ts DISCIPLINE_GROUPS) as defaults. */
-export const DEFAULT_CONSULTING_DISCIPLINES = ["rigging", "curtain", "lighting", "av"];
-
-export function mergedConsultingDisciplines(stored?: string[] | null): string[] {
-  const list = (stored || []).map((s) => s.trim()).filter(Boolean);
-  return list.length ? list : DEFAULT_CONSULTING_DISCIPLINES;
-}
-
-/**
- * #155 D231 — the save-side rule for a consulting quote's disciplines.
- *
- * `posted` is untrusted form input (a public server action), so it is
- * allowlisted rather than trusted: a value survives only if it is in the
- * live Settings vocabulary OR already on the quote being edited. The
- * second clause is the fix — a discipline an admin has since deleted from
- * Settings stays on an old quote (and so keeps gating its template tasks)
- * unless the user actually unticks it, which the builder's "(removed)"
- * checkbox says it does. The first clause is the guardrail that was always
- * here: a value in neither list is refused, so a hand-crafted POST still
- * can't stash an arbitrary string onto the quote (and, at spawn, the
- * engagement). `existing` comes from the stored quote, never from the
- * form, so it can't be widened by the caller.
- *
- * Values are trimmed, lowercased (how the vocabulary is stored —
- * saveConsultingDisciplinesAction) and de-duplicated; both allowlists are
- * matched case-insensitively so a legacy mixed-case stored vocabulary
- * still matches. Pass `existing` as empty/null on the create path, where
- * there is no prior quote and the rule is the plain allowlist.
- */
-export function resolveDisciplines(
-  posted: unknown,
-  live: readonly string[] | null | undefined,
-  existing?: readonly string[] | null
-): string[] {
-  const norm = (v: unknown): string => String(v ?? "").trim().toLowerCase();
-  const allowed = new Set(
-    [...(live || []), ...(existing || [])].map(norm).filter(Boolean)
-  );
-  return Array.from(
-    new Set((Array.isArray(posted) ? posted : []).map(norm).filter((d) => d && allowed.has(d)))
-  );
-}
-
-/**
- * #145 — pair each phase NAME with its stored weight (absent/invalid → 1)
- * and a stable id. The id is the phase name slugged, so it survives a
- * settings edit that reorders the list and matches across regenerations.
- */
-export function phaseWeightsFor(
-  stored: Record<string, number> | null | undefined,
-  phaseNames: readonly string[]
-): Array<{ phaseId: string; name: string; weight: number }> {
-  return phaseNames.map((name) => {
-    const w = Number(stored?.[name]);
-    return {
-      phaseId: "ph-" + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
-      name,
-      weight: Number.isFinite(w) && w > 0 ? w : 1,
-    };
-  });
-}
 
 export async function getSettingsPatch(): Promise<Record<string, unknown>> {
   try {
@@ -556,39 +407,3 @@ export async function setDefaultQuoteOffice(id: string): Promise<boolean> {
   return found;
 }
 
-/** Templates screen (#343): set or clear the wording overrides of the named
- *  templates and stamp each one's "last edited" meta, under the settings row
- *  lock — every other template's overrides and meta are the stored ones, so
- *  two people saving different templates at once both keep their edit. A
- *  non-empty field map replaces that template's overrides; `null` or `{}`
- *  removes them (back to the built-in defaults). Validation is the caller's. */
-export async function writeTemplateOverrides(
-  changes: Record<string, Record<string, string> | null>,
-  stamp: { by: string; at: number }
-): Promise<void> {
-  await updateSettings((cur) => {
-    const s = settingsFrom(cur);
-    const templates: NonNullable<AppSettingsData["templates"]> = { ...(s.templates || {}) };
-    const templatesMeta = { ...(s.templatesMeta || {}) };
-    for (const [id, fields] of Object.entries(changes)) {
-      if (fields && Object.keys(fields).length) templates[id] = fields;
-      else delete templates[id];
-      templatesMeta[id] = { ...stamp };
-    }
-    return { templates, templatesMeta };
-  });
-}
-
-/** Estimating Rules → venue doctrine (#343): replace one venue class's entry
- *  under the settings row lock. The stored map is resolved over the source-
- *  sheet defaults first and written whole, exactly as the action did before. */
-export async function setVenueDoctrineEntry(
-  venueClass: VenueClass,
-  entry: VenueDoctrineEntry
-): Promise<void> {
-  await updateSettings((cur) => {
-    const venueDoctrine = resolveVenueDoctrine(settingsFrom(cur).venueDoctrine);
-    venueDoctrine[venueClass] = { ...entry };
-    return { venueDoctrine };
-  });
-}

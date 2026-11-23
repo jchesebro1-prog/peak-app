@@ -1,5 +1,7 @@
-import type { DriveListedPhoto } from "@/lib/google/drive-photos";
-import { HEIC_REASON, OVER_CAP_REASON } from "./drive-photo-plan";
+import type { DriveListedPhoto } from "./photo-sheet";
+
+export const HEIC_REASON = "HEIC — save it as JPEG (iPhone: Settings → Camera → Formats → Most Compatible)";
+export const OVER_CAP_REASON = "over 25 MB — export a smaller copy";
 import { droppedNameOf, driveIdOf, PHOTO_SLOTS, slotSource, type ImportRow, type PartMatcher, type SheetImage } from "./photo-sheet";
 import { MAX_PART_IMAGE_BYTES } from "./types";
 

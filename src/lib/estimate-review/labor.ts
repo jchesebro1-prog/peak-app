@@ -1,5 +1,4 @@
 import { computeLabor, lineExtSellOf, round2, type RateFn } from "@/app/(app)/estimator/pricing";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 
 /**
@@ -29,7 +28,7 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
  * left out of every sell/loose row (a group with optioned lines reads `edited`).
  *
  * "Other labor lines" (`other`) catch every remaining labor line the way `totals().lab`
- * counts it — `it.labor` or any line of a labor-kind section (reward credits, option lines
+ * counts it — `it.labor` or any line of a labor-kind section (option lines
  * and alternate sections excluded) that is neither in a configured group nor a loose `hr`
  * line: a pre-#269 labor line, a lot-priced configurator line whose draft is gone, a
  * labor-section line. cost = qty × cost, sell = current ext sell; hours = 0 (an `hr` line
@@ -117,7 +116,7 @@ export function laborSummary(sections: SpecSection[], rate: RateFn): LaborSummar
       });
     }
     for (const it of items) {
-      if (it.option || isRewardCreditItem(it)) continue;
+      if (it.option) continue;
       if (!it.labor && sec.kind !== "labor") continue;
       if (it.laborGroup && records[it.laborGroup]?.draft) continue; // counted with its group
       const qty = Number.isFinite(it.qty) ? it.qty : 0;

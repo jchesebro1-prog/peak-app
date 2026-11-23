@@ -1,5 +1,5 @@
 /**
- * Documents (#218) — file rules shared by the team and portal uploads.
+ * Documents (#218) — file rules for uploads.
  * Pure: no store, no `@/db`, no Node built-ins, so client components import
  * it freely. The browser's MIME type and the file's extension are only a
  * first filter; the finalize step (src/lib/documents-upload.ts) re-checks the
@@ -218,8 +218,7 @@ export function parseUploadPayload(payload: string | null): { customerId: string
   }
 }
 
-/** The portal token route reads only the upload key — the company comes
- *  from the portal session. */
+/** A token route that reads only the upload key (the estimate package-file upload). */
 export function parseUploadKey(payload: string | null): string | null {
   try {
     const p = payload ? (JSON.parse(payload) as { uploadKey?: unknown } | null) : null;
@@ -242,7 +241,7 @@ export function inlineDisposition(fileName: string): string {
   return attachmentDisposition(fileName).replace(/^attachment;/, "inline;");
 }
 
-/** Every document download, team or portal: a file, never rendered. */
+/** Every document download: a file, never rendered. */
 export function documentDownloadHeaders(fileName: string): Record<string, string> {
   return {
     "content-type": "application/octet-stream",

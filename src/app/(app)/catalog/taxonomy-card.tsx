@@ -152,7 +152,7 @@ export function TaxonomyCard({
             </span>
           </div>
           <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4, lineHeight: 1.45 }}>
-            Map each imported category to a Group and Trade so estimates roll up correctly. The Grid groups parts by Device types instead.
+            Map each imported category to a Group and Trade so estimates roll up correctly.
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>

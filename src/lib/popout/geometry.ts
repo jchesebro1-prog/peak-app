@@ -10,8 +10,6 @@ export type Screen = { availLeft: number; availTop: number; availWidth: number; 
 export const DEFAULT_GEO: Record<PopKind, { width: number; height: number }> = {
   estimate: { width: 1100, height: 800 },
   customer: { width: 900, height: 800 },
-  thread: { width: 760, height: 800 },
-  inbox: { width: 760, height: 800 },
 };
 
 /** At least this many px of the window must stay on the screen. */
@@ -32,7 +30,7 @@ function finite(n: unknown): n is number {
  *  screen: a saved size raised to MIN_WIDTH×MIN_HEIGHT, then capped to the
  *  screen, and at least MIN_VISIBLE px showing. Screens left of / above the
  *  primary (negative availLeft/availTop) clamp the same way. */
-export function clampGeo(saved: Partial<Geo> | null | undefined, screen: Screen, kind: PopKind = "thread"): Geo {
+export function clampGeo(saved: Partial<Geo> | null | undefined, screen: Screen, kind: PopKind = "estimate"): Geo {
   const def = DEFAULT_GEO[kind];
   const sw = Math.max(finite(screen.availWidth) ? screen.availWidth : def.width, MIN_VISIBLE);
   const sh = Math.max(finite(screen.availHeight) ? screen.availHeight : def.height, MIN_VISIBLE);

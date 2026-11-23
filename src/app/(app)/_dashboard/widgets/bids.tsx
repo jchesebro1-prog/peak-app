@@ -3,7 +3,7 @@ import type { WidgetRenderer } from "@/lib/dashboard/context";
 import { periodBounds } from "@/lib/dashboard/metrics";
 import { bidsByBidder, BID_REPORT_COPY } from "@/lib/parties/bid-report";
 import { ROLE_SHORT } from "@/lib/parties/rules";
-import { chicagoShortDate } from "@/lib/triage/clock";
+import { chicagoShortDate } from "@/lib/chicago-day";
 
 /** #348 slice 6 — Reports › "Bids by GC/EC". Period = ?range (history contract), anchored on each bid's due date
  *  (else its last send; a future due date counts as now, so in-flight bids show). Staff-only by being on the team Reports page; the loader reads delivered bidder rows only. */

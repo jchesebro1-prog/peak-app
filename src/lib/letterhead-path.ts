@@ -6,5 +6,5 @@
  * The glob writes the `(app)` route-group segment as `*` (parentheses are
  * glob syntax); the harness checks the two stay in step.
  */
-export const BAKED_LETTERHEAD = "src/app/(app)/flame-tests/letter/peak-letterhead.jpg";
-export const BAKED_LETTERHEAD_TRACE_GLOB = "./src/app/*/flame-tests/letter/peak-letterhead.jpg";
+export const BAKED_LETTERHEAD = "src/app/(app)/estimator/peak-letterhead.jpg";
+export const BAKED_LETTERHEAD_TRACE_GLOB = "./src/app/*/estimator/peak-letterhead.jpg";

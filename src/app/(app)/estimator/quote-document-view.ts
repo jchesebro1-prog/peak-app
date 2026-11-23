@@ -126,7 +126,7 @@ export function alternatingPhotoSides(keys: readonly string[]): Map<string, "rig
  *  BOM). #364: the quote's Show on BOM switches (pdfOptions.bom*, carried on
  *  the props; absent = on) apply here and nowhere else — Line prices ANDs with
  *  the quote-wide Prices, and Materials / Labor / Freight become the
- *  document's show* flags. System prices, tax, credit and the Total always
+ *  document's show* flags. System prices, tax and the Total always
  *  print. #365: `showModels` turns on "Model — Description" for the lines
  *  `bomModelParts` (passed by the caller) can resolve. Pure. */
 export function bomViewProps(p: QuoteDocumentProps): QuoteDocumentProps {

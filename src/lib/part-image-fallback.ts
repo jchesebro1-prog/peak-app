@@ -25,10 +25,6 @@ export type MfrImageLookup = (mfr: string) => string | null;
 
 export const CUSTOM_PARTS_CATEGORY = "Custom Parts";
 
-export function isCustomCategory(category: string | null | undefined): boolean {
-  return String(category ?? "").trim().toLowerCase() === CUSTOM_PARTS_CATEGORY.toLowerCase();
-}
-
 function kindOrManufacturer(input: FallbackInput, mfrImage: MfrImageLookup): ImageFallback | null {
   if (input.allowance) return { kind: "placeholder", name: "allowance" };
   if (input.custom) return { kind: "placeholder", name: "custom-device" };
@@ -37,15 +33,7 @@ function kindOrManufacturer(input: FallbackInput, mfrImage: MfrImageLookup): Ima
   return id ? { kind: "image", documentId: id, label: mfr } : null;
 }
 
-export function portalFallback(input: FallbackInput, mfrImage: MfrImageLookup): ImageFallback {
-  return kindOrManufacturer(input, mfrImage) ?? { kind: "placeholder", name: input.por ? "contact-us" : "coming-soon" };
-}
-
 export function documentFallback(input: FallbackInput, mfrImage: MfrImageLookup): ImageFallback | null {
   return kindOrManufacturer(input, mfrImage);
 }
 
-/** The <img src> for a fallback; an image goes through the caller's own document URL. */
-export function fallbackSrc(f: ImageFallback, docSrc: (documentId: string) => string): string {
-  return f.kind === "image" ? docSrc(f.documentId) : PLACEHOLDER_SRC[f.name];
-}

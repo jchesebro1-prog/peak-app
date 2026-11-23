@@ -8,7 +8,6 @@
  *  - quoteBom (client-package-server.ts): section `kind`; item `labor`, `qty`,
  *    `sku`, `desc`;
  *  - isBonusItem (estimate-bonus/flags.ts): item `bonus`;
- *  - isRewardCreditItem (rewards/credit-line.ts): item `rewardCredit`;
  *  - expandLine (quote-line-members.ts): item `rackId`, `fixtureId`,
  *    `fixture`, `components[]` (`sku`, `label`, `role`, `qty`).
  * A harness check proves quoteBom on the projection equals quoteBom on the
@@ -24,7 +23,6 @@ export type BomProjectionItem = {
   qty?: number;
   labor?: boolean;
   bonus?: string;
-  rewardCredit?: boolean;
   rackId?: string;
   fixtureId?: string;
   fixture?: boolean;
@@ -60,7 +58,6 @@ function projectItem(it: Rec): BomProjectionItem {
   if (it.qty !== undefined) out.qty = it.qty as number;
   if (it.labor !== undefined) out.labor = it.labor as boolean;
   if (it.bonus !== undefined) out.bonus = it.bonus as string;
-  if (it.rewardCredit !== undefined) out.rewardCredit = it.rewardCredit as boolean;
   if (it.rackId !== undefined) out.rackId = it.rackId as string;
   if (it.fixtureId !== undefined) out.fixtureId = it.fixtureId as string;
   if (it.fixture !== undefined) out.fixture = it.fixture as boolean;
@@ -127,7 +124,6 @@ export function sanitizeBomProjectionCounted(raw: unknown): { sections: BomProje
       if (it.labor === true) o.labor = true;
       const bonus = str(it.bonus);
       if (bonus !== undefined) o.bonus = bonus;
-      if (it.rewardCredit === true) o.rewardCredit = true;
       const rackId = str(it.rackId);
       if (rackId !== undefined) o.rackId = rackId;
       const fixtureId = str(it.fixtureId);

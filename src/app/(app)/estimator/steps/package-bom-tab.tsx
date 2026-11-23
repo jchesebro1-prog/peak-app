@@ -92,7 +92,6 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
     customers,
     companyName,
     logoDark,
-    purchasePerksDocLine,
     loadedId,
     contentUnsaved,
     togglePdf,
@@ -126,9 +125,8 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
       customers,
       companyName,
       logoDark,
-      rewardsLine: purchasePerksDocLine,
     }),
-    [quoteId, projectName, customerId, docCustName, locationId, contactName, quoteNote, assumptions, owner, preparedBy, paymentTerms, sections, groups, vendorQuotes, pdfOpts, revNum, revDateMs, portal, customers, companyName, logoDark, purchasePerksDocLine]
+    [quoteId, projectName, customerId, docCustName, locationId, contactName, quoteNote, assumptions, owner, preparedBy, paymentTerms, sections, groups, vendorQuotes, pdfOpts, revNum, revDateMs, portal, customers, companyName, logoDark]
   );
   const [shown, setShown] = useState<LiveBomInput | null>(null);
   if (active && shown !== input) setShown(input);

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { coverDocumentPropsFor, coverScopeHeading } from "../src/lib/estimate-output/cover";
 import CoverDocument from "../src/components/estimate-output/cover-document";
 import { qdP2bNoAltCases } from "./qd293-cases";
@@ -23,7 +23,6 @@ import { compareImages } from "../src/lib/part-docs/types";
 import { NEW_SYSTEM_PRESENTATION, presentationForNewSystem } from "../src/lib/estimate-output/fields";
 import { estimateReadiness } from "../src/lib/estimate-steps/readiness";
 import { systemFromCategory } from "../src/lib/system-categories";
-import { systemFromSuggestion } from "../src/lib/assist/features/suggestion";
 import { photoSkusOf } from "../src/app/(app)/estimator/narrative";
 import { can } from "../src/lib/team";
 
@@ -72,7 +71,7 @@ function viewedChecks(ok: Ok) {
   const ha = src("src/app/(app)/home-actions.ts");
   const sheet = src("src/app/(app)/home-stage-sheet.tsx");
   ok(qa.includes('if (reopenedAtWonVersion(before, q)) redirect(back + (back.includes("?") ? "&" : "?") + "statusNotice=" + encodeURIComponent(REOPENED_AT_WON_NOTICE));') &&
-     hub.includes("const creditNotice = one(sp.creditNotice) || one(sp.statusNotice) || null;"), "#355 review M8: the Quotes hub shows the reopen notice");
+     hub.includes("const statusNotice = one(sp.statusNotice) || null;") && hub.includes("{statusNotice}"), "#355 review M8: the Quotes hub shows the reopen notice");
   ok(ha.includes("return reopenedAtWonVersion(before, after) ? { ok: true, notice: REOPENED_AT_WON_NOTICE } : { ok: true };") && sheet.includes("if (res.notice) {") &&
      sheet.includes('data-testid="reopened-at-won-notice"') && !sheet.includes("@/lib/stores/") && !sheet.includes("quote-won-version"),
     "#355 review M8: Home's stage sheet shows the reopen notice (the client sheet imports no store)");
@@ -80,7 +79,7 @@ function viewedChecks(ok: Ok) {
   ok(panel.includes('data-testid="client-link-viewed"') && panel.includes("{status.viewed}"), "#58: Send & track's Client link panel shows the Viewed stamp");
   ok(/sentRevs: sentRevisionRows\(q\), viewed: viewedStamp\(q\) \}/.test(src("src/lib/quote-share/links.ts")), "#58: the panel's status carries the stamp (staff-only server action)");
   for (const f of ["src/app/share/quote/[id]/[token]/page.tsx", "src/app/share/quote/[id]/[token]/package-page.tsx", "src/app/share/quote/[id]/[token]/package-slots.tsx",
-    "src/components/estimate-output/package-view.tsx", "src/lib/estimate-output/package-model.ts", "src/app/portal/quotes/[id]/page.tsx", "src/app/portal/quotes/[id]/bom-view.tsx"]) {
+    "src/components/estimate-output/package-view.tsx", "src/lib/estimate-output/package-model.ts"]) {
     const t = src(f);
     ok(!t.includes("viewedStamp") && !t.includes("lastViewedAt") && !t.includes("COPY.viewed") && !t.includes("shareOpens"), `#58: the customer never sees it — ${f} reads no open stamp`);
   }
@@ -119,8 +118,8 @@ function wonVersionChecks(ok: Ok) {
      st.includes('const recordsWon = status === "won" && tracksWonVersion(q) && opts.bypassApprovalGate !== "historical-import";') &&
      st.includes("const sentLive = sent ? { ...sent, spec: wonRewrite(sent.spec ?? null) } : null;"),
     "#59 / #355 M3: setStatus records the won version at the Won transition, comparing at today's SKUs (never for a historical import)");
-  ok(/const c = await restoredCreditFor\(q, target, true\);/.test(st) && st.includes("withRestoredCredit(doc, plan.credit);") && st.includes("delete clean.wonRev;"),
-    "#59: the reopen's credit goes through restoredCreditFor → settleCredit (locked while still won); update() can't set wonRev");
+  ok(st.includes("return { target, rewrite };") && st.includes("doc.value = restoredValue(target);") && !/[Cc]redit\(/.test(st) && st.includes("delete clean.wonRev;"),
+    "#59: the reopen puts the won version's own value back (no credit step); update() can't set wonRev");
   ok(st.indexOf("const reopen = await reopenPlanFor(q, status, opts);") < st.indexOf("const gate = decideApprovalGate(status, gateQ, limits, opts, Date.now(), by ?? null);") &&
      st.includes("const gateQ = asReopened(q, reopen);") && st.includes("const d = decideApprovalGate(status, asReopened(q, plan), await loadReviewLimitContext(), {}, Date.now(), actor);"),
     "#355 review I1: setStatus and the actions' pre-check (checkApprovalGate) both judge the reopened version through one helper");
@@ -159,12 +158,10 @@ function presentationChecks(ok: Ok) {
   ok(systemFromCategory(catOpt, [{ sku: "A", qty: 2 }], { ...ctx, presentation: "narrative" }).presentation === "narrative" &&
      systemFromCategory(catOpt, [{ sku: "A", qty: 2 }], { ...ctx, presentation: "itemized" }).presentation === "itemized" &&
      !("presentation" in systemFromCategory(catOpt, [], ctx)), "#355 review M6: a category system takes the presentation it is given (none → no key)");
-  ok(systemFromSuggestion({ key: "k", name: "Rigging", categoryId: "c", lines: [] }, new Map(), { ...ctx, presentation: "itemized" }).presentation === "itemized",
-    "#355 review M6: a suggested system takes the presentation it is given");
   const us = src("src/app/(app)/estimator/use-estimator-state.ts");
   ok(/const freshSections = [\s\S]{0,400}presentation: newSystemPresentation\(\[\], boxSale\)/.test(us) && !us.includes("presentation: NEW_SYSTEM_PRESENTATION") &&
-     us.includes("presentation: newSystemPresentation(ss, boxSale)") && (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 2,
-    "#355 review M6 (+ box goods sale): only a NEW estimate starts Narrative; + Add system (blank, category, suggestion) follows the estimate — Itemized throughout on a box sale");
+     us.includes("presentation: newSystemPresentation(ss, boxSale)") && (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 1,
+    "#355 review M6 (+ box goods sale): only a NEW estimate starts Narrative; + Add system (blank, category) follows the estimate — Itemized throughout on a box sale");
   const narr = { id: "n", name: "N", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", items: [{ id: 1, sku: "A", desc: "A", qty: 1, unit: "ea", cost: 1, price: 2 }] };
   const base = { saved: true, review: null, status: "draft" as const, revNum: 1 };
   const send1 = estimateReadiness({ ...base, sections: [narr, { ...narr, id: "n2", narrative: "Intro." }, narr] as never[] }).send;
@@ -177,8 +174,6 @@ function presentationChecks(ok: Ok) {
   ok(photoSkusOf([old] as never[]).length === 0 && photoSkusOf([{ ...old, presentation: "narrative" }] as never[]).join() === "A",
     "#61: a system with no stored presentation stays Itemized (existing estimates unchanged); only an explicit Narrative prints narrative");
   ok(src("src/app/(app)/estimator/quote-document.tsx").includes('presentation: sec.presentation || "itemized"'), "#61: the document still reads an absent presentation as Itemized");
-  ok(!src("src/lib/portal-pricing.ts").includes("NEW_SYSTEM_PRESENTATION") && !src("src/lib/assessments/findings-quote.ts").includes("NEW_SYSTEM_PRESENTATION"),
-    "#61: portal-built and assessment-findings systems stay itemized");
 }
 
 /* --- #62 anyone with `create` edits the shared system intros (already so — pinned) --- */
@@ -224,11 +219,9 @@ export async function batch5PureChecks(ok: Ok) {
 
 async function wonVersionDbChecks(ok: Ok) {
   const Q = await import("../src/lib/stores/quotes");
-  const L = await import("../src/lib/stores/reward-ledger");
-  const { withRewardCredit, quoteRewardCredit } = await import("../src/lib/rewards/credit-line");
   const bypass = { bypassApprovalGate: "engine-owned-flow" as const };
   const CO = fixtureId("b5", "co");
-  const spec = (price: number) => ({ sections: withRewardCredit([b5sec(price)] as never[], 100, 2), mobs: [] });
+  const spec = (price: number) => ({ sections: [b5sec(price)], mobs: [] });
   const priceOf = (q: { spec?: unknown } | null | undefined) =>
     ((q?.spec as { sections?: Sec[] } | undefined)?.sections?.[0]?.items || []).find((it) => it.sku === "X")?.price;
   const mk = async (slug: string) => {
@@ -244,7 +237,6 @@ async function wonVersionDbChecks(ok: Ok) {
     const a1 = (await Q.get(A))!;
     const sentA = a1.revisions!.filter((r) => r.reason === "sent").at(-1)!;
     ok(a1.wonRev === sentA.rev && a1.revisions!.length === 1, "#59 db: won straight after a send → wonRev is that send, no extra snapshot");
-    const ledgerWon = (await L.ledgerForQuote(A)).map((e) => e.id).sort().join(",");
     await Q.update(A, { spec: spec(3000), value: 2900, wonRev: 99 } as never);
     ok((await Q.get(A))!.wonRev === sentA.rev, "#59 db: update() can't move wonRev");
     await Q.setStatus(A, "draft", "Pat");
@@ -252,10 +244,6 @@ async function wonVersionDbChecks(ok: Ok) {
     const auto = a2.revisions!.at(-1)!;
     ok(a2.status === "draft" && priceOf(a2) === 2000 && a2.value === 1900, `#59 db: reopening loads the version that won (price ${priceOf(a2)}, value ${a2.value})`);
     ok(auto.reason === "manual" && auto.note === REOPEN_AUTOSAVE_NOTE && priceOf(auto) === 3000 && auto.status === "won", "#59 db: the edits made after the win are kept as a revision first");
-    ok(quoteRewardCredit(a2) === 100, `#59 db: the Rewards credit is the locked amount, re-homed on the won version (${quoteRewardCredit(a2)})`);
-    const led = (await L.ledgerForQuote(A)).map((e) => e.id).sort();
-    ok(ledgerWon.includes(`redeem:${A}:1`) && led.includes(`redeem:${A}:1`) && led.includes(`unredeem:${A}:1`) && led.filter((x) => x.startsWith("unredeem:")).length === 1,
-      `#59 db: the ledger sees a plain revise — the redeem is returned once (${led.join(",")})`);
     // Re-win from the reopened draft with no edits: wonRev = a fresh snapshot? No — the live quote matches the last SEND, so that send.
     await Q.setStatus(A, "won", "Pat", bypass);
     ok((await Q.get(A))!.wonRev === sentA.rev, "#59 db: re-winning unchanged points at the same send again");
@@ -349,6 +337,25 @@ async function wonVersionDbChecks(ok: Ok) {
     const hPdf = JSON.stringify((await Q.get(H))!.pdf ?? null);
     await Q.setStatus(H, "sent", "Pat", bypass);
     ok(JSON.stringify((await Q.get(H))!.pdf ?? null) === hPdf, "#355 review I2 control: won → sent with no restore leaves the PDF state alone");
+
+    // Rewards credit removed (2026-11-23): a stored credit line is dropped when the quote is read — and only then.
+    const { getDb } = await import("../src/db");
+    const { DOC_TABLES } = await import("../src/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    const creditLine = { id: 2, sku: "", desc: "Credit", qty: 1, unit: "ea", cost: 0, price: -100, rewardCredit: true };
+    const withCredit = () => ({ sections: [{ ...b5sec(2000), items: [...b5sec(2000).items, { ...creditLine }] }], mobs: [] });
+    const K = fixtureId("b5", "credit");
+    const frozen = { rev: 1, at: 1, by: "x", reason: "manual", note: "", name: "B5 credit", value: 1900, margin: 0.3, status: "draft", spec: withCredit() };
+    await createFixture("quotes", { ...Q.buildQuote(K, { name: "B5 credit", customer: "B5 Co", customerId: CO, value: 1900, spec: withCredit() } as never, "system", null, Date.now()), revisions: [frozen] } as never);
+    const itemsOf = (spec: unknown) => ((spec as { sections?: Sec[] } | undefined)?.sections?.[0]?.items || []);
+    const k1 = (await Q.get(K))!;
+    const listed = (await Q.getAll()).find((q) => q.id === K)!;
+    ok(itemsOf(k1.spec).length === 1 && priceOf(k1) === 2000 && !itemsOf(k1.spec).some((it) => it.rewardCredit) && itemsOf(listed.spec).length === 1,
+      `credit filter db: a stored Rewards credit line is dropped when the quote is read (get and getAll; ${itemsOf(k1.spec).length} line)`);
+    ok(itemsOf(k1.revisions![0].spec).length === 2, "credit filter db: the frozen revision is read exactly as stored");
+    const t = DOC_TABLES.quotes;
+    const raw = (await (await getDb()).select({ doc: t.doc }).from(t).where(eq(t.id, K)))[0].doc as { spec?: unknown };
+    ok(itemsOf(raw.spec).length === 2 && itemsOf(raw.spec).some((it) => it.rewardCredit === true), "credit filter db: reading writes nothing — the stored row still holds the line");
   } finally {
     await dropFixtures("b5");
   }

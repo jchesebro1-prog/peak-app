@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { sites, type NewSiteRow, type SiteRow } from "@/db/schema";
 import { geoStampForSave, sameVenueAddress } from "@/lib/address-verify/state";
 import { compareVenueOrder } from "@/lib/venue-types";
-import { CODE_RE } from "@/lib/assessments/codes";
+import { CODE_RE } from "@/lib/identity/short-code";
 import { isUniqueViolation } from "@/lib/identity/companies";
 
 /**

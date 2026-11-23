@@ -1,33 +1,10 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
-import { isDone } from "@/lib/pipelines";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
-import { listDesignRecords } from "@/lib/stores/designs";
-import { getAllProjects, riskFlags } from "@/lib/stores/projects";
-import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
-import { getAll as allInspections } from "@/lib/stores/inspections";
-import {
-  getAll as allRepairs,
-  flaggedFromInspections,
-  priorityMeta,
-} from "@/lib/stores/repair-jobs";
-import { getAll as allSurveys } from "@/lib/stores/surveys";
-import { allVisits } from "@/lib/stores/site-visits";
-import { getAll as allComms, isAssignedTo, waitHours, unreadCountFrom } from "@/lib/stores/comms";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
 import { getPrefs } from "@/lib/stores/notif-prefs";
-import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
-import { countOpenImmediateFindings } from "@/lib/stores/findings";
-import { unseenCustomerDocuments } from "@/lib/stores/documents";
-import { nameFor as customerNameFor } from "@/lib/stores/customers";
-import { customerUploadBell } from "@/lib/document-rules";
-import { shortDate } from "@/lib/format";
 import { displayLeadNumber } from "@/lib/estimate-number";
-import { portalBellGroups } from "@/lib/portal-bell";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { quoteAwaitsApprovalBy, quoteBackFromReview, sameName } from "@/lib/quote-approval-rules";
 import { firstName } from "@/lib/team";
-import { perksToFulfil } from "@/lib/stores/reward-perks";
-import { perkBellItems } from "@/lib/rewards/perk-bell";
 import type {
   NavCounts,
   BellGroup,
@@ -82,106 +59,22 @@ export function quoteApprovalBell(quotes: Quote[], me: string, canApprove: boole
   return { needs, back };
 }
 
-export async function navData(me: string, canApprove = false, meId: string | null = null): Promise<{
+export async function navData(me: string, canApprove = false): Promise<{
   counts: NavCounts;
   bell: BellGroup[];
   bellCount: number;
 }> {
-  const [
-    quotes,
-    designs,
-    projects,
-    inspections,
-    repairs,
-    surveys,
-    comms,
-    visits,
-    leadFollowUps,
-    renewalRows,
-    taskRows,
-    prefs,
-    unseenDocs,
-    perkRedemptions,
-    immediateFindingCount,
-    viewer,
-  ] = await Promise.all([
+  const [quotes, leadFollowUps, prefs] = await Promise.all([
     allQuotes(),
-    // Fix wave 3 (I3): the badge needs review / owner only — a plain record
-    // read, never live Grid pricing (a catalog load per Grid design) on
-    // every page navigation.
-    listDesignRecords(),
-    getAllProjects(),
-    allInspections(),
-    allRepairs(),
-    allSurveys(),
-    allComms(),
-    allVisits(),
     followUps({ unownedOrMine: true, me }),
-    renewals({ dueOnly: true }),
-    allTasks(),
     getPrefs(me),
-    // #218 — one SQL-filtered read (source = customer AND seenByTeamAt IS NULL), usually empty.
-    unseenCustomerDocuments(),
-    // #282 perks+points — one SQL-filtered read of perk ledger entries (usually few).
-    perksToFulfil(),
-    // #340 — open Immediate-attention findings: one SQL count, no documents read.
-    countOpenImmediateFindings().catch((error) => {
-      console.error("[assessments] nav badge: findings count failed", error);
-      return 0;
-    }),
-    // #349 — mailbox / assignment checks are by identity (no id: owns nothing)
-    mailboxViewer({ id: meId || "", name: me }),
   ]);
-  // Everything below is derived from the arrays already fetched above — no
-  // extra table scans. Previously these re-fetched inspections+repairs
-  // (flagged), leads (leadCount), and comms (unread) a second time, plus a
-  // serial round-trip for unread after the parallel batch. navData runs on
-  // every app page, so this is per-navigation overhead removed.
-  const flagged = await flaggedFromInspections({ jobs: repairs, inspections });
   const leadCount = leadFollowUps.length;
-  const inboxUnread = unreadCountFrom(comms, viewer);
 
   const approvalBell = quoteApprovalBell(quotes, me, canApprove);
-  const reviewDesigns = designs.filter(
-    (d) =>
-      d.review?.state === "in_review" &&
-      d.review?.reviewer === me &&
-      d.owner !== me
-  );
-  const riskProjects = projects.filter(
-    (p) => !isDone(p) && riskFlags(p).length > 0
-  );
-  const requestedInspections = inspections.filter(
-    (r) => (r.stage || "requested") === "requested"
-  );
-  const approvedRepairs = repairs.filter((r) => r.stage === "approved");
-  const requestedSurveys = surveys.filter(
-    (s) => (s.stage || "requested") === "requested"
-  );
-  const openVisits = visits.filter((v) => v.stage === "requested" || v.stage === "open");
-  const myVisitsToSchedule = visits.filter((v) => v.stage === "claimed" && v.assignedTo === me);
-  const waitingComms = comms
-    // archived (Peak or Gmail side) stops nagging the bell too (S14)
-    .filter(
-      (t) =>
-        t.status === "waiting_us" &&
-        isAssignedTo(t, viewer) && // #349 — by identity
-        !t.deleted && // #341 — never a thread in Deleted
-        !t.archived &&
-        t.gmailInboxed !== false
-    )
-    .sort((a, b) => waitHours(b) - waitHours(a));
-
   const counts: NavCounts = {
-    inbox: inboxUnread,
     leads: leadCount,
-    reviews: approvalBell.needs.length + reviewDesigns.length,
-    projects: riskProjects.length,
-    flametests: renewalRows.length,
-    inspections: requestedInspections.length,
-    repairs: approvedRepairs.length + flagged.length,
-    field: requestedSurveys.length,
-    assessments: immediateFindingCount,
+    reviews: approvalBell.needs.length,
   };
 
   const groups: BellGroup[] = [];
@@ -191,117 +84,8 @@ export async function navData(me: string, canApprove = false, meId: string | nul
     groups.push({ key, label, items });
   };
 
-  push(
-    "comms",
-    "Customers waiting on a reply",
-    waitingComms.map((t) => ({
-      id: t.id,
-      title: t.customer || t.contactName || t.contactEmail || t.subject,
-      sub: `${t.subject} · waiting ${Math.round(waitHours(t))}h`,
-      // #341 — open the thread itself (read-only when it isn't in my mailbox)
-      href: `/inbox?thread=${encodeURIComponent(t.id)}`,
-      letter: "@",
-      color: "#b4543a",
-    }))
-  );
-  push("reviews", "Needs your approval", [
-    ...approvalBell.needs,
-    ...reviewDesigns.map((d) => ({
-      id: d.id,
-      title: d.name,
-      sub: `${d.customer || ""} · design`,
-      href: "/design/designs",
-      letter: "D",
-      color: "#3155a8",
-    })),
-  ]);
+  push("reviews", "Needs your approval", approvalBell.needs);
   push("reviewBack", "Back from review", approvalBell.back);
-  push(
-    "surveys",
-    "Survey requests to schedule",
-    requestedSurveys.map((s) => ({
-      id: s.id,
-      title: (s.customer as string) || s.id,
-      sub: (s.venue as string) || "Site survey",
-      href: "/venue-assessments",
-      letter: "S",
-      color: "#1f7a52",
-    }))
-  );
-  push(
-    "visits",
-    "Site visit requests",
-    [...openVisits, ...myVisitsToSchedule].map((v) => ({
-      id: v.id,
-      title: v.customer || v.id,
-      sub:
-        v.stage === "claimed"
-          ? `${v.reason} · claimed — pick a time`
-          : `${v.reason} · open — claim it`,
-      href: "/venue-assessments",
-      letter: "V",
-      color: "#7b3f8a",
-    }))
-  );
-  push(
-    "inspections",
-    "Inspections to schedule",
-    requestedInspections.map((r) => ({
-      id: r.id,
-      title: (r.customer as string) || r.id,
-      sub: (r.venue as string) || "Rigging inspection",
-      href: "/inspections",
-      letter: "I",
-      color: "#7b3f8a",
-    }))
-  );
-  push(
-    "projects",
-    "Projects need attention",
-    riskProjects.map((p) => ({
-      id: p.id,
-      title: p.name,
-      sub: riskFlags(p)[0]?.label || "",
-      href: "/projects",
-      letter: "P",
-      color: "#b4543a",
-    }))
-  );
-  push(
-    "flame",
-    "Flame tests due for renewal",
-    renewalRows.map((r) => ({
-      id: r.id,
-      title: `${r.customer}${r.venues?.[0]?.label ? " — " + r.venues[0].label : ""}`,
-      sub: dueLabel(r._renewal.days, r._renewal.state),
-      href: "/flame-tests",
-      letter: "F",
-      color: "#b4543a",
-    }))
-  );
-  push(
-    "repairs",
-    "Repairs awaiting scheduling",
-    approvedRepairs.map((r) => ({
-      id: r.id,
-      title: (r.customer as string) || r.id,
-      sub: `${priorityMeta(r.priority).label} · awaiting scheduling`,
-      href: "/repairs",
-      letter: "R",
-      color: r.priority === "emergency" ? "#8a2f22" : "#b4543a",
-    }))
-  );
-  // #245 (spec §8.2) — derived groups over the same quotes already fetched
-  // above; no extra table scan, no writer, no Leads-queue record. #288: all
-  // three link the staff Portal quotes queue (/quotes/portal?focus=<id>).
-  const {
-    review: portalReviewItems,
-    generated: portalNewItems,
-    accepted: portalAcceptedItems,
-  } = portalBellGroups(quotes, me, Date.now());
-  push("portal", "Portal acceptances to confirm", portalAcceptedItems);
-  push("portalReview", "Portal quotes to review", portalReviewItems);
-  push("portalNew", "New portal quotes", portalNewItems);
   push(
     "leads",
     "Leads needing follow-up",
@@ -317,38 +101,6 @@ export async function navData(me: string, canApprove = false, meId: string | nul
       };
     })
   );
-  const nowMs = Date.now();
-  const taskItems = taskBellItems(taskRows, meId, me, nowMs);
-  push("tasks", "Tasks needing attention", taskItems.map((t) => ({
-    id: t.id,
-    title: t.title,
-    sub: t.dueAt
-      ? (isOverdue(t, nowMs) ? "Overdue" : "Due " + shortDate(t.dueAt))
-      : (t.assigneeName || "Unassigned"),
-    href: t.projectId ? `/projects/${t.projectId}` : "/field-work",
-    letter: "T",
-    color: "#b45309",
-  })));
-
-  // #218 — one item per company with customer uploads nobody has opened;
-  // downloading one (or "Mark seen" on the card) clears it.
-  const docBell = customerUploadBell(unseenDocs);
-  // A company that no longer resolves has no page to clear it from, so its
-  // item is dropped rather than left sitting in the bell for good.
-  const docNames = await Promise.all(docBell.map((b) => customerNameFor(b.customerId)));
-  push("documents", "New documents from customers", docBell.flatMap((b, i) => (docNames[i] ? [{
-    id: "docs-" + b.customerId,
-    title: docNames[i],
-    sub: b.count === 1 ? "1 new document" : `${b.count} new documents`,
-    href: `/companies/${encodeURIComponent(b.customerId)}#documents`,
-    letter: "D",
-    color: "#3155a8",
-  }] : [])));
-
-  // #282 perks+points — redemptions (portal or staff Redeem) nobody has marked
-  // fulfilled yet; Mark fulfilled (or an admin Undo) on the company card clears one.
-  const perkNames = await Promise.all(perkRedemptions.map((r) => customerNameFor(r.companyId)));
-  push("perks", "Perks to fulfil", perkBellItems(perkRedemptions, perkNames));
 
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
   return { counts, bell: groups, bellCount };

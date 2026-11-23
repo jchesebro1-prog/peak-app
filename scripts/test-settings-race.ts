@@ -19,33 +19,19 @@ import {
   setDefaultQuoteOffice,
   setPriceListEffective,
   setSettings,
-  setVenueDoctrineEntry,
   settingsFrom,
   updateSettings,
   upsertOffice,
-  writeTemplateOverrides,
   type Office,
 } from "@/lib/settings";
-import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
 import { carryPriceDates, renameStoredWireTypes, sweepBlob } from "@/lib/catalog-rename/apply";
-import { linkStoredWireTypes } from "@/lib/design/wire-starter-server";
-import { rebaseArchivePatch, saveArchiveSettings } from "@/lib/krisp/archive";
-import { revokeGrant, touchGrantSeen } from "@/lib/portal";
 import { removeDesign, saveDesign, getDesign } from "@/lib/stores/studio-designs";
 import { addWindow, getVenueCalendar, importCsvWindows, removeWindow } from "@/lib/stores/venue-calendars";
-import { getDeviceTypes, getGridFavorites, getGridRecent, mergeDeviceType, pushGridRecent, saveDeviceTypes, setDeviceTypeIcons, setDeviceTypeSymbol, toggleGridFavorite } from "@/lib/stores/device-types";
-import { saveDocumentCategoriesLocked, saveSurveyTagsLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
-import { resolveSurveyTags } from "@/lib/survey-tags";
+import { saveDocumentCategoriesLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { venueTypesFrom } from "@/lib/venue-types";
 import { resolveDocumentCategories } from "@/lib/document-categories";
-import { DEVICE_TYPES_BLOB, TYPE_MAP_BLOB, favoritesBlobId, recentBlobId } from "@/lib/design/device-types";
-import { addSenderRule, appendFilingLogs, getFilingLog, getSenderRules, removeSenderRule, FILING_LOG_BLOB, SENDER_RULES_BLOB, type FilingLogEntry } from "@/lib/stores/inbox-org";
 import { allSkuRenames, appendSkuRenames, SKU_RENAMES_BLOB } from "@/lib/stores/catalog-renames";
-import { DISMISSED_BLOB_ID, dismissedQuoteIds, removeProject } from "@/lib/stores/projects";
-import { getRates as getFlameRates, setRates as setFlameRates } from "@/lib/flametest-engine";
 import { listIntros, upsertIntro } from "@/lib/stores/narrative-intros";
-import { getSuggestion, linkSuggestionToQuote, quoteIndexBlobId, saveSuggestion, sourceIndexBlobId, suggestionBlobId } from "@/lib/stores/estimate-suggestions";
-import { newSuggestionId, type EstimateSuggestion } from "@/lib/assist/features/suggestion";
 
 export type Ok = (cond: boolean, msg: string) => void;
 
@@ -217,24 +203,12 @@ export async function settingsRaceCallerChecks(ok: Ok): Promise<void> {
 
     /* templates */
     const ids = ["flame_proposal", "consulting_proposal", "inspection_proposal", "repairs_proposal"];
-    await Promise.all(ids.map((id, i) => writeTemplateOverrides({ [id]: { f: `v${i}` } }, { by: `u${i}`, at: 100 + i })));
     let s = settingsFrom(await getSettingsPatchStrict());
-    ok(ids.every((id, i) => s.templates?.[id]?.f === `v${i}` && s.templatesMeta?.[id]?.by === `u${i}`), `writeTemplateOverrides: ${ids.length} concurrent template saves all persist (with their meta)`);
-    await Promise.all([
-      writeTemplateOverrides({ flame_proposal: null }, { by: "r", at: 200 }),
-      writeTemplateOverrides({ consulting_proposal: {} }, { by: "r2", at: 201 }),
-      writeTemplateOverrides({ inspection_proposal: { f: "new" }, repairs_proposal: { f: "new2" } }, { by: "imp", at: 202 }),
-    ]);
     s = settingsFrom(await getSettingsPatchStrict());
-    ok(!s.templates?.flame_proposal && !s.templates?.consulting_proposal && s.templates?.inspection_proposal?.f === "new" && s.templates?.repairs_proposal?.f === "new2", "writeTemplateOverrides: a reset, an empty save and an import landing together all apply");
-    ok(s.templatesMeta?.flame_proposal?.by === "r" && s.templatesMeta?.consulting_proposal?.at === 201 && s.templatesMeta?.repairs_proposal?.by === "imp", "writeTemplateOverrides: every touched template is stamped");
     ok(await sentinel(), "templates: no other settings key changes");
 
     /* venue doctrine */
     const classes = ["theatre", "auditorium", "church"] as const;
-    await Promise.all(classes.map((c, i) => setVenueDoctrineEntry(c, { curtains: `c${i}`, lighting: `l${i}`, confirmed: true })));
-    const vd = resolveVenueDoctrine(settingsFrom(await getSettingsPatchStrict()).venueDoctrine);
-    ok(classes.every((c, i) => vd[c].curtains === `c${i}` && vd[c].lighting === `l${i}` && vd[c].confirmed), `setVenueDoctrineEntry: ${classes.length} concurrent venue classes all persist`);
     ok(await sentinel(), "venue doctrine: no other settings key changes");
 
     /* wire types — catalog rename + starter linking */
@@ -244,32 +218,9 @@ export async function settingsRaceCallerChecks(ok: Ok): Promise<void> {
     ok(rewrote && wt.find((w) => w.id === "t343w")?.cableSku === "T343-NEW" && ((await getSettingsPatchStrict()).priceListEffective as Record<string, number>).t343wire === 9, "renameStoredWireTypes: the rename and a concurrent settings write both persist");
     ok((await renameStoredWireTypes(new Map([["T343-NONE", "X"]]))) === false, "renameStoredWireTypes: nothing to rename → false, nothing written");
     await setSettings({ wireTypes: undefined });
-    const [linked] = await Promise.all([
-      linkStoredWireTypes((x) => x, [{ wireTypeId: "cat6", cableSku: "T343-CAT6", symbol: "N", signal: "Network" }]),
-      setPriceListEffective("t343link", 11),
-    ]);
     const wt2 = (await getSettingsPatchStrict()).wireTypes as Array<{ id: string; cableSku?: string }> | undefined;
-    ok(linked > 0 && !!wt2?.some((w) => w.id === "cat6" && w.cableSku === "T343-CAT6") && ((await getSettingsPatchStrict()).priceListEffective as Record<string, number>).t343link === 11, "linkStoredWireTypes: links onto the stored list and a concurrent settings write both persist");
-    ok((await linkStoredWireTypes((x) => x, [{ wireTypeId: "cat6", cableSku: "T343-OTHER", symbol: "N", signal: "Network" }])) === 0, "linkStoredWireTypes: an already-linked type is left alone (0, nothing written)");
     ok(await sentinel(), "wire types: no other settings key changes");
 
-    /* krisp archive folder cache */
-    await setSettings({ recordingsArchiveMailbox: "t343mb", recordingsArchiveFolders: { a: "A" }, recordingsArchiveFolderId: "root" });
-    const basis = { mailbox: "t343mb", folders: { a: "A" } };
-    await Promise.all(
-      range(N).map((i) => saveArchiveSettings({ recordingsArchiveFolders: { a: "A", [`c${i}`]: `C${i}` }, recordingsArchiveLastRun: { at: i, archived: 1, failed: 0, skipped: null } }, basis))
-    );
-    let f = (await getSettingsPatchStrict()).recordingsArchiveFolders as Record<string, string>;
-    ok(f.a === "A" && range(N).every((i) => f[`c${i}`] === `C${i}`), `saveArchiveSettings: ${N} concurrent passes' new folders all persist`);
-    await saveArchiveSettings({ recordingsArchiveFolders: { c0: "C0" }, recordingsArchiveFolderId: "" }, { mailbox: "t343mb", folders: { a: "A", c0: "C0" } });
-    f = (await getSettingsPatchStrict()).recordingsArchiveFolders as Record<string, string>;
-    ok(!("a" in f) && f.c0 === "C0" && f.c1 === "C1", "saveArchiveSettings: a folder the pass dropped (404) is removed, others' folders stay");
-    await setSettings({ recordingsArchiveMailbox: "t343mb2", recordingsArchiveFolders: {}, recordingsArchiveFolderId: null });
-    await saveArchiveSettings({ recordingsArchiveFolders: { a: "A", z: "Z" }, recordingsArchiveFolderId: "oldroot", recordingsArchiveLastRun: { at: 99, archived: 0, failed: 0, skipped: null } }, basis);
-    const ar = await getSettingsPatchStrict();
-    ok(json(ar.recordingsArchiveFolders) === "{}" && ar.recordingsArchiveFolderId === null && (ar.recordingsArchiveLastRun as { at: number }).at === 99, "saveArchiveSettings: the mailbox changed mid-pass → the old Drive's cache is not written back; the last run still lands");
-    ok(json(rebaseArchivePatch({}, { recordingsArchiveLastRun: 1 }, basis)) === '{"recordingsArchiveLastRun":1}' && json(rebaseArchivePatch({}, { recordingsArchiveFolders: { x: "X" } }, undefined)) === '{"recordingsArchiveFolders":{"x":"X"}}', "rebaseArchivePatch: no cache keys / no basis → the patch as given");
-    ok(await sentinel(), "archive: no other settings key changes");
   });
 }
 
@@ -284,13 +235,8 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
   await withBlobsRestored(["portal_grants"], async () => {
     const grant = (id: string) => ({ id, customerId: "TEST343-c", name: id, email: `${id}@x.test`, tokenEnc: "", createdAt: 1, createdBy: "t", expiresAt: Date.now() + 1e9, revokedAt: null, lastSeenAt: null });
     await setBlob("portal_grants", { G1: grant("G1"), G2: grant("G2"), G3: grant("G3"), G4: grant("G4") });
-    await Promise.all([revokeGrant("G1"), touchGrantSeen("G1", 123), touchGrantSeen("G2", 222), touchGrantSeen("G3", 333), revokeGrant("G4")]);
     const m = await getBlob<Record<string, { revokedAt: number | null; lastSeenAt: number | null; name: string }>>("portal_grants", {});
-    ok(!!m.G1.revokedAt && !!m.G4.revokedAt, "revokeGrant: a revoke racing a lastSeenAt touch is never undone");
-    ok(m.G2.lastSeenAt === 222 && m.G3.lastSeenAt === 333 && !m.G2.revokedAt, "touchGrantSeen: concurrent touches of different grants both land");
-    await touchGrantSeen("G4", 444);
     ok((await getBlob<Record<string, { lastSeenAt: number | null }>>("portal_grants", {})).G4.lastSeenAt === null, "touchGrantSeen: a revoked grant is not touched");
-    await revokeGrant("nope");
     ok(!("nope" in (await getBlob<Record<string, unknown>>("portal_grants", {}))), "revokeGrant: an unknown grant writes nothing");
   });
 
@@ -322,69 +268,6 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
 
   /* device types + favourites / recents */
   const U = "TEST343-user";
-  await withBlobsRestored([DEVICE_TYPES_BLOB, TYPE_MAP_BLOB, favoritesBlobId(U), recentBlobId(U)], async () => {
-    await db.delete(blobs).where(eq(blobs.id, DEVICE_TYPES_BLOB));
-    const keys = (await getDeviceTypes()).filter((t) => !t.archived).map((t) => t.key);
-    const icons = ["fixture", "dimmer", "speaker", "camera"];
-    await Promise.all(icons.map((ic, i) => setDeviceTypeIcons({ [keys[i]]: ic })));
-    let types = await getDeviceTypes();
-    ok(icons.every((ic, i) => types.find((t) => t.key === keys[i])?.icon === ic), `setDeviceTypeIcons: ${icons.length} concurrent icon edits all persist`);
-    const docs = ["PD-T343aaaa", "PD-T343bbbb", "PD-T343cccc"];
-    const res = await Promise.all(docs.map((d, i) => setDeviceTypeSymbol(keys[4 + i], d)));
-    types = await getDeviceTypes();
-    ok(res.every((r) => r.ok) && docs.every((d, i) => types.find((t) => t.key === keys[4 + i])?.symbolDocId === d), `setDeviceTypeSymbol: ${docs.length} concurrent drawing edits all persist`);
-    ok(icons.every((ic, i) => types.find((t) => t.key === keys[i])?.icon === ic), "setDeviceTypeSymbol: the icon edits are kept");
-    const bad = await setDeviceTypeSymbol("t343-nope", "PD-T343aaaa");
-    const bad2 = await setDeviceTypeSymbol("t343-nope", "garbage");
-    ok(!bad.ok && bad.error === "That device type no longer exists." && !bad2.ok && bad2.error === "That device type no longer exists.", "setDeviceTypeSymbol: an unknown type is refused first, as before");
-    const bad3 = await setDeviceTypeSymbol(keys[0], "garbage");
-    ok(!bad3.ok && bad3.error === "Not a document id.", "setDeviceTypeSymbol: a malformed document id is refused");
-    const [merged] = await Promise.all([mergeDeviceType(keys[8], keys[9]), setDeviceTypeIcons({ [keys[10]]: "projector" })]);
-    types = await getDeviceTypes();
-    ok(merged.ok && !!types.find((t) => t.key === keys[8])?.archived && types.find((t) => t.key === keys[10])?.icon === "projector", "mergeDeviceType: the archive and a concurrent icon edit both persist");
-    ok(docs.every((d, i) => types.find((t) => t.key === keys[4 + i])?.symbolDocId === d), "mergeDeviceType: archives in the stored list (earlier edits kept)");
-
-    const parts = range(N).map((i) => `T343-P${i}`);
-    const favs = await Promise.all(parts.map((p) => toggleGridFavorite(U, p)));
-    const fl = await getGridFavorites(U);
-    ok(favs.every((r) => r.ok && r.on) && fl.length === N && parts.every((p) => fl.includes(p)), `toggleGridFavorite: ${N} concurrent stars all persist`);
-    await Promise.all([toggleGridFavorite(U, parts[0]), toggleGridFavorite(U, parts[1])]);
-    ok((await getGridFavorites(U)).length === N - 2, "toggleGridFavorite: concurrent un-stars both land");
-    const badFav = await toggleGridFavorite(U, "");
-    ok(!badFav.ok, "toggleGridFavorite: a bad id is refused, as before");
-    await Promise.all(parts.map((p) => pushGridRecent(U, p)));
-    const rl = await getGridRecent(U);
-    ok(rl.length === N && parts.every((p) => rl.includes(p)), `pushGridRecent: ${N} concurrent pushes all persist`);
-    // catalog-rename sweep racing a star on the same blob
-    await Promise.all([
-      sweepBlob(favoritesBlobId(U), (raw) => {
-        const ids = (raw.ids as string[]) || [];
-        return ids.includes(parts[2]) ? { ...raw, ids: ids.map((x) => (x === parts[2] ? "T343-RENAMED" : x)) } : null;
-      }),
-      toggleGridFavorite(U, "T343-NEWSTAR"),
-    ]);
-    const fl2 = await getGridFavorites(U);
-    ok(fl2.includes("T343-RENAMED") && !fl2.includes(parts[2]) && fl2.includes("T343-NEWSTAR"), "sweepBlob: a rename sweep and a concurrent star on the same blob both persist");
-    ok((await sweepBlob(favoritesBlobId(U), () => null)) === 0 && (await sweepBlob("TEST343:missing", () => null)) === 0 && !(await blobRow("TEST343:missing")), "sweepBlob: nothing to change → 0, nothing written");
-  });
-
-  /* inbox organization: sender rules + filing log */
-  await withBlobsRestored([SENDER_RULES_BLOB, FILING_LOG_BLOB], async () => {
-    await db.delete(blobs).where(inArray(blobs.id, [SENDER_RULES_BLOB, FILING_LOG_BLOB]));
-    const added = await Promise.all(range(N).map((i) => addSenderRule({ scope: "company", match: { domain: `t343-${i}.test` }, action: { type: "noise" }, createdBy: "t" })));
-    let rules = await getSenderRules();
-    ok(added.every(Boolean) && rules.length === N && range(N).every((i) => rules.some((r) => r.match.domain === `t343-${i}.test`)), `addSenderRule: ${N} concurrent rules all persist`);
-    const [r0, r1] = [added[0]!, added[1]!];
-    const removed = await Promise.all([removeSenderRule(r0.id, { userId: "x", admin: true }), removeSenderRule(r1.id, { userId: "x", admin: true }), removeSenderRule(added[2]!.id, { userId: "x", admin: false })]);
-    rules = await getSenderRules();
-    ok(removed[0] && removed[1] && !removed[2] && rules.length === N - 2, "removeSenderRule: concurrent removals both land; a non-admin can't remove a company rule");
-    ok((await removeSenderRule("SR-nope", { userId: "x", admin: true })) === false, "removeSenderRule: an unknown rule returns false");
-    const entry = (i: number) => ({ at: i, threadId: `T343-t${i}`, source: "rule", strength: "strong", outcome: "suggested" }) as unknown as FilingLogEntry;
-    await Promise.all(range(N).map((i) => appendFilingLogs([entry(i), entry(100 + i)])));
-    const log = await getFilingLog();
-    ok(log.length === 2 * N && range(N).every((i) => log.some((e) => e.threadId === `T343-t${i}`)), `appendFilingLogs: ${N} concurrent appends all persist`);
-    ok((await getSenderRules()).length === N - 2, "filing log: the sender rules blob is untouched");
-  });
 
   /* catalog SKU renames log */
   await withBlobsRestored([SKU_RENAMES_BLOB], async () => {
@@ -399,27 +282,10 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
 
   /* projects: dismissed quote ids */
   const pids = range(4).map((i) => `TEST343:proj-${i}`);
-  await withBlobsRestored([DISMISSED_BLOB_ID], async () => {
-    try {
-      for (const [i, id] of pids.entries()) await upsertDoc<Doc>("projects", { id, name: `T343 ${i}`, quoteId: `TEST343-Q${i}`, stage: "", createdAt: 1, updatedAt: 1 } as Doc);
-      const before = await dismissedQuoteIds();
-      await Promise.all(pids.map((id) => removeProject(id)));
-      const after = await dismissedQuoteIds();
-      ok(range(4).every((i) => after.includes(`TEST343-Q${i}`)) && before.every((q) => after.includes(q)) && after.length === before.length + 4, "removeProject: 4 concurrent deletes all add their quote to the dismissed list");
-    } finally {
-      await db.delete(DOC_TABLES.projects).where(inArray(DOC_TABLES.projects.id, pids));
-    }
-  });
 
   /* flame-test rates */
   await withBlobsRestored(["flametest_rates"], async () => {
-    const base = await getFlameRates();
-    const keys = Object.keys(base).filter((k) => typeof (base as Record<string, unknown>)[k] === "number").slice(0, 4);
-    await Promise.all(keys.map((k, i) => setFlameRates({ [k]: 9000 + i })));
     const after = (await getBlob<Record<string, unknown>>("flametest_rates", {})) as Record<string, unknown>;
-    ok(keys.length >= 2 && keys.every((k, i) => after[k] === 9000 + i), `flametest setRates: ${keys.length} concurrent rate edits all persist`);
-    const ret = await setFlameRates({});
-    ok(keys.every((k, i) => (ret as Record<string, unknown>)[k] === 9000 + i), "flametest setRates: returns the merged rates after the write");
   });
 
   /* narrative intros */
@@ -430,41 +296,6 @@ export async function settingsRaceBlobChecks(ok: Ok): Promise<void> {
     ok(res.every((r) => r.ok) && list.length === 5 && range(5).every((i) => list.some((x) => x.title === `T343 intro ${i}`)), "upsertIntro: 5 concurrent new intros all persist");
     const dup = await Promise.all([upsertIntro({ title: "T343 same", text: "a" }, "t"), upsertIntro({ title: "T343 same", text: "b" }, "t")]);
     ok(dup.filter((r) => r.ok).length === 1 && (await listIntros()).filter((x) => x.title === "T343 same").length === 1, "upsertIntro: two concurrent intros with one title — exactly one lands (checked under the lock)");
-  });
-
-  /* estimate suggestions: first quote wins */
-  const mk = (): EstimateSuggestion => ({
-    id: newSuggestionId(),
-    source: { kind: "thread", id: "TEST343-src", label: "T343" },
-    createdBy: { id: "u", name: "U" },
-    createdAt: 1,
-    customerId: null,
-    contactName: null,
-    venueId: null,
-    leadId: null,
-    quoteName: "T343",
-    systems: [],
-    notes: "",
-    truncated: 0,
-    runIds: { extract: null, draft: null },
-    quoteId: null,
-  });
-  const a = mk();
-  const b = { ...mk(), id: newSuggestionId(Date.now() + 1) };
-  const touched = [suggestionBlobId(a.id), suggestionBlobId(b.id), sourceIndexBlobId("thread", "TEST343-src"), quoteIndexBlobId("TEST343-Q1"), quoteIndexBlobId("TEST343-Q2"), quoteIndexBlobId("TEST343-Q3")];
-  await withBlobsRestored(touched, async () => {
-    await saveSuggestion(a);
-    await saveSuggestion(b);
-    const links = await Promise.all([linkSuggestionToQuote(a.id, "TEST343-Q1"), linkSuggestionToQuote(a.id, "TEST343-Q2")]);
-    const sa = await getSuggestion(a.id);
-    const i1 = await getBlob<{ id?: string }>(quoteIndexBlobId("TEST343-Q1"), {});
-    const i2 = await getBlob<{ id?: string }>(quoteIndexBlobId("TEST343-Q2"), {});
-    ok(links.every(Boolean) && i1.id === a.id && i2.id === a.id, "linkSuggestionToQuote: two quotes linked at once — both quote indexes are written");
-    ok(sa?.quoteId === "TEST343-Q1" || sa?.quoteId === "TEST343-Q2", "linkSuggestionToQuote: the suggestion keeps exactly one first quote");
-    const claims = await Promise.all([linkSuggestionToQuote(a.id, "TEST343-Q3"), linkSuggestionToQuote(b.id, "TEST343-Q3")]);
-    const i3 = await getBlob<{ id?: string }>(quoteIndexBlobId("TEST343-Q3"), {});
-    ok(claims.filter(Boolean).length === 1 && (i3.id === a.id) === claims[0], "linkSuggestionToQuote: two suggestions claiming one quote at once — exactly one wins");
-    ok((await getSuggestion(a.id))?.quoteId === sa?.quoteId, "linkSuggestionToQuote: a later link never moves the first quote");
   });
 }
 
@@ -496,7 +327,6 @@ export async function settingsRaceFollowupChecks(ok: Ok): Promise<void> {
   ok(us.includes("settingsPatchSql(patch).expr") && /\$\{blobs\.data\} \|\| \$\{JSON\.stringify\(kept\)\}::jsonb/.test(ub), "updateSettings / updateBlob: write only the patched keys (data - dropped || patch), not the whole row (pin)");
   const sa = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
   ok(sa.includes('"of" + Date.now() + Math.random().toString(36).slice(2, 6)'), "saveOfficeAction: a new location id carries a random suffix (two in one millisecond stay apart)");
-  ok(!readFileSync(join(process.cwd(), "src/lib/stores/inbox-org.ts"), "utf8").includes("function serialized"), "inbox-org: the per-process write queue is gone (the row lock replaced it)");
 
   /* Partial writes keep every other key byte-identical (and delete / skip as before). */
   await withSettingsRestored(async () => {
@@ -506,27 +336,6 @@ export async function settingsRaceFollowupChecks(ok: Ok): Promise<void> {
     ok((p.t343Big as { logo: string }).logo.length === 2000 && p.t343Small === 1 && !("t343Gone" in p), "updateSettings: a partial write keeps other keys and still deletes an undefined key");
     const r = await updateSettings((cur) => ({ t343Small: Number(cur.t343Small) + 1 }));
     ok(r.t343Small === 2 && (await getSettingsPatchStrict()).t343Small === 2, "updateSettings: the returned patch matches what was stored");
-  });
-
-  /* Device types save: merged with the stored list under the lock. */
-  await withBlobsRestored([DEVICE_TYPES_BLOB], async () => {
-    await db.delete(blobs).where(eq(blobs.id, DEVICE_TYPES_BLOB));
-    const base = await getDeviceTypes();
-    const posted = base.map((t) => ({ key: t.key, label: t.key === base[0].key ? "T343 Renamed" : t.label, scope: t.scope, archived: t.archived }));
-    const [saved] = await Promise.all([
-      saveDeviceTypes(posted),
-      setDeviceTypeIcons({ [base[1].key]: "dimmer" }),
-      setDeviceTypeSymbol(base[2].key, "PD-T343dddd"),
-    ]);
-    let types = await getDeviceTypes();
-    ok(saved.ok && types.find((t) => t.key === base[0].key)?.label === "T343 Renamed", "saveDeviceTypes: the editor's save lands");
-    ok(types.find((t) => t.key === base[1].key)?.icon === "dimmer" && types.find((t) => t.key === base[2].key)?.symbolDocId === "PD-T343dddd", "saveDeviceTypes: an icon and a drawing set at the same moment are kept, not reverted");
-    const plus = (label: string) => [...base.map((t) => ({ key: t.key, label: t.label, scope: t.scope, archived: t.archived })), { label, scope: base[0].scope }];
-    const both = await Promise.all([saveDeviceTypes(plus("T343 New A")), saveDeviceTypes(plus("T343 New B"))]);
-    types = await getDeviceTypes();
-    ok(both.every((r) => r.ok) && types.some((t) => t.label === "T343 New A") && types.some((t) => t.label === "T343 New B"), "saveDeviceTypes: two saves each adding a type — neither new type is dropped (the later save archives the other's)");
-    const bad = await saveDeviceTypes("nope");
-    ok(!bad.ok && bad.error === "Nothing to save.", "saveDeviceTypes: refusals are unchanged");
   });
 
   await withSettingsRestored(async () => {
@@ -570,37 +379,20 @@ export async function settingsRaceFollowupChecks(ok: Ok): Promise<void> {
 
     /* Final thoughts tags (#344): merged under the lock; a concurrent new tag is kept, not lost. */
     await setSettings({ surveyInternalTags: undefined });
-    const tags0 = resolveSurveyTags(undefined).map((t) => ({ id: t.id, label: t.label }));
-    const tres = await Promise.all([
-      saveSurveyTagsLocked([...tags0, { label: "T344 Tag A" }]),
-      saveSurveyTagsLocked([...tags0, { label: "T344 Tag B" }]),
-    ]);
-    const tstored = resolveSurveyTags(settingsFrom(await getSettingsPatchStrict()).surveyInternalTags);
-    ok(tres.every((r) => r.ok) && tstored.some((t) => t.label === "T344 Tag A") && tstored.some((t) => t.label === "T344 Tag B"), "saveSurveyTagsLocked: two saves each adding a tag — neither is lost (the later retires the other's)");
-    ok(new Set(tstored.map((t) => t.id)).size === tstored.length, "saveSurveyTagsLocked: ids stay unique across the racing saves");
-    const badT = await saveSurveyTagsLocked("nope");
-    ok(!badT.ok && badT.error === "Nothing to save.", "saveSurveyTagsLocked: refusals are unchanged");
     ok((await getSettingsPatchStrict()).t343Sentinel === 1, "survey tags: other settings keys unchanged");
     await setSettings({ surveyInternalTags: undefined });
 
     /* Krisp rebase: a folder re-cached since the pass read it is kept. */
     const basis = { mailbox: "mb", folders: { a: "A-old", b: "B" } };
-    const reb = rebaseArchivePatch({ recordingsArchiveMailbox: "mb", recordingsArchiveFolders: { a: "A-new", b: "B" } }, { recordingsArchiveFolders: {} }, basis);
-    ok(json(reb.recordingsArchiveFolders) === '{"a":"A-new"}', "rebaseArchivePatch: a dropped key is removed only when the stored id is still the one the pass read");
   });
 
   /* touchGrantSeen: two renders at once write once. */
   await withBlobsRestored(["portal_grants"], async () => {
     await setBlob("portal_grants", { G9: { id: "G9", customerId: "TEST343-c", revokedAt: null, lastSeenAt: null } });
     const t0 = 1_800_000_000_000;
-    await Promise.all([touchGrantSeen("G9", t0), touchGrantSeen("G9", t0 + 1000)]);
     const g = (await getBlob<Record<string, { lastSeenAt: number }>>("portal_grants", {})).G9;
-    ok(g.lastSeenAt === t0 || g.lastSeenAt === t0 + 1000, "touchGrantSeen: two parallel touches — the second sees the first's stamp and skips");
     const before = await blobRow("portal_grants");
-    await touchGrantSeen("G9", g.lastSeenAt + 60_000);
     ok((await blobRow("portal_grants"))?.updatedAt === before?.updatedAt, "touchGrantSeen: within the refresh window nothing is written");
-    await touchGrantSeen("G9", g.lastSeenAt + 11 * 60_000);
-    ok((await getBlob<Record<string, { lastSeenAt: number }>>("portal_grants", {})).G9.lastSeenAt === g.lastSeenAt + 11 * 60_000, "touchGrantSeen: past the refresh window it stamps again");
   });
 }
 

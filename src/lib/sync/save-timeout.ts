@@ -2,9 +2,6 @@
    save for minutes: past the limit `saveThroughOutbox` treats it like a lost connection and queues the whole doc in
    the outbox. Pure; no DOM at import time. */
 
-/** How long an online save may take before it becomes a queued (outbox) save. */
-export const SAVE_ACTION_TIMEOUT_MS = 15_000;
-
 export class SaveTimeoutError extends Error {
   constructor(ms: number) {
     super(`The server didn't answer within ${Math.round(ms / 1000)} s`);

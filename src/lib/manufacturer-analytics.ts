@@ -16,12 +16,11 @@
 import type { Quote } from "@/lib/stores/quotes";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { decidedAt, wonAt } from "@/lib/dashboard/metrics";
 import { mfrKey } from "@/lib/catalog-books";
-import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/design/grid-virtual-parts";
-import { CUSTOM_ITEM_PREFIX } from "@/lib/design/grid-custom-items";
-import { isLaborSku } from "@/lib/design/wire-labor";
+import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/quote-line-ids";
+import { CUSTOM_ITEM_PREFIX } from "@/lib/quote-line-ids";
+import { isLaborSku } from "@/lib/quote-line-ids";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 
 export type AnalyticsQuote = Pick<Quote, "id" | "status" | "createdAt" | "updatedAt" | "history" | "spec">;
@@ -65,7 +64,7 @@ type GridLine = { sku?: unknown; desc?: unknown; qty?: unknown; price?: unknown;
 
 const num = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) ? n : 0);
 
-/** The quote's catalog-attributable lines: labor, options, the rewards credit,
+/** The quote's catalog-attributable lines: labor, options,
  *  allowances and price-on-request lines are skipped; a fixture line counts
  *  each component; a line with no manufacturer is skipped. */
 export function attributedLines(
@@ -86,7 +85,7 @@ export function attributedLines(
     // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
     if (sec.alternate) continue;
     for (const it of sec.items as SpecItem[]) {
-      if (!it || isBonusItem(it) || it.labor || it.laborOverhead || it.laborTravel || it.option || it.allowance || it.por || isRewardCreditItem(it)) continue;
+      if (!it || isBonusItem(it) || it.labor || it.laborOverhead || it.laborTravel || it.option || it.allowance || it.por) continue;
       const lineQty = num(it.qty);
       if (Array.isArray(it.components) && it.components.length) {
         for (const c of it.components) {

@@ -18,7 +18,6 @@ import { shortDate } from "@/lib/format";
 import { Avatar } from "@/components/ui";
 import EditPersonModal from "../edit-modal";
 import type { SavePersonInput } from "../types";
-import { MeetingsCard } from "@/components/meetings/meetings-card";
 
 export const metadata = { title: "Person — Quartzite-6" };
 
@@ -191,8 +190,6 @@ export default async function PersonDetailPage({
         )}
       </div>
 
-      {/* #323 — Krisp meetings this person is linked to */}
-      <MeetingsCard kind="contact" id={person.id} viewerId={user.id} style={{ marginBottom: 24 }} />
 
       {/* record meta */}
       <div style={card}>

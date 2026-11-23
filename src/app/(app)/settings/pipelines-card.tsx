@@ -3,26 +3,21 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  PROJECT_TAGS,
   QUOTE_TAGS,
-  PROJECT_TAG_META,
-  validateProjectPipeline,
   validateQuotePipeline,
   slugStageId,
   type Pipeline,
   type Pipelines,
-  type ProjectPipeline,
   type QuotePipeline,
   type PipelineStage,
-  type ProjectTag,
   type QuoteTag,
 } from "@/lib/pipelines";
 import { savePipelinesAction, moveStageRecordsAction } from "./actions";
 import { PipelineStageRow } from "./pipeline-stage-row";
 
 /**
- * Settings → Pipelines (Task 7) — the Daylite-stage editor: rename/add/
- * reorder/retag stages on the two project pipelines (Install, Order) and the
+ * Settings → Pipelines (Task 7) — the stage editor: rename/add/
+ * reorder/retag stages on the
  * two quote pipelines (Estimate/Design, BID SPEC), plus the default quote
  * pipeline. One Save covers everything (savePipelinesAction, a full-
  * replacement of both lists + the default id); an in-use stage's remove
@@ -37,11 +32,10 @@ import { PipelineStageRow } from "./pipeline-stage-row";
  */
 
 const QUOTE_TAG_LABEL: Record<QuoteTag, string> = { draft: "Draft", sent: "Sent", won: "Won" };
-const projectTagLabel = (t: ProjectTag) => PROJECT_TAG_META[t].label;
 const quoteTagLabel = (t: QuoteTag) => QUOTE_TAG_LABEL[t];
 
 type UsageMap = Record<string, Record<string, number>>;
-type Kind = "project" | "quote";
+type Kind = "quote";
 type MoverState = { kind: Kind; pipelineId: string; stageId: string; target: string };
 
 const inS: React.CSSProperties = {
@@ -108,8 +102,6 @@ function makeHandlers<T extends string>(setList: React.Dispatch<React.SetStateAc
 export function PipelinesCard({ pipelines, usage }: { pipelines: Pipelines; usage: UsageMap }) {
   const router = useRouter();
 
-  const [savedProject, setSavedProject] = useState<ProjectPipeline[]>(() => clone(pipelines.project) as ProjectPipeline[]);
-  const [project, setProject] = useState<ProjectPipeline[]>(() => clone(pipelines.project) as ProjectPipeline[]);
   const [savedQuote, setSavedQuote] = useState<QuotePipeline[]>(() => clone(pipelines.quote) as QuotePipeline[]);
   const [quote, setQuote] = useState<QuotePipeline[]>(() => clone(pipelines.quote) as QuotePipeline[]);
   const [savedDefaultId, setSavedDefaultId] = useState(pipelines.defaultQuotePipelineId);
@@ -128,17 +120,14 @@ export function PipelinesCard({ pipelines, usage }: { pipelines: Pipelines; usag
     setJustSaved(false);
     setError(null);
   };
-  const projectH = makeHandlers<ProjectTag>(setProject, onEdit);
   const quoteH = makeHandlers<QuoteTag>(setQuote, onEdit);
 
   const dirty =
-    JSON.stringify(project) !== JSON.stringify(savedProject) ||
     JSON.stringify(quote) !== JSON.stringify(savedQuote) ||
     defaultId !== savedDefaultId;
 
   const clientErrors = (): string[] => {
     const errs: string[] = [];
-    for (const p of project) errs.push(...validateProjectPipeline(p).map((e) => `${p.label}: ${e}`));
     for (const p of quote) errs.push(...validateQuotePipeline(p).map((e) => `${p.label}: ${e}`));
     return errs;
   };
@@ -151,12 +140,11 @@ export function PipelinesCard({ pipelines, usage }: { pipelines: Pipelines; usag
       return;
     }
     startTransition(async () => {
-      const res = await savePipelinesAction({ project, quote, defaultQuotePipelineId: defaultId });
+      const res = await savePipelinesAction({ quote, defaultQuotePipelineId: defaultId });
       if (!res.ok) {
         setError(res.errors.join(" "));
         return;
       }
-      setSavedProject(project);
       setSavedQuote(quote);
       setSavedDefaultId(defaultId);
       setJustSaved(true);
@@ -207,8 +195,8 @@ export function PipelinesCard({ pipelines, usage }: { pipelines: Pipelines; usag
             </span>
           </div>
           <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4, lineHeight: 1.45 }}>
-            The stages projects, orders, and quotes move through. Behaviour follows each stage&apos;s status (Backlog/
-            Scheduled/On site/Closeout/Done, or Draft/Sent/Won) — rename, add, reorder or retag freely.
+            The stages quotes move through. Behaviour follows each stage&apos;s status (Draft/Sent/Won) — rename,
+            add, reorder or retag freely.
           </div>
         </div>
         <button
@@ -232,37 +220,6 @@ export function PipelinesCard({ pipelines, usage }: { pipelines: Pipelines; usag
 
       <div style={{ padding: "14px 18px 18px" }}>
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", color: "#8c919c", marginBottom: 10 }}>
-          Projects
-        </div>
-        {project.map((pl) => (
-          <PipelineBlock
-            key={pl.id}
-            kind="project"
-            pl={pl}
-            tags={PROJECT_TAGS}
-            tagLabel={projectTagLabel}
-            isProject
-            usage={usageState[pl.id] || {}}
-            addLabel={addLabel[pl.id] || ""}
-            onAddLabel={(v) => setAddLabel((m) => ({ ...m, [pl.id]: v }))}
-            onPatch={(stageId, patch) => projectH.patch(pl.id, stageId, patch)}
-            onMove={(i, dir) => projectH.move(pl.id, i, dir)}
-            onRemove={(stageId) => projectH.remove(pl.id, stageId)}
-            onAdd={() => projectH.add(pl.id, (addLabel[pl.id] || "").trim() || "New stage", "backlog")}
-            mover={mover}
-            moverError={moverError}
-            moverPending={moverPending}
-            onRequestMove={(stageId) => {
-              const other = pl.stages.find((s) => s.id !== stageId);
-              if (other) openMover("project", pl.id, stageId, other.id);
-            }}
-            onMoverTargetChange={(target) => setMover((m) => (m ? { ...m, target } : m))}
-            onMoverConfirm={onMove}
-            onMoverCancel={closeMover}
-          />
-        ))}
-
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", color: "#8c919c", margin: "16px 0 10px" }}>
           Quotes
         </div>
         {quote.map((pl) => (

@@ -1,9 +1,12 @@
 /**
  * Curtain cut sheets (#292) — the finish + mount vocabulary (spec §1.1).
- * Pure and client-safe: the Estimator curtain modal, the Grid drop dialog,
+ * Pure and client-safe: the Estimator curtain modal,
  * the cut-sheet collector and the harness all read it.
  */
-import type { GridCurtainType } from "@/lib/design/grid-bom";
+
+/** The curtain types a Grid-made quote's CURTAIN lines name (the Grid is gone; old quotes keep the lines). */
+export const GRID_CURTAIN_TYPES = ["Border", "Draw", "Full", "Leg"] as const;
+export type GridCurtainType = (typeof GRID_CURTAIN_TYPES)[number];
 
 export type CurtainTopFinish = "grommets" | "pipe-pocket" | "hook-loop";
 export type CurtainBottomFinish = "chain" | "pipe-pocket" | "hem";

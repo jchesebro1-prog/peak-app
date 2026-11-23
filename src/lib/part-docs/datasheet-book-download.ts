@@ -1,30 +1,23 @@
 import { after } from "next/server";
 import { blobEnabled, getBlobStream, putBlobAt } from "@/lib/blob";
-import { buildClientPackageManifest, packageNeedsFixtures } from "@/lib/client-package";
 import { CutSheetDeadlineError } from "@/lib/curtain-cut-sheets/deadline";
-import { ensureOptions, resolveOptionId } from "@/lib/design/grid-options";
 import { attachmentDisposition } from "@/lib/document-files";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { bookRows, revisionPackageDocs, specPackageDocs } from "@/lib/estimate-output/package-docs-server";
 import { PACKAGE_ZIP_DOC_MAX_BYTES, PACKAGE_ZIP_TOTAL_MAX_BYTES, packageZipCacheDir, packageZipCacheOn } from "@/lib/estimate-output/package-zip";
 import type { Letterhead } from "@/lib/letterhead";
 import { resolvePeakHeader } from "@/lib/letterhead";
-import { loadDocumentLetterhead, loadEstimateBookLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-server";
+import { loadEstimateBookLetterhead, loadPeakHeaderDefault } from "@/lib/letterhead-server";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
-import { loadPartDocsState } from "@/lib/part-docs/load";
-import { resolvePackageDocs } from "@/lib/part-docs/package";
 import { readCapped } from "@/lib/rack/submittal-server";
 import type { SharedPackage } from "@/lib/quote-share/links";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
-import { list as listCatalog } from "@/lib/stores/catalog";
-import { listFixtures } from "@/lib/stores/fixtures";
-import { getProject } from "@/lib/stores/grid-projects";
 import { get as getQuote, type Quote, type QuoteRevision } from "@/lib/stores/quotes";
 import { zipStream } from "@/lib/zip";
 import { BOOK_REASON, bookPartOf, planDatasheetBook, withCanonicalMfrs, type BookPart, type BookPlan, type CanonicalMfr } from "./datasheet-book";
 import { buildDatasheetBook, loadCanonicalMfr, type BookDoc, type BuiltBook } from "./datasheet-book-server";
 import { BOOK_COVER_COPY, bookCachePath, bookDownloadName, type BookCover } from "./datasheet-book-cover";
-import { bookCoverFingerprint, gridBookCover, quoteBookCover } from "./datasheet-book-cover-server";
+import { bookCoverFingerprint, quoteBookCover } from "./datasheet-book-cover-server";
 
 /**
  * Grid notes #8 — "Download all datasheets": the #329 datasheet book (the
@@ -197,42 +190,6 @@ export async function quoteBookPdf(quoteId: string, opts: { startedAt: number; d
   });
 }
 
-/**
- * Staff: one Grid design option's book (Outputs) — the Grid client package's
- * own documents, with the Outputs menu's "Include Peak header" choice
- * (`peakHeader`; undefined = the company default), as its package build.
- */
-export async function gridBookPdf(projectId: string, optionId: string | null, by: string, opts: { startedAt: number; peakHeader?: boolean; deps?: ReadDeps }): Promise<BookDownload> {
-  const { deps, startedAt } = opts;
-  const project = await getProject(projectId);
-  if (!project) return { ok: false, status: 404, error: "Design not found." };
-  const optId = resolveOptionId(project, optionId);
-  const catalog = await listCatalog();
-  const { index } = await loadPartDocsState(catalog);
-  const fixtures = packageNeedsFixtures(project.placements || []) ? new Map((await listFixtures()).map((f) => [f.id, f] as const)) : null;
-  const manifest = buildClientPackageManifest(project, catalog, optId, index, (id) => fixtures?.get(id));
-  const partBySku = new Map(catalog.map((p) => [p.sku, p] as const));
-  const coverage = resolvePackageDocs(index, manifest.items.filter((i) => !!i.catalogId).map((i) => i.sku));
-  const quoteId = ensureOptions(project).options.find((o) => o.id === optId)?.quoteId ?? null;
-  const [cover, letterhead, canonicalMfr] = await Promise.all([gridBookCover(project, { quoteId, by }), loadDocumentLetterhead(opts.peakHeader), loadCanonicalMfr(undefined, "[datasheets]")]);
-  const catalogIds = new Set(manifest.items.filter((i) => !!i.catalogId).map((i) => i.sku));
-  return buildBookDownload({
-    startedAt,
-    inputs: loadBookInputs({
-      rows: manifest.items.map((i) => ({ sku: i.sku, desc: i.description })),
-      partOf: (sku) => (catalogIds.has(sku) ? partBySku.get(sku) : null),
-      docsOf: (sku) => coverage.bySku.get(sku),
-      canonicalMfr,
-    }),
-    index,
-    cover,
-    letterhead,
-    fileName: bookDownloadName(project.name || project.id, project.id),
-    logTag: `[datasheets] grid ${project.id}`,
-    deps,
-  });
-}
-
 /** The customer's package page: a SENT revision's book, with its cover + letterhead already resolved (the cache key). */
 export async function revisionBookPdf(q: Quote, rev: QuoteRevision, cover: BookCover, letterhead: Letterhead | null, opts: { startedAt: number; deps?: ReadDeps }): Promise<BookDownload> {
   const { deps, startedAt } = opts;
@@ -251,14 +208,6 @@ export async function revisionBookPdf(q: Quote, rev: QuoteRevision, cover: BookC
     logTag: `[datasheets] ${q.id} rev ${rev.rev}`,
     deps,
   });
-}
-
-/** `?header=` on the Grid download: "1" on, "0" off, absent = the company default; anything else is "bad" (400). */
-export function parsePeakHeaderParam(v: string | null): boolean | undefined | "bad" {
-  if (v === null) return undefined;
-  if (v === "1") return true;
-  if (v === "0") return false;
-  return "bad";
 }
 
 const PDF_HEADERS = (fileName: string) => ({

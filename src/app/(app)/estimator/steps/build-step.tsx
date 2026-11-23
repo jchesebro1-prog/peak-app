@@ -4,10 +4,8 @@ import { Fragment, useMemo, useRef, useState, type CSSProperties, type DragEvent
 import { withDiscipline } from "@/lib/estimate-output/fields";
 import { GROUPS_MAX } from "@/lib/estimate-groups/groups";
 import { canResolve, commentsBySection, numberComments, type NumberedComment } from "@/lib/estimate-review/comments";
-import { pointsLabel } from "@/lib/rewards/points";
 import { SIDE_TOGGLE } from "../estimator-styles";
 import type { EstimatorState } from "../use-estimator-state";
-import { RewardCreditPanel } from "../reward-credit-panel";
 import { linesForSku, ProjectDiscountsCard } from "../project-discounts-card";
 import { fmt, short, systemSellTotal } from "../pricing";
 import { vendorAttachmentLoad } from "../types";
@@ -17,7 +15,6 @@ import MoveLinesBar from "../move-lines-bar";
 import { isMovableLine, lineRefKey, parseLineRefKey, type LineRef } from "@/lib/estimate-line-move/move";
 import { CommentPin, useCommentsFocusRefresh, useResolveComment } from "../comment-pins";
 import SystemLibraryModal from "../system-library-modal";
-import AiScopeModal from "../ai-scope-modal";
 import CurtainModal from "../curtain-modal";
 import FixtureModal from "../fixture-modal";
 import AddSystemModal from "../add-system-modal";
@@ -26,25 +23,17 @@ import TrackModal from "../track-modal";
 import PipeModal from "../pipe-modal";
 import LinesetModal from "../lineset-modal";
 import VendorQuoteModal from "../vendor-quote-modal";
-import { ReadPdfButton, VendorPdfPanel } from "../vendor-pdf-panel";
-import { vendorPdfLineHints } from "@/lib/vendor-pdf/fill";
-import { isPdfAttachment } from "@/lib/vendor-quotes/rules";
-import { PortalPanel } from "../portal-panel";
-import { AssistDraftBanner } from "../assist-draft-banner";
 import { RepriceBanner } from "../reprice-banner";
-import { SuggestedBomPanel } from "../suggested-bom-panel";
 import { bonusNotFigured, bonusRulesApply, isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
-import type { SuggestionParts } from "@/lib/assist/features/suggestion-panel";
 import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /**
- * #305 — Build: the systems sidebar (markup, cost breakdown, Rewards credit),
+ * #305 — Build: the systems sidebar (markup, cost breakdown),
  * the system cards and every configurator modal. A card's narrative snippet
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
 const NO_COMMENTS: NumberedComment[] = [];
-const NO_PARTS: SuggestionParts = {};
 
 export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresentation }: {
   s: EstimatorState;
@@ -64,7 +53,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     markBuilt,
     setGroupAlternateAction,
     setSystemGroup,
-    addAiLine,
     addCurtain,
     addCustomPart,
     addFixture,
@@ -93,28 +81,15 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     linesetSec,
     linesetTypes,
     addVendorLine,
-    aiAdded,
-    aiBusy,
-    aiErr,
-    aiLines,
-    aiOpen,
-    aiScope,
-    aiScopeInserted,
-    aiSource,
-    aiTargetSection,
-    appliedCredit,
     applyAutoMiles,
-    applyCredit,
     applyTravelTrip,
     blobUploads,
-    canApplyCredit,
     cardRefs,
     closeInput,
     confirmDiscardInput,
     cols,
     commitVendorQuote,
     copySystem,
-    creditInfo,
     curtainDraft,
     curtainEdit,
     curtainFor,
@@ -138,7 +113,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     importMaterials,
     inc,
     initial,
-    insertAiScope,
     isExpanded,
     isInternal,
     isOpenFor,
@@ -163,12 +137,9 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     openTrackEdit,
     openVendorEdit,
     placeLibrarySystem,
-    portalStatusError,
-    assistDraft,
     repricedOnRevise,
     projectDiscounts,
     rate,
-    removeCredit,
     removeProjectDiscount,
     setProjectDiscount,
     removeItem,
@@ -178,13 +149,11 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     resetAutoHrs,
     resetSystemSell,
     roundSystemPrice,
-    runAiDraft,
     savingCustom,
     scrollRef,
     searchQuotes,
     sections,
     setActiveId,
-    setAiOpen,
     setAutoHrs,
     setCurtainField,
     setCurtainTrack,
@@ -233,10 +202,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     vendorEditingRec,
     vendorFor,
     vendorFormMarkup,
-    vendorHandoff,
-    vendorPdf,
-    vendorPdfEnabled,
-    readVendorPdf,
     retargetVendor,
     setVendorCompany,
     vendorPreviews,
@@ -259,7 +224,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
   const resolveComment = useResolveComment(s);
   useCommentsFocusRefresh(s);
   /* #348 slice 5: Read the PDF — only for a user the server gate passed, and only on a PDF attachment. */
-  const readPdf = vendorPdfEnabled && !!vendorDraft.attachment && isPdfAttachment(vendorDraft.attachment);
 
   /* #357: ticked lines and a row's ⇄ feed the Move bar. Build unmounts on a step
      change (estimator-client renders one step at a time), which clears both; a line
@@ -439,12 +403,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                   <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.alt ?? 0)}</span>
                 </div>
               )}
-              {(t.credit || 0) > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#1f8a5b", fontWeight: 600 }}>
-                  <span>Rewards credit · {pointsLabel(t.credit || 0)}</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(t.credit || 0)}</span>
-                </div>
-              )}
             </div>
 
             {/* #366: project discounts — internal (staff view only); hidden when nothing on the estimate could carry one. */}
@@ -452,15 +410,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               <ProjectDiscountsCard sections={sections} discounts={projectDiscounts} onSet={setProjectDiscount} onRemove={removeProjectDiscount} />
             )}
 
-            <RewardCreditPanel
-              info={creditInfo}
-              applied={appliedCredit}
-              preCreditTotal={t.grand + (t.credit || 0)}
-              editable={canApplyCredit && (status === "draft" || status === "sent")}
-              hasSystems={sections.length > 0}
-              onApply={applyCredit}
-              onRemove={removeCredit}
-            />
           </div>
         ) : (
           <div
@@ -512,7 +461,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
             position: "relative",
           }}
         >
-          <AssistDraftBanner view={assistDraft} />
           {/* #368: a Revise re-priced lines to today's catalog — shown while the estimate is that revise's draft. */}
           <RepriceBanner view={repricedOnRevise} quoteId={loadedId} show={status === "draft"} />
           {/* Box goods sale (spec 2026-10-21): turning it on with labor is allowed — Save stays refused until it's gone. */}
@@ -525,7 +473,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
               {boxSaleLaborBanner(s.boxSaleLabor)}
             </div>
           )}
-          {initial.portal && <PortalPanel data={initial.portal} statusError={portalStatusError} />}
           {pinned.whole.length > 0 && (
             <div style={{ margin: "0 0 12px" }}>
               <CommentPin
@@ -786,20 +733,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           )}
         </div>
 
-        {/* Estimate suggestion (spec 2026-10-13 §2): the Suggested BOM column, beside the system cards. */}
-        {s.suggestion && (
-          <SuggestedBomPanel
-            view={s.suggestion}
-            parts={s.suggestionParts ?? NO_PARTS}
-            added={s.suggestionAdded}
-            sections={sections}
-            open={s.suggestOpen}
-            onToggle={s.toggleSuggestOpen}
-            targetFor={s.suggestionTargetFor}
-            onAddSystem={s.addSuggestedSystem}
-            onAddLine={s.addSuggestedLine}
-          />
-        )}
       </div>
 
       {/* configurator modals */}
@@ -946,40 +879,10 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
           onAdd={() => commitVendorQuote(vendorFor)}
           onClose={closeInput}
           confirmClose={confirmDiscardInput}
-          /* #348 slice 4: the vendor company picker (typed name as the fallback) and the email hand-off. */
+          /* #348 slice 4: the vendor company picker (typed name as the fallback). */
           onPickVendor={(c) => setVendorCompany(c)}
           onTypedVendor={(name) => setVendorField("vendor", name)}
           onUnlinkVendor={() => setVendorCompany(null)}
-          handoff={vendorHandoff}
-          systems={sections.map((sec) => ({ id: sec.id, name: sec.name }))}
-          systemId={vendorFor}
-          onPickSystem={retargetVendor}
-          /* #348 slice 5: Read the PDF (pilot users with a Claude key; PDFs only) — the file-row button, the
-             results panel, the per-line hints, and Add waiting while it reads. */
-          fileActions={readPdf ? <ReadPdfButton busy={vendorPdf.busy} onRead={() => void readVendorPdf(false)} /> : undefined}
-          readPanel={readPdf ? <VendorPdfPanel draft={vendorDraft} state={vendorPdf} onTryHarder={() => void readVendorPdf(true)} /> : undefined}
-          lineHints={readPdf ? vendorPdfLineHints(vendorDraft) : undefined}
-          reading={readPdf && !!vendorPdf.busy}
-        />
-      )}
-      {aiSource && aiOpen && (
-        <AiScopeModal
-          sourceLabel={
-            (aiSource.kind === "survey" ? "field survey" : "inspection") +
-            " · " +
-            aiSource.label
-          }
-          targetSection={aiTargetSection()?.name || ""}
-          busy={aiBusy}
-          error={aiErr}
-          scope={aiScope}
-          lines={aiLines}
-          scopeInserted={aiScopeInserted}
-          addedLines={aiAdded}
-          onInsertScope={insertAiScope}
-          onAddLine={addAiLine}
-          onRetry={runAiDraft}
-          onClose={() => setAiOpen(false)}
         />
       )}
     </div>

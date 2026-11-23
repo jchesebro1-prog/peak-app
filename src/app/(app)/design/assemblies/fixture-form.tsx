@@ -16,7 +16,6 @@ import {
   type HeadLine,
   type ResolvedFixture,
   type SystemScope,
-  PORTAL_CATEGORY_MAX,
 } from "@/lib/fixture-assemblies";
 import { dateYear } from "@/lib/format";
 import { emptyRackLayout, newPlacementId } from "@/lib/rack/layout";
@@ -41,7 +40,7 @@ export type Draft = {
   kind: FixtureKind;
   label: string;
   description: string;
-  /** #289 — fixture kind only; blank = "Other packages" in the portal. */
+  /** A stored field of the removed customer portal (#289). No control edits it; it rides the draft so a save keeps the stored value. */
   portalCategory: string;
   scope: SystemScope | "";
   lightEngineSku: string;
@@ -266,7 +265,7 @@ export const NO_RACK_DEFAULTS: RackDefaults = {};
 const RACK_SIZES = Array.from({ length: RACK_RU_MAX - RACK_RU_MIN + 1 }, (_, k) => RACK_RU_MIN + k);
 const RACK_HELP = "Lay out devices in the rack on the right. Rack-level parts (frame, rails, PDUs, casters, fans, cable management, labor) go in the parts list — they take no RU. Labor prices with the rack but stays out of its weight, power and submittal.";
 
-export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel, portalCategories = [], rackDefaults = NO_RACK_DEFAULTS, onSaveRackDefaults }: {
+export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel, rackDefaults = NO_RACK_DEFAULTS, onSaveRackDefaults }: {
   draft: Draft;
   onChange: (next: Draft) => void;
   bySku: ReadonlyMap<string, PartHit>;
@@ -279,8 +278,6 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
   error: string | null;
   onSave: () => void;
   onCancel: () => void;
-  /** #289 — the portal categories already used across fixtures (sorted, unique) — the Portal category datalist. */
-  portalCategories?: string[];
   /** #296 (D579) — the rack tray's default blank / vent SKUs and how to change them. */
   rackDefaults?: RackDefaults;
   onSaveRackDefaults?: (d: RackDefaults) => Promise<{ ok: true; value: RackDefaults } | { ok: false; error: string }>;
@@ -329,7 +326,7 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
             {isSystem
               ? "A bundle of catalog parts under one scope — a mixer, DSP & amps; a video switcher; a distro system."
               : isHardware
-                ? "A bundle of catalog hardware — a chain wrap, a batten or beginning termination. It has no scope of its own: on the plan it follows the Equipment map row it is mapped on (Rigging by default)."
+                ? "A bundle of catalog hardware — a chain wrap, a batten or beginning termination. It has no scope of its own."
                 : isRack
                   ? RACK_HELP
                   : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}
@@ -346,21 +343,6 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
         <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : isHardware ? "e.g. Chain wrap" : isRack ? "e.g. AV head-end rack" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>
         <label style={LABEL}>Description<textarea value={draft.description} onChange={(e) => set({ description: e.target.value })} placeholder="Customer-facing description" rows={2} style={{ ...FIELD, marginTop: 5, resize: "vertical" }} /></label>
-        {!isParts && (
-          <label style={LABEL}>Portal category
-            <input
-              value={draft.portalCategory}
-              onChange={(e) => set({ portalCategory: e.target.value })}
-              list="portal-category-options"
-              maxLength={PORTAL_CATEGORY_MAX}
-              placeholder="e.g. Lighting packages"
-              style={{ ...FIELD, marginTop: 5 }}
-            />
-            <datalist id="portal-category-options">
-              {portalCategories.map((c) => <option key={c} value={c} />)}
-            </datalist>
-          </label>
-        )}
         {(isSystem || isRack) && (
           <label style={LABEL}>Scope
             <select value={draft.scope} required onChange={(e) => set({ scope: e.target.value as SystemScope | "" })} style={{ ...FIELD, marginTop: 5 }}>

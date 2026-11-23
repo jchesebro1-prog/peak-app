@@ -1,6 +1,6 @@
 /* #348 slice 2a — the pure bid rules. Browser-safe: client components read labels and status text from here.
    The stores (src/lib/stores/bids.ts, parties.ts, quotes.ts) are the only writers and call these. */
-import { chicagoShortDate, chicagoTime, dayDiff, dayKey } from "@/lib/triage/clock";
+import { chicagoShortDate, chicagoTime, dayDiff, dayKey } from "@/lib/chicago-day";
 import type { BidderState } from "./rules";
 
 export const BID_RESULTS = ["pending", "awarded", "lost", "withdrew", "no_bid"] as const;
@@ -73,7 +73,7 @@ export function addendumMovesToDraft(status: string, added: ReadonlyArray<number
 /** The note the Bid chip shows after a save that moved the estimate back to Draft. */
 export function addendumDraftNote(nos: ReadonlyArray<number>): string {
   const which = nos.length === 1 ? `Addendum ${nos[0]}` : `Addenda ${nos.join(", ")}`;
-  return `${which} added — the estimate is back in Draft. Send revision to all bidders when it's ready. The customer's and bidders' links show it as being revised until then.`;
+  return `${which} added — the estimate is back in Draft. Mark it sent again when it's ready, then mark each bidder's new revision submitted. The customer's and bidders' links show it as being revised until then.`;
 }
 
 export function sanitizeBidSiteUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {

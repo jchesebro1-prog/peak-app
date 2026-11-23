@@ -3,7 +3,6 @@ import type { KeyProduct, SpecItem, SpecSection } from "@/app/(app)/estimator/ty
 import { latestSentRevision } from "@/lib/quote-pdf/state";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { withoutGroupMeta } from "@/lib/estimate-groups/groups";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { OLD_VENDOR_PRICE_NOTE } from "./old-vendor-line";
 import { applyAutoFreight } from "@/app/(app)/estimator/freight-default";
@@ -120,9 +119,9 @@ function sectionsOf(spec: unknown): SpecSection[] {
   );
 }
 
-/** A system's lines without the Rewards credit (and without junk rows). */
+/** A system's lines without bonus lines (and without junk rows). */
 function linesOf(sec: SpecSection): SpecItem[] {
-  return sec.items.filter((it): it is SpecItem => !!it && typeof it === "object" && !isRewardCreditItem(it) && !isBonusItem(it));
+  return sec.items.filter((it): it is SpecItem => !!it && typeof it === "object" && !isBonusItem(it));
 }
 
 const distinct = (xs: string[]): string[] => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
@@ -222,8 +221,8 @@ export function parseLibraryKey(key: string): { quoteId: string; rev: number | n
  * The system Load copies, picked by the library rule AS OF NOW (a quote
  * re-sent since indexing loads its newest sent revision). Vendor-quote lines
  * are left out (their records hold job-specific files and terms, and count
- * against the per-estimate attachment budget) and counted; the Rewards
- * credit, blocks on dropped or missing lines, `room`, `clientGoals` and `coverText` (job-specific) go.
+ * against the per-estimate attachment budget) and counted;
+ * blocks on dropped or missing lines, `room`, `clientGoals` and `coverText` (job-specific) go.
  */
 export function librarySectionForLoad(
   q: Quote,

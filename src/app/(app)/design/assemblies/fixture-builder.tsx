@@ -23,7 +23,7 @@ const REVIEW_TIP = {
 } as const;
 
 /** #210 — the one Assemblies list (fixtures + systems) and its form. */
-export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage, portalCategories, rackDefaults = NO_RACK_DEFAULTS }: {
+export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage, rackDefaults = NO_RACK_DEFAULTS }: {
   initial: FixtureRecord[];
   /** The server's priced seed — every part currently referenced by a saved
    *  fixture (I1, fix wave 1), never the whole catalog. Grown locally below
@@ -32,8 +32,6 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   priceListEffective: Record<string, number>;
   /** #207 — each saved line's datasheet coverage, keyed by pairKey(). */
   coverage: Record<string, MemberCoverage>;
-  /** #289 — the portal categories already used across fixtures, sorted + unique. */
-  portalCategories: string[];
   /** #296 (D579) — the rack tray's default blank / vent SKUs. */
   rackDefaults?: RackDefaults;
 }) {
@@ -190,7 +188,6 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
           onPickPart={mergePart}
           live={live}
           coverage={coverage}
-          portalCategories={portalCategories}
           rackDefaults={rackDefaults}
           onSaveRackDefaults={saveRackDefaultsAction}
           busy={busy}

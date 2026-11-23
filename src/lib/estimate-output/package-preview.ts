@@ -8,7 +8,6 @@ import { withDatasheetAliases, type DatasheetLinkView, type PackagePlanView } fr
 import { partModel } from "@/lib/catalog-rename/sku";
 import { expandLine, type FixtureLookup, type MemberLine } from "@/lib/quote-line-members";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 
 /**
  * Estimator Phase 4 (spec §11.1) — the staff preview of what the client gets:
@@ -212,11 +211,11 @@ export function clientDatasheetRows(docs: ClientRowsDocs, members: ReadonlyMap<s
 /**
  * #332 member SKU (live, through `moved`) → the descriptions of the assembly
  * lines it is a member of, walking the lines with the package BOM's own skip
- * rule (quoteBom: labor sections / lines, bonus and credit lines, qty ≤ 0) and
+ * rule (quoteBom: labor sections / lines, bonus lines, qty ≤ 0) and
  * expandLine. A SKU on several assembly lines lists each description once.
  */
 export function bomMemberParents(
-  sections: ReadonlyArray<{ kind?: string; items: ReadonlyArray<MemberLine & { labor?: unknown; bonus?: unknown; rewardCredit?: unknown; desc?: unknown; qty?: unknown }> }>,
+  sections: ReadonlyArray<{ kind?: string; items: ReadonlyArray<MemberLine & { labor?: unknown; bonus?: unknown; desc?: unknown; qty?: unknown }> }>,
   fixtureOf?: FixtureLookup,
   moved?: ReadonlyMap<string, string>,
 ): Map<string, string[]> {
@@ -225,7 +224,7 @@ export function bomMemberParents(
     if (s.kind === "labor") continue;
     for (const it of s.items || []) {
       const qty = typeof it.qty === "number" ? it.qty : NaN;
-      if (it.labor || isBonusItem(it) || isRewardCreditItem(it) || !(qty > 0)) continue;
+      if (it.labor || isBonusItem(it) || !(qty > 0)) continue;
       const rows = expandLine(it, fixtureOf);
       if (!rows) continue;
       const desc = (typeof it.desc === "string" && it.desc.trim()) || (typeof it.sku === "string" ? it.sku : "") || "Assembly";

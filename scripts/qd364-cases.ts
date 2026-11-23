@@ -22,10 +22,26 @@ export function qd364BomCases(overlay: Record<string, unknown> = {}): Record<str
     bomSectioned: web(qd293Props({ pdfOptions: { detail: "sectioned", ...overlay } })),
     bomLean: web(qd293Props({ pdfOptions: { pdfQty: false, pdfPrices: false, ...overlay } })),
     bomAlternates: web(qd293Props({ sections: grouped(), groups: G, pdfOptions: { ...overlay } })),
-    // A Rewards credit, a tax line and the perks line — all three always print.
-    bomRewards: (() => {
+    // A tax line — it always prints, whatever the Show on BOM switches say.
+    bomTax: (() => {
       const p = web(qd293Props({ pdfOptions: { ...overlay } }));
-      return { ...p, t: { ...p.t, tax: 12.5, credit: 25, grand: p.t.grand + 12.5 - 25 }, taxRatePct: 5, rewardsLine: "Your Gold rewards: Free freight" };
+      return { ...p, t: { ...p.t, tax: 12.5, grand: p.t.grand + 12.5 }, taxRatePct: 5 };
     })(),
   };
+}
+
+/**
+ * The stored baseline (docs/superpowers/fixtures/364-bom-view-baseline.json) as the harness compares it.
+ * Its `bomRewards` entry was rendered while a quote could carry a $25 Rewards credit. The credit was removed
+ * (2026-11-23) and the file is left as it was written, so that entry is read as the `bomTax` case: the same
+ * render without its "Credit applied" row and with the Total $25 higher ($340.50 → $365.50). Every other entry
+ * is returned untouched. A file re-written by qd364-baseline.ts (it then has `bomTax`) is returned as-is.
+ */
+export function qd364Baseline(json: string): Record<string, string> {
+  const raw = JSON.parse(json) as Record<string, string>;
+  if (!("bomRewards" in raw)) return raw;
+  const { bomRewards, ...rest } = raw;
+  const creditRow = bomRewards.match(/<div class="est-reward-credit"[^>]*>.*?<\/div>/)?.[0];
+  if (!creditRow) throw new Error("364 baseline: the bomRewards entry has no credit row");
+  return { ...rest, bomTax: bomRewards.replace(creditRow, "").split("$340.50").join("$365.50") };
 }

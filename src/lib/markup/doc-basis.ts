@@ -3,6 +3,8 @@
  * `pricingBasis: "markup"` stamp stores margins. Every stored pricing fraction
  * converts EXACTLY to markup; line prices, totals and values are never touched
  * (no sell amount moves). Pure; used by src/db/doc-store.ts on every read.
+ * The same read hook drops a stored Rewards credit line from a quote
+ * (`dropStoredCreditLines`, below).
  */
 import { PRICING_BASIS, marginToMarkup, markupPctString } from "./index";
 
@@ -74,12 +76,31 @@ export function convertProjectDoc<T extends Rec>(doc: T): T {
 }
 
 /**
- * The doc store's one read hook. Converts IN PLACE: every row the store hands
+ * The Customer Rewards credit was removed (2026-11-23). A quote saved while it
+ * existed could carry one line flagged `rewardCredit: true` (a negative price).
+ * Such a line is dropped from the live `spec.sections` on read, so it can never
+ * reach pricing or a customer document. Read-time only: nothing is written for
+ * it, and `revisions` (frozen copies) are left exactly as stored.
+ */
+const isStoredCreditLine = (it: unknown): boolean => isRec(it) && it.rewardCredit === true;
+
+function dropStoredCreditLines(quote: Rec): void {
+  if (!isRec(quote.spec) || !Array.isArray(quote.spec.sections)) return;
+  for (const sec of quote.spec.sections) {
+    if (isRec(sec) && Array.isArray(sec.items) && sec.items.some(isStoredCreditLine)) {
+      sec.items = sec.items.filter((it) => !isStoredCreditLine(it));
+    }
+  }
+}
+
+/**
+ * The doc store's one read hook. Works IN PLACE: every row the store hands
  * it is freshly parsed JSON nobody else holds, and a legacy quote that is never
  * re-saved (Daylite history) is converted on every read — cloning thousands of
  * specs per list read would be the slow part, not the arithmetic.
  */
 export function hydrateDoc<T extends Rec>(coll: string, doc: T): T {
+  if (coll === "quotes") dropStoredCreditLines(doc);
   if (doc[BASIS_KEY] === PRICING_BASIS) return doc;
   if (coll === "quotes") quoteInPlace(doc);
   else if (coll === "projects") projectInPlace(doc);

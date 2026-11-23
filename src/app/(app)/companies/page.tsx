@@ -5,7 +5,6 @@ import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { DeleteCompanyButton } from "./delete-company-button";
 import { allForDirectory, primaryLoc } from "@/lib/stores/customers";
 import { listQuoteRows } from "@/lib/stores/quotes";
-import { listProjectActivityRows } from "@/lib/stores/projects";
 import { companyIdsWithContactMatching } from "@/lib/identity/contacts";
 import { companyRollups, filterCompanyDirectory } from "@/lib/company-directory";
 import { paginate, parsePageParam, withPage } from "@/lib/list-paging";
@@ -65,12 +64,11 @@ export default async function CustomersPage({
 }) {
   // Jeff 2026-10-15 #11 — slim reads: companies + venues (no contacts), and only the quote / project fields
   // the rollups need (SQL projections), so the whole directory filters without loading whole documents.
-  const [me, sp, customers, quotes, projects, users, settings] = await Promise.all([
+  const [me, sp, customers, quotes, users, settings] = await Promise.all([
     requireUser(),
     searchParams,
     allForDirectory(),
     listQuoteRows(),
-    listProjectActivityRows(),
     activeUsers(),
     getSettings(),
   ]);
@@ -96,7 +94,7 @@ export default async function CustomersPage({
   };
 
   /* ---- per-customer activity rollups (quotes / projects live by id|name; a stored owner wins — D83) ---- */
-  const rows = companyRollups(customers, quotes, projects);
+  const rows = companyRollups(customers, quotes, []);
 
   /* ---- filters, over EVERY company: scope, type, search (name, type, venues, and — in SQL — contacts' names,
      titles and emails), added in 7 days ---- */
@@ -275,7 +273,7 @@ export default async function CustomersPage({
             <div className="pk-card" style={{ padding: "60px 30px", textAlign: "center" }}>
               <div style={{ fontSize: 16, fontWeight: 600, color: "#3a3f4a" }}>No companies yet</div>
               <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6 }}>
-                Add your first company to start building quotes and projects.
+                Add your first company to start building quotes.
               </div>
               <Link
                 href="/companies?edit=new"

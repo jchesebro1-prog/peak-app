@@ -4,12 +4,10 @@
  * NO weight math: the Estimator preview counts sheets through
  * countCutSheetTypes without bundling steel.ts. collect.ts adds weights,
  * areas and hardware on the server. A quote is read by exactly one adapter:
- * non-empty spec.sections → Estimator; else spec.kind === "grid" → Grid.
+ * non-empty spec.sections → Estimator; else spec.kind === "grid" → the quoted
+ * CURTAIN lines of a quote the removed Grid made.
  */
-import { ensureOptions, hasOption, optionSlice, type GridOption } from "@/lib/design/grid-options";
-import type { GridCurtain, GridCurtainType } from "@/lib/design/grid-bom";
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import type { TrackOperation, TrackSeries } from "@/lib/track-series";
 import { pathSignature } from "@/lib/track-path";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
@@ -19,12 +17,12 @@ import { trackLayoutSource, type TrackLayoutSource } from "./layout";
 import {
   ASSUMED_MOUNT, DEFAULT_BOTTOM_FINISH, DEFAULT_MARK_SPACING_IN, DEFAULT_TOP_FINISH, GRID_CURTAIN_DEFAULTS,
   isBottomFinish, isMountTypeId, isTopFinish, mountTypeForTrackMounting,
-  type CurtainBottomFinish, type CurtainMountKey, type CurtainTopFinish,
+  type CurtainBottomFinish, type CurtainMountKey, type CurtainTopFinish, type GridCurtainType,
 } from "./vocab";
 
 export const CURTAIN_UNREADABLE = "Can't read size — edit the curtain";
 export const CURTAIN_ZERO_SIZE = "Size is 0 — edit the curtain";
-export const GRID_DESIGN_GONE = "The Grid design behind this quote no longer exists — sheets read the quoted lines.";
+export const GRID_DESIGN_GONE = "This quote came from a Grid design — sheets read the quoted lines.";
 export const TRACK_SERIES_GONE_WARNING = "Track series no longer exists — hardware as quoted.";
 
 /** The catalog fabric row slice the cut sheets read (fabricParts()). */
@@ -72,13 +70,8 @@ export type CurtainsRead = {
   skippedOptional: CurtainLineRef[];
   notes: string[];
 };
-/** The Grid project slice the adapter needs (stores/grid-projects GridProject satisfies it). */
-export type GridProjectLite = {
-  /** A pre-options project's own quote — ensureOptions gives its one option this quoteId. */
-  quoteId?: string | null;
-  options?: GridOption[];
-  placements?: Array<{ id: string; optionId?: string; curtain?: GridCurtain | null }>;
-};
+/** Always null: the Grid design store is gone, so a Grid-made quote is read from its quoted lines. The parameter stays so every caller reads the same. */
+export type GridProjectLite = null;
 
 const empty = (): CurtainsRead => ({ curtains: [], unreadable: [], skippedOptional: [], notes: [] });
 
@@ -117,7 +110,7 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
   const read = empty();
   for (const sec of sections) {
     for (const it of sec.items || []) {
-      if (!it.curtain || isRewardCreditItem(it)) continue;
+      if (!it.curtain) continue;
       const lineRef: CurtainLineRef = { ref: `${sec.id}/line-${it.id}`, where: sec.name || "System", desc: it.desc || "", sectionId: sec.id, lineId: it.id };
       const qty = lineQty(it.qty);
       // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
@@ -199,89 +192,11 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
   return read;
 }
 
-/** A copy of the project (ensureOptions normalizes IN PLACE — an orphan placement joins the first option), so the reader never mutates the caller's. */
-function gridDoc(project: GridProjectLite | null) {
-  return project ? { quoteId: project.quoteId ?? null, options: project.options ? [...project.options] : undefined, placements: (project.placements || []).map((p) => ({ ...p })) } : null;
-}
-
-/**
- * The Grid option a quote reads: its `gridOptionId` when that option still
- * exists; for a quote saved before `gridOptionId` existed, the option whose
- * quoteId is this quote (final review #6). "" = read the quoted lines.
- */
-function gridOptionIdFor(spec: { gridOptionId?: unknown }, doc: ReturnType<typeof gridDoc>, quoteId: string | undefined): string {
-  if (!doc) return "";
-  if (typeof spec.gridOptionId === "string" && spec.gridOptionId) return hasOption(doc, spec.gridOptionId) ? spec.gridOptionId : "";
-  if (!quoteId) return "";
-  return ensureOptions(doc).options.find((o) => o.quoteId === quoteId)?.id ?? "";
-}
-
-type QuotedCurtainLine = { parsed: NonNullable<ReturnType<typeof parseGridCurtainDesc>>; used: boolean };
-
-/**
- * The fabric name a Grid curtain's own quoted line printed — "" when that
- * line printed the SKU (the fabric was already gone at quote time) or no line
- * matches. Never a SKU: a line printing this curtain's SKU is taken as its own
- * (→ ""); a line printing any other known SKU, or a current catalog fabric's
- * name (another, live curtain's line), is skipped. Each line answers once.
- */
-function quotedGridFabricName(c: GridCurtain, lines: QuotedCurtainLine[], notNames: ReadonlySet<string>): string {
-  const same = (l: QuotedCurtainLine) =>
-    !l.used && l.parsed.name === (c.name || "").trim() && l.parsed.gridType === c.type && l.parsed.widthFt === Number(c.widthFt)
-    && l.parsed.heightFt === Number(c.heightFt) && l.parsed.fullnessPct === (c.fullnessPct > 0 ? c.fullnessPct : 0);
-  const own = lines.find((l) => same(l) && l.parsed.fabricName === c.fabricSku);
-  const hit = own ?? lines.find((l) => same(l) && !notNames.has(l.parsed.fabricName));
-  if (!hit) return "";
-  hit.used = true;
-  return hit === own ? "" : hit.parsed.fabricName;
-}
-
-export function gridCurtains(spec: { gridOptionId?: unknown; lines?: unknown }, project: GridProjectLite | null, fabrics: readonly CurtainFabricRow[], quoteId?: string): CurtainsRead {
+export function gridCurtains(spec: { lines?: unknown }, project: GridProjectLite, fabrics: readonly CurtainFabricRow[]): CurtainsRead {
+  void project;
   const bySku = new Map(fabrics.map((f) => [f.sku, f]));
   const byName = new Map(fabrics.map((f) => [f.desc, f]));
   const read = empty();
-  const doc = gridDoc(project);
-  const optionId = gridOptionIdFor(spec, doc, quoteId);
-  if (doc && optionId) {
-    const placements = optionSlice(doc, optionId).placements;
-    const quoted: QuotedCurtainLine[] = (Array.isArray(spec.lines) ? spec.lines : []).flatMap((raw) => {
-      const l = (raw && typeof raw === "object" ? raw : {}) as { sku?: unknown; desc?: unknown };
-      const parsed = l.sku === "CURTAIN" && typeof l.desc === "string" ? parseGridCurtainDesc(l.desc) : null;
-      return parsed ? [{ parsed, used: false }] : [];
-    });
-    const notNames = new Set([...placements.map((p) => p.curtain?.fabricSku || ""), ...fabrics.map((f) => f.sku), ...fabrics.map((f) => f.desc)].filter(Boolean));
-    for (const pl of placements) {
-      const c = pl.curtain;
-      if (!c) continue;
-      const lineRef: CurtainLineRef = { ref: `placement-${pl.id}`, where: "Grid design", desc: c.name || "" };
-      const problem = sizeProblem(Number(c.widthFt), Number(c.heightFt));
-      if (problem) {
-        read.unreadable.push({ ...lineRef, reason: problem });
-        continue;
-      }
-      const d = GRID_CURTAIN_DEFAULTS[c.type] ?? GRID_CURTAIN_DEFAULTS.Full;
-      const fabric = fabricOf(bySku.get(c.fabricSku));
-      read.curtains.push({
-        ...lineRef,
-        name: (c.name || "").trim() || "Curtain",
-        gridType: c.type,
-        color: (c.color || "").trim() || undefined,
-        fabric,
-        // A fabric gone from the catalog prints the name its quoted line printed, else nothing — never the SKU (final review #5).
-        fabricText: fabric ? fabric.name : quotedGridFabricName(c, quoted, notNames),
-        ...(fabric || !c.fabricSku ? {} : { fabricRef: c.fabricSku }),
-        widthFt: c.widthFt,
-        heightFt: c.heightFt,
-        fullnessPct: c.fullnessPct > 0 ? c.fullnessPct : 0,
-        qty: 1,
-        topFinish: isTopFinish(c.topFinish) ? c.topFinish : d.top,
-        bottomFinish: isBottomFinish(c.bottomFinish) ? c.bottomFinish : d.bottom,
-        mount: isMountTypeId(c.mountType) ? { key: c.mountType, source: "picked" } : { key: d.mount, source: "assumed" },
-        warnings: [],
-      });
-    }
-    return read;
-  }
   read.notes.push(GRID_DESIGN_GONE);
   const lines = Array.isArray(spec.lines) ? spec.lines : [];
   lines.forEach((raw, i) => {
@@ -320,10 +235,11 @@ export function gridCurtains(spec: { gridOptionId?: unknown; lines?: unknown }, 
   return read;
 }
 
-export function readCurtains(spec: unknown, fabrics: readonly CurtainFabricRow[], trackSeries: readonly TrackSeries[], project: GridProjectLite | null, quoteId?: string): CurtainsRead {
+export function readCurtains(spec: unknown, fabrics: readonly CurtainFabricRow[], trackSeries: readonly TrackSeries[], project: GridProjectLite = null): CurtainsRead {
+  void project;
   const s = (spec && typeof spec === "object" ? spec : {}) as { sections?: unknown; kind?: unknown; gridOptionId?: unknown; lines?: unknown };
   if (Array.isArray(s.sections) && s.sections.length) return estimatorCurtains(s.sections as SpecSection[], fabrics, trackSeries);
-  if (s.kind === "grid") return gridCurtains(s, project, fabrics, quoteId);
+  if (s.kind === "grid") return gridCurtains(s, null, fabrics);
   return empty();
 }
 
@@ -335,7 +251,8 @@ export function readCurtains(spec: unknown, fabrics: readonly CurtainFabricRow[]
  * `byNameIfMissing` = SKUs whose line falls back to its name when the SKU
  * isn't a fabric row. Mirrors readCurtains' adapter choice exactly.
  */
-export function curtainFabricLookups(spec: unknown, project: GridProjectLite | null, quoteId?: string): { skus: string[]; byName: boolean; byNameIfMissing: string[] } {
+export function curtainFabricLookups(spec: unknown, project: GridProjectLite = null): { skus: string[]; byName: boolean; byNameIfMissing: string[] } {
+  void project;
   const s = (spec && typeof spec === "object" ? spec : {}) as { sections?: unknown; kind?: unknown; gridOptionId?: unknown; lines?: unknown };
   const skus = new Set<string>();
   const ifMissing = new Set<string>();
@@ -343,7 +260,7 @@ export function curtainFabricLookups(spec: unknown, project: GridProjectLite | n
   if (Array.isArray(s.sections) && s.sections.length) {
     for (const sec of s.sections as SpecSection[]) {
       for (const it of sec?.items || []) {
-        if (!it?.curtain || isRewardCreditItem(it)) continue;
+        if (!it?.curtain) continue;
         const ci = it.curtainInputs;
         if (!ci) byName = true;
         else if (ci.fabricSku) {
@@ -353,13 +270,7 @@ export function curtainFabricLookups(spec: unknown, project: GridProjectLite | n
       }
     }
   } else if (s.kind === "grid") {
-    const doc = gridDoc(project);
-    const optionId = gridOptionIdFor(s, doc, quoteId);
-    if (doc && optionId) {
-      for (const pl of optionSlice(doc, optionId).placements) if (pl.curtain?.fabricSku) skus.add(pl.curtain.fabricSku);
-    } else {
-      byName = (Array.isArray(s.lines) ? s.lines : []).some((l) => !!l && typeof l === "object" && (l as { sku?: unknown }).sku === "CURTAIN");
-    }
+    byName = (Array.isArray(s.lines) ? s.lines : []).some((l) => !!l && typeof l === "object" && (l as { sku?: unknown }).sku === "CURTAIN");
   }
   return { skus: [...skus], byName, byNameIfMissing: [...ifMissing] };
 }
@@ -396,23 +307,16 @@ export function countCutSheetTypes(spec: unknown, fabrics: readonly CurtainFabri
 }
 
 /**
- * Where a staff "edit" link on the Cut sheets page goes (final review #4). An
- * Estimator line (it has a sectionId) opens the Estimator. A Grid placement
- * opens its Grid design — saving a Grid quote in the Estimator would convert
- * it to sections. Anything else (a Grid quote's quoted lines) opens the
- * quote's own builder.
+ * Where a staff "edit" link on the Cut sheets page goes. An Estimator line
+ * (it has a sectionId) opens the Estimator; anything else (a Grid-made
+ * quote's quoted lines) opens the quote's own builder.
  */
 export function curtainEditLink(row: Pick<CurtainLineRef, "ref" | "sectionId">, quote: { id: string; quoteType?: string | null; spec?: unknown }): { href: string; label: string } {
   if (row.sectionId) return { href: `/estimator?id=${encodeURIComponent(quote.id)}`, label: "Edit the curtain →" };
-  const spec = (quote.spec && typeof quote.spec === "object" ? quote.spec : {}) as { gridProjectId?: unknown; gridOptionId?: unknown };
-  if (row.ref.startsWith("placement-") && typeof spec.gridProjectId === "string" && spec.gridProjectId) {
-    const option = typeof spec.gridOptionId === "string" && spec.gridOptionId ? `?option=${encodeURIComponent(spec.gridOptionId)}` : "";
-    return { href: `/design/grid/${encodeURIComponent(spec.gridProjectId)}${option}`, label: "Edit in the Grid design →" };
-  }
   return { href: quoteBuilderHref(quote), label: "Open the quote →" };
 }
 
-/** The Grid editor's staff note after a client package (final review #10): curtains the cut sheets couldn't read (the per-row reasons ride in its tooltip). */
+/** The staff note after a client package: curtains the cut sheets couldn't read (the per-row reasons ride in its tooltip). */
 export function cutSheetsUnreadableNote(n: number): string {
   return `${n} curtain${n === 1 ? "" : "s"} couldn't be read for cut sheets — edit ${n === 1 ? "it" : "them"}, then rebuild`;
 }

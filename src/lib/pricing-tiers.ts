@@ -1,7 +1,6 @@
 import { frac } from "@/lib/stores/pricing";
-import { getCompanies, getCompany } from "@/lib/identity/companies";
+import { getCompany } from "@/lib/identity/companies";
 import {
-  contactsForCompanies,
   contactsForCompany,
   displayName,
 } from "@/lib/identity/contacts";
@@ -101,80 +100,3 @@ export async function tierMarkupByCompany(
   return out;
 }
 
-/**
- * The markup a service quote actually prices/stamps at: an untiered customer
- * (`resolveTier`'s `source === "default"`) uses the SERVICE'S OWN default
- * markup (`serviceDefault` — the service's Estimating Rules `baseRates.margin`,
- * the same value the builder's markup knob seeds from, src/lib/tier-seed.ts
- * `seedFor`), never tier Base's registry markup — the two agree today only
- * because every service default happens to be 43 % (0.30 margin before #367; #254 follow-up; D457).
- * A resolved contact/company tier is unchanged.
- */
-export function serviceMarkupFor(tier: ResolvedTier, serviceDefault: number): number {
-  return tier.source === "default" ? serviceDefault : tier.markup;
-}
-
-export type BuilderTier = {
-  /** Company-level markup (company tier, else Base). */
-  markup: number;
-  /** Personal markups for contacts that carry their OWN tier, by display name. */
-  byContact: Record<string, number>;
-  /** The company's OWN tier (null = none set → the builder's own default, #254). */
-  tier: PricingTier | null;
-  /** The OWN tier of each contact in `byContact`, by display name (#254 prompt label). */
-  byContactTier: Record<string, PricingTier>;
-};
-
-/**
- * Tier info for the service-quote builders (flame/repair/inspection): the
- * customer picker seeds the markup knob from these when a customer is
- * chosen — contact's own tier first, else the company's, else Base.
- */
-export async function builderTiers(
-  companyIds: string[]
-): Promise<Record<string, BuilderTier>> {
-  const out: Record<string, BuilderTier> = {};
-  if (!companyIds.length) return out;
-
-  /* Batched (punch #90). This used to loop the company list serially, awaiting
-     getCompany() + contactsForCompany() + a margin read PER company — ~3,400
-     sequential round trips for the real directory (~1,700 companies), which is
-     what made the three service-quote builders take seconds locally and would
-     be far worse against a hosted Postgres. Two bulk queries now, plus at most
-     one margin read per DISTINCT tier (there are seven). Resolution order is
-     unchanged: contact tier → company tier → default. */
-  const [companies, contactsByCompany] = await Promise.all([
-    getCompanies(companyIds),
-    contactsForCompanies(companyIds),
-  ]);
-
-  const markupCache = new Map<PricingTier, number>();
-  const markupFor = async (tier: PricingTier): Promise<number> => {
-    const hit = markupCache.get(tier);
-    if (hit != null) return hit;
-    const k = await tierMarkup(tier);
-    markupCache.set(tier, k);
-    return k;
-  };
-  const defaultMarkup = await markupFor(DEFAULT_PRICING_TIER);
-
-  for (const id of companyIds) {
-    const companyTier = asTier(companies.get(id)?.pricingTier);
-    const byContact: Record<string, number> = {};
-    const byContactTier: Record<string, PricingTier> = {};
-    for (const p of contactsByCompany.get(id) || []) {
-      const t = asTier(p.pricingTier);
-      if (t) {
-        byContact[displayName(p)] = await markupFor(t);
-        byContactTier[displayName(p)] = t;
-      }
-    }
-    out[id] = {
-      markup: companyTier ? await markupFor(companyTier) : defaultMarkup,
-      byContact,
-      tier: companyTier,
-      byContactTier,
-    };
-  }
-  return out;
-}

@@ -1,6 +1,6 @@
 /* #373 — pipe and lineset configurators. Pure checks run alone with
    `npx tsx scripts/test-rigging-config.ts`; riggingDbChecks runs only inside test:specs (scratch PGLITE_PATH). */
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import {
   isFootUnit, linesetTypeProblems, pipeTypeProblems, sanitizeLinesetType, sanitizeLinesetTypeBlob, sanitizePipeType, sanitizePipeTypeBlob,
   type LinesetType, type PipeType,

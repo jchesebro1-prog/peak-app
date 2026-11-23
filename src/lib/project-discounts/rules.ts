@@ -1,7 +1,6 @@
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isPlaceholderSku } from "@/lib/quote-line-ids";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { partModel } from "@/lib/catalog-rename/sku";
 
 /**
@@ -119,14 +118,14 @@ function isAssemblyLine(it: SpecItem): boolean {
  * The SKU a PLAIN line is discounted under, or "" when it can't carry one:
  * a custom line (even one saved with a real SKU — its cost is typed by hand
  * in the Custom part form), a vendor-quote line, allowance, curtain, any labor
- * (labor / overhead / travel), a bonus line, the Rewards credit, or an
+ * (labor / overhead / travel), a bonus line, or an
  * assembly / rack / track line itself (an assembly's parts are discounted
  * inside it instead).
  */
 export function discountSkuOf(it: SpecItem): string {
   if (!it || typeof it !== "object") return "";
   if (it.custom || it.vendorQuoteId || it.allowance || it.curtain || it.labor || it.laborOverhead || it.laborTravel) return "";
-  if (isBonusItem(it) || isRewardCreditItem(it)) return "";
+  if (isBonusItem(it)) return "";
   if ((Array.isArray(it.components) && it.components.length) || it.rackId || it.track || it.rigging || it.fixture) return "";
   return realSku(it.sku);
 }

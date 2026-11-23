@@ -1,7 +1,5 @@
 import type { SharedPackage } from "@/lib/quote-share/links";
 import { revisionPackageDocs } from "./package-docs-server";
-import { specReadyFor } from "./package-spec-ready";
-import { allSections } from "@/lib/stores/spec-sections";
 import { revisionShownPackageFiles } from "./package-files";
 import { responseScopes } from "./responses";
 import { revisionGroupedSections } from "@/lib/quote-share/photo-response";
@@ -21,8 +19,7 @@ export async function loadPackageExtras(hit: SharedPackage, base: string): Promi
     // #304: the page looks a key product up by its line SKU — a renamed part's old one too;
     // #332: a starred assembly line takes its primary member's datasheet.
     withDatasheetAliases(extras.datasheets, docs.moved, docs.aliases);
-    const specReady = specReadyFor(docs.parts, await allSections());
-    extras.downloads = downloadsView(docs.documents, specReady, base);
+    extras.downloads = downloadsView(docs.documents, false, base);
   } catch (e) {
     console.warn("[package] documents unavailable", e instanceof Error ? e.message : e);
   }

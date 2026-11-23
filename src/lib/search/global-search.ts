@@ -14,32 +14,14 @@ import { getMany as getQuotesByIds } from "@/lib/stores/quotes";
 import type { Party } from "@/lib/parties/rules";
 import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
-import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
-import { summarySearchText } from "@/lib/krisp/derive";
 import { partSearchHaystack, staffPartLabel, type SearchPartLike } from "@/lib/catalog-rename/sku";
-import { searchMeetingCandidates } from "@/lib/stores/meetings";
-import { meetingsReadOr } from "@/lib/meetings/safe-read";
-import { canSeeMeeting } from "@/lib/meetings/visibility";
-import { renderMeeting, type RenderNames } from "@/lib/meetings/render";
-import { lengthLabel, meetingReaderHref } from "@/app/(app)/inbox/meetings/format";
-import { canSeeThread, canSeeThreadCond, type CommThread } from "@/lib/stores/comms";
-import { normalizeAssessment } from "@/lib/stores/assessments";
-import { normalizeFinding } from "@/lib/stores/findings";
-import { sitesForCompanies } from "@/lib/identity/sites";
-import { assessmentSearchResult, findingSearchResult, matchesAssessment, matchesFinding } from "@/lib/assessments/integration";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
 
 /**
  * Global nav search (⌘K) — port of Nav.dc.html's search sources:
- * quotes, designs, surveys, inspections, comm threads, companies + people
+ * quotes, companies + people
  * (the identity core, D85), and catalog parts. Simple case-insensitive
  * substring match over the fields the prototype searched; small data
  * volumes make this instant.
- *
- * Extracted from /api/search (Ask AI, spec 2026-10-13 §3): the route keeps
- * its auth check and returns `{ groups: await globalSearch(q, user) }`, byte
- * for byte what it returned before; Ask AI's `search` tool calls the same
- * function with the asking user.
  */
 
 export type Result = {
@@ -53,10 +35,6 @@ export type Result = {
 export type Group = { label: string; items: Result[] };
 
 const LIMIT_PER_GROUP = 5;
-
-/** #323 — ⌘K renders a meeting's summary without resolving linked names (speed); the text still relabels
- *  mapped speakers by their stored names. */
-const NO_NAMES: RenderNames = { contact: () => null, user: () => null };
 
 function matches(q: string, ...fields: Array<unknown>): boolean {
   return fields.some(
@@ -74,60 +52,24 @@ function staffLabelText(p: SearchPartLike): string {
   return [l.primary, l.secondary].filter(Boolean).join(" · ");
 }
 
-/**
- * The ⌘K search's groups for `rawQ` as `me` may see them (meetings through
- * canSeeMeeting, email threads through canSeeThread). The query is trimmed
- * and lower-cased; under 2 characters there are no groups. `me.id` scopes
- * meetings and (#349) email threads — by identity, the name only for a legacy
- * thread no other user's name matches (mailboxViewer).
- *
- * #341 — email-thread candidates are cut to the threads `me` may see — my
- * own mailbox's, ones assigned to me, and ones linked to an entity; never one
- * in Deleted or another person's draft — in SQL (canSeeThreadCond), before
- * the per-group cut, so other people's private mail can't crowd the visible
- * threads out of the 5; canSeeThread re-checks each row. ⌘K and Ask AI share
- * the rule. `opts.emailOnly` (Ask AI) also keeps only email threads (no
- * logged calls or meetings).
- */
-export type GlobalSearchOpts = { emailOnly?: boolean };
-
-export async function globalSearch(
-  rawQ: string,
-  me: { id: string; name?: string | null },
-  opts: GlobalSearchOpts = {}
-): Promise<Group[]> {
+/** The ⌘K search's groups for `rawQ`. The query is trimmed and lower-cased; under 2 characters there are no groups. */
+export async function globalSearch(rawQ: string): Promise<Group[]> {
   const q = (rawQ || "")
     .trim()
     .toLowerCase();
   if (q.length < 2) return [];
-  const meId = me.id;
-  const viewer = await mailboxViewer({ id: me.id, name: me.name || "" });
 
   // Pull only a small candidate set per table from SQL (matches anywhere in
   // the doc), then apply the precise per-field filter below. Avoids
   // materializing whole tables — the catalog alone is ~10.7k rows.
   const CANDIDATES = 100;
-  const [quotes, designs, surveys, inspections, comms, companies, people, parts, recordings, partialQuotes, meetingHits, assessmentDocs, findingDocs] =
+  const [quotes, companies, people, parts, partialQuotes] =
     await Promise.all([
       searchDocs("quotes", q, CANDIDATES),
-      searchDocs("designs", q, CANDIDATES),
-      searchDocs("surveys", q, CANDIDATES),
-      searchDocs("inspections", q, CANDIDATES),
-      searchDocs<CommThread & Doc>("comms", q, CANDIDATES, {
-        ...(opts.emailOnly ? { fieldEquals: { channel: "email" } } : {}),
-        where: canSeeThreadCond(viewer),
-      }),
       allCompanies(),
       allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
-      searchDocs<RecordingRecord>("recordings", q, CANDIDATES),
       quotesByPartialNumber(q, CANDIDATES),
-      // #323 — title / notes-text ILIKE in SQL, visible to me (in the WHERE, before the LIMIT), no transcript;
-      // visibility + the rendered summary re-checked below
-      meetingsReadOr(searchMeetingCandidates(q, CANDIDATES, meId), [], "search"),
-      // #340 — assessments and findings: SQL candidates (anywhere in the doc), the precise match below.
-      searchDocs("assessments", q, CANDIDATES),
-      searchDocs("findings", q, CANDIDATES),
     ]);
 
   const groups: Group[] = [];
@@ -216,60 +158,6 @@ export async function globalSearch(
       color: "var(--accent)",
     }))
   );
-  add(
-    "Designs",
-    designs
-      .filter((d) => matches(q, d.id, d.name, d.customer))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.name || d.id),
-        sub: `${d.id} · ${String(d.customer || "")}`,
-        href: `/design/designs?id=${encodeURIComponent(d.id)}`,
-        letter: "D",
-        color: "#3155a8",
-      }))
-  );
-  add(
-    "Surveys",
-    surveys
-      .filter((d) => matches(q, d.id, d.customer, d.venue))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.customer || d.id),
-        sub: `${d.id} · ${String(d.venue || "site survey")}`,
-        href: `/venue-assessments`,
-        letter: "S",
-        color: "#1f7a52",
-      }))
-  );
-  add(
-    "Inspections",
-    inspections
-      .filter((d) => matches(q, d.id, d.customer, d.venue))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.customer || d.id),
-        sub: `${d.id} · ${String(d.venue || "rigging inspection")}`,
-        href: `/inspections`,
-        letter: "I",
-        color: "#7b3f8a",
-      }))
-  );
-  add(
-    "Email threads",
-    comms
-      // #341 — the SQL cut above, re-checked row by row (one rule, comms-visibility.ts)
-      .filter((d) => canSeeThread(d, viewer))
-      .filter((d) => matches(q, d.subject, d.customer, d.contactName, d.contactEmail))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.subject || d.id),
-        sub: String(d.customer || d.contactEmail || ""),
-        href: `/inbox?thread=${encodeURIComponent(d.id)}`,
-        letter: "@",
-        color: "#b4543a",
-      }))
-  );
   // Companies + People search the identity tables directly (D85); volumes
   // are small, and matching in JS mirrors the per-field precision above.
   add(
@@ -311,75 +199,6 @@ export async function globalSearch(
         letter: "P",
         color: "#1f7a52",
       }))
-    );
-  }
-  // Recordings (Krisp spec §4.5): id / title / customer / venue / joined
-  // summary text. The transcript sits in the JSONB candidate scan above but
-  // is never the label or the sub.
-  {
-    const now = Date.now();
-    add(
-      "Recordings",
-      recordings
-        .map((d) => normalizeRecording(d))
-        .filter((r) => matches(q, r.id, r.title, r.customer, r.venue, summarySearchText(r)))
-        .map((r) => ({
-          id: r.id,
-          title: r.title || r.id,
-          sub: `${recordingStatusChip(r, now)} · ${r.customer || r.venue || r.parentId}`,
-          href: `/recordings/${encodeURIComponent(r.id)}`,
-          letter: "R",
-          color: "#6b4fa1",
-        }))
-    );
-  }
-  // #323 Krisp meetings: title + the rendered summary, only what this user may see (canSeeMeeting).
-  {
-    const DAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" });
-    add(
-      "Meetings",
-      meetingHits
-        .filter((m) => canSeeMeeting(m, meId))
-        .filter((m) => {
-          const r = renderMeeting(m, NO_NAMES);
-          return matches(q, m.krisp.title, r.summary.flatMap((x) => [x.title, x.description]).join(" "), r.keyPoints.join(" "));
-        })
-        .map((m) => ({
-          id: m.id,
-          title: m.krisp.title || "Untitled meeting",
-          sub: `${m.krisp.startedAt != null ? DAY.format(m.krisp.startedAt) : "—"} · ${lengthLabel(m.krisp.durationSec)}`,
-          href: meetingReaderHref(m),
-          letter: "M",
-          color: "#6b4fa1",
-        }))
-    );
-  }
-  // #340 assessments (AS-1001 · customer, venue · status) and findings (the printed id, the description). A company
-  // whose NAME matches also brings its assessments in (the doc holds the customer id, never the name).
-  {
-    const byName = companies.filter((c) => matches(q, c.name)).slice(0, 10).map((c) => c.id);
-    const nameHits = byName.length ? await listDocsByField("assessments", "customerId", byName) : [];
-    const seenA = new Set<string>();
-    const cands = [...assessmentDocs, ...nameHits].filter((d) => (seenA.has(d.id) ? false : (seenA.add(d.id), true))).map((d) => normalizeAssessment(d));
-    const custBy = new Map(companies.map((c) => [c.id, c.name]));
-    const siteBy = new Map<string, string>();
-    const siteGroups = await sitesForCompanies([...new Set(cands.map((a) => a.customerId))]);
-    for (const list of siteGroups.values()) for (const s of list) siteBy.set(s.id, s.name || s.locationName || s.id);
-    const nm = (a: { customerId: string; siteId: string }) => ({ customer: custBy.get(a.customerId) ?? a.customerId, venue: siteBy.get(a.siteId) ?? "" });
-    add(
-      "Assessments",
-      cands
-        .filter((a) => matchesAssessment(q, a, nm(a)))
-        .sort((a, b) => b.visitDate - a.visitDate || b.id.localeCompare(a.id, undefined, { numeric: true }))
-        .map((a) => assessmentSearchResult(a, nm(a)))
-    );
-    add(
-      "Findings",
-      findingDocs
-        .map((d) => normalizeFinding(d, d.id))
-        .filter((f) => matchesFinding(q, f))
-        .sort((a, b) => (a.printedId === null ? 1 : 0) - (b.printedId === null ? 1 : 0) || (a.printedId ?? "").localeCompare(b.printedId ?? "", undefined, { numeric: true }) || a.key.localeCompare(b.key))
-        .map((f) => findingSearchResult(f))
     );
   }
   add(

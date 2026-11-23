@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import EntityQuickAdd, { type QuickAddValues } from "@/components/entity-quick-add";
-import { quickAddContactAction } from "@/app/(app)/inbox/link-actions";
+import { quickAddContactAction } from "@/app/(app)/people/quick-add-actions";
 import { ACCENT_INK, ACCENT_SOFT, mono } from "@/app/(app)/companies/lib";
 import { setContactRoleAction } from "../actions";
 

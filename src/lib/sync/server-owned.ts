@@ -4,23 +4,15 @@
  * browser, so these are never accepted from a push: stripped on insert, and
  * carried over from the stored copy on update. Pure.
  *
- * - `tasks.threadShare` — the thread owner's share stamp (Jeff 2026-10-15
- *   #26): only owner-driven server paths write it. A push that revives a
- *   deleted task brings no stamp back with it.
- * - `tasks.threadId` — the email a task came from: set by the Inbox / Ask
- *   paths after their own-thread check, never re-pointed by a push.
- *
  * Add a field here whenever a synced collection gains a server-owned one.
  */
 export const SERVER_OWNED_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  tasks: ["threadShare", "threadId"],
   // booth_captures never take the generic push path (pushBoothCapture records them); this is defence in depth.
   booth_captures: ["leadId", "outcome", "cardImagePath", "claimUntil"],
 };
 
 /** Fields not carried back onto a document the push revives from Deleted. */
 const DROP_ON_REVIVE: Readonly<Record<string, readonly string[]>> = {
-  tasks: ["threadShare"],
 };
 
 /**

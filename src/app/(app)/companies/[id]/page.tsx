@@ -2,27 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
-import { activeUsers, allUsers } from "@/lib/users";
-import { canChangeVisit } from "@/lib/visit-edit-rights";
+import { activeUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { visitsForCustomer } from "@/lib/stores/site-visits";
-import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
-import { MeetingsCard } from "@/components/meetings/meetings-card";
-import { WaitingOnCustomerCard } from "@/components/meetings/waiting-on-card";
 import { DocumentsCard } from "@/components/documents/documents-card";
-import { AssessmentsCard, FindingsCard } from "@/components/assessments/assessment-cards";
 import { CompanyRolesCard } from "@/components/parties/company-roles-card";
 import { QuotesReceivedCard } from "@/components/vendors/quotes-received-card";
-import { RecordingCountBadge } from "@/components/recordings/record-control-link";
-import { recordingCountByParent } from "../../recordings/data";
-import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
-import { getAllProjects, riskFlags } from "@/lib/stores/projects";
-import { isDone } from "@/lib/pipelines";
-import { formatJobValue } from "@/lib/job-value";
-import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
-import { snippet as commSnippet, statusMeta as commStatusMeta, visibleByCustomer } from "@/lib/stores/comms";
 import {
   coordsOf,
   estimate,
@@ -51,19 +37,10 @@ import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
 export const metadata = { title: "Company — Quartzite-6" };
 
-import { grantsFor, grantPath } from "@/lib/portal";
-import { PortalAccessCard } from "./portal-access";
 import { CompanyLogoCard } from "./logo-card";
 import { getCompanyLogo } from "@/lib/stores/company-logos";
-import { RewardsCard } from "./rewards-card";
-import { companyRewards, getRewardsProgram } from "@/lib/stores/rewards";
-import { companyCredit } from "@/lib/stores/reward-ledger";
-import { companyPerkPanel } from "@/lib/stores/reward-perks";
 import EditCustomerModal from "../edit-modal";
 import VenueDialog from "../venue-dialog";
-import { DeleteVisitButton } from "../delete-visit-button";
-import { EditVisitButton } from "@/components/visit-booking/visit-edit-button";
-import { VisitConflictChip, VisitConflictProvider } from "@/components/visit-booking/visit-conflict-chips";
 import {
   ACCENT_INK,
   ACCENT_SOFT,
@@ -80,14 +57,7 @@ import {
 } from "../lib";
 import type { SaveCustomerInput } from "../types";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { addressStatesForVisits } from "@/lib/address-verify/targets";
-import type { AddressState } from "@/lib/address-verify/types";
-import { FLAG_TEXT } from "@/lib/drive-plan/plan";
-import AddressFlagBadge from "@/components/address-fix/address-flag";
-import { mailboxViewer } from "@/lib/mailbox-viewer";
 
-// Visit schedule/delete actions run their after() drive re-sync (geocode + OSRM + Google writes) inside this invocation — keep the 60s ceiling.
-export const maxDuration = 60;
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -140,29 +110,15 @@ export default async function CustomerDetailPage({
   const cust = await getCustomer(id);
   if (!cust) notFound();
 
-  const [quotes, projects, surveys, threads, offices, users, feedRows, settings, rewardsProgram, companyLogo, everyone] = await Promise.all([
+  const [quotes, offices, users, feedRows, settings, companyLogo] = await Promise.all([
     getAllQuotes(),
-    getAllProjects(),
-    getAllSurveys(),
-    // #341 — threads on this company are linked (customerId), so every
-    // teammate sees them, read-only when not their own; one in Deleted (or
-    // another person's draft) is not listed (canSeeThread).
-    mailboxViewer(me).then((v) => visibleByCustomer(id, v)), // #349 — by identity
     officesFromSettings(),
     activeUsers(),
-    loadCustomerFeed({ id: cust.id, name: cust.name }, me.id, me),
+    loadCustomerFeed({ id: cust.id, name: cust.name }),
     getSettings(),
-    getRewardsProgram(),
     // Grid notes #8 — the customer logo on the datasheet book's cover.
     getCompanyLogo(cust.id),
-    // Jeff 2026-10-15 #35 — the whole roster (any status) for the visit lead's unique-name check (#353 review M8: in parallel).
-    allUsers(),
   ]);
-  // #282 — the Rewards card shows only while the program is on.
-  const [rewards, rewardCredit] = rewardsProgram.enabled
-    ? await Promise.all([companyRewards(cust.id, rewardsProgram), companyCredit(cust.id)])
-    : [null, null];
-
   const edit = one(sp.edit);
   const venueTypes = venueTypesFrom(settings.venueTypes);
   const addVenue = one(sp.addVenue);
@@ -183,16 +139,6 @@ export default async function CustomerDetailPage({
   const custQuotes = quotes.filter((qt) =>
     qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name
   );
-  /* #245 (spec §5) — "Portal activity" line under PortalAccessCard. #248
-     Task 4: widened to portal-service (the customer's own flame/inspection
-     quote intake) alongside portal-catalog. */
-  const portalQuotes = custQuotes.filter(
-    (qt) => qt.source === "portal-catalog" || qt.source === "portal-service"
-  );
-  const portalAwaitingApproval = portalQuotes.filter(
-    (qt) => qt.status === "sent" && !!qt.portalAcceptance
-  ).length;
-  const portalInReview = portalQuotes.filter((qt) => !!qt.portalReview).length;
   const openValue = custQuotes
     .filter((qt) => qt.status === "draft" || qt.status === "sent")
     .reduce((a, qt) => a + (qt.value || 0), 0);
@@ -204,13 +150,9 @@ export default async function CustomerDetailPage({
   const decided = custQuotes.filter((qt) => qt.status === "won" || qt.status === "lost").length;
   const winRate = decided > 0 ? Math.round((wonCount / decided) * 100) + "%" : "—";
 
-  const custProjects = projects.filter((p) => p.customerId === cust.id);
-  const custSurveys = surveys.filter((s) => s.customerId === cust.id);
-
-  /* ---- derived account owner (newest quote/project owner) ---- */
+  /* ---- derived account owner (newest quote owner) ---- */
   const ownerActs = [
     ...custQuotes.map((qt) => ({ at: qt.updatedAt || 0, owner: qt.owner || "" })),
-    ...custProjects.map((p) => ({ at: p.updatedAt || 0, owner: p.owner || "" })),
   ].filter((r) => r.owner);
   ownerActs.sort((a, b) => b.at - a.at);
   const owner = ownerActs[0]?.owner || "";
@@ -254,44 +196,6 @@ export default async function CustomerDetailPage({
 
   const contacts = (cust.contacts || []).map((ct) => ({ ...ct, mono: mono(ct.name) }));
 
-  /* ---- site visits (D76) ---- */
-  const visits = await visitsForCustomer(cust.id);
-  // Address flags are advisory: a failed lookup shows none, never breaks the page.
-  let visitAddr: Map<string, AddressState> = new Map();
-  try {
-    visitAddr = await addressStatesForVisits(
-      visits.map((v) => ({ id: v.id, customerId: v.customerId, locationId: v.locationId, address: v.address })),
-      "cache"
-    );
-  } catch (err) {
-    console.error("[address-verify] company visit address states failed", err);
-  }
-  // Recordings spec §6 — per-visit recording count on the Site visits card (one pass).
-  const visitRecCounts = await recordingCountByParent("site_visit", visits.map((v) => v.id));
-  // Spec 2026-10-09 site-visit scheduling — Edit + conflict badges. A stored
-  // "scheduled" visit past its end already reads "done" (deriveVisitStage).
-  const teamNames = users.map((u) => u.name);
-  // Jeff 2026-10-15 #35 — a scheduled visit's Edit / Delete are live only for its lead or an approver.
-  const visitRoster = everyone.map((u) => ({ id: u.id, name: u.name }));
-  const conflictVisits = visits
-    .filter((v) => v.stage === "scheduled" && v.startAt != null)
-    .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0))
-    .slice(0, 10);
-  const conflictIds = conflictVisits.map((v) => v.id);
-  // Changes when an edit lands, so the badges are asked for again.
-  const conflictVersion = conflictVisits.map((v) => `${v.id}:${v.updatedAt}`).join("|");
-
-  /* ---- portal access grants (IDEAS #47) ---- */
-  const portalGrants = (await grantsFor(cust.id)).map((g) => ({
-    id: g.id,
-    name: g.name,
-    email: g.email,
-    path: grantPath(g),
-    createdAt: g.createdAt,
-    revoked: !!g.revokedAt,
-    lastSeenAt: g.lastSeenAt ?? null,
-  }));
-
   /* ---- edit-modal initial ---- */
   const editInitial: SaveCustomerInput = {
     id: cust.id,
@@ -306,7 +210,6 @@ export default async function CustomerDetailPage({
   };
 
   const tc = typeColor(cust.type);
-  const commWaiting = threads.filter((t) => t.status === "waiting_us").length;
   const feedGroups = groupRows(feedRows, Date.now());
 
   /* ---- #23 lifecycle pill + custom-field detail rows ---- */
@@ -436,31 +339,6 @@ export default async function CustomerDetailPage({
           ))}
         </div>
 
-        {rewards && (
-          <RewardsCard
-            view={rewards}
-            canApprove={can("approve", me.roles)}
-            credit={rewardCredit}
-            canAdjust={can("manage_users", me.roles)}
-            quoteRefs={Object.fromEntries(quotes.filter((q) => q.customerId === cust.id).map((q) => [q.id, displayQuoteNumber(q)]))}
-            perks={
-              rewardCredit
-                ? {
-                    // #282 phase 4 — availability at render time; Mark used re-checks on the server.
-                    // #282 perks+points: points to spend = pointsFor(available credit).
-                    ...companyPerkPanel(rewardsProgram.perks, rewards.earned, rewardCredit.entries, undefined, rewardCredit.available),
-                    allPerks: rewardsProgram.perks,
-                    quotes: quotes
-                      .filter((q) => q.customerId === cust.id)
-                      .slice(0, 60)
-                      .map((q) => ({ id: q.id, label: `${displayQuoteNumber(q)} · ${q.name || "Quote"}`.slice(0, 80) })),
-                    canMark: can("create", me.roles),
-                    canUndo: can("manage_users", me.roles),
-                  }
-                : null
-            }
-          />
-        )}
 
         {/* locations & venues */}
         <div style={card}>
@@ -529,67 +407,6 @@ export default async function CustomerDetailPage({
           )}
         </div>
 
-        {/* communications */}
-        <div style={card}>
-          <div style={cardHead}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 14.5, fontWeight: 600 }}>Communications</span>
-              {commWaiting > 0 && (
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#b4543a", background: "#f8ece7", border: "1px solid #eccfc4", padding: "2px 8px", borderRadius: 20 }}>
-                  {commWaiting} waiting on us
-                </span>
-              )}
-            </div>
-            <Link
-              href={`/inbox?new=${encodeURIComponent(cust.id)}`}
-              style={{ fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, border: `1px solid ${ACCENT_SOFT}`, borderRadius: 8, padding: "8px 12px", textDecoration: "none" }}
-            >
-              + Log interaction
-            </Link>
-          </div>
-          {threads.length > 0 && (
-            <ShortList
-              searchPlaceholder="Search communications…"
-              items={threads.map((t) => {
-                const sm = commStatusMeta(t.status);
-                const ident = t.assignedTo ? identOf(t.assignedTo) : null;
-                return (
-                  <Link
-                    key={t.id}
-                    href={`/inbox?thread=${encodeURIComponent(t.id)}`}
-                    className="cu-d-row"
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                  >
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 9.5, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 8px", borderRadius: 20, flexShrink: 0 }}>
-                          {sm.label}
-                        </span>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {t.subject || "Conversation"}
-                        </span>
-                      </span>
-                      <span style={{ display: "block", fontSize: 11.5, color: "#9aa0ab", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {commSnippet(t)}
-                      </span>
-                    </span>
-                    <span style={{ textAlign: "right", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                      {ident && <Avatar name={t.assignedTo} initials={ident.initials} color={ident.color} size={22} />}
-                      <span style={{ fontSize: 10.5, color: "#aab0bb" }}>{timeAgo(t.updatedAt)}</span>
-                    </span>
-                  </Link>
-                );
-              })}
-              searchText={threads.map((t) => [t.subject, commSnippet(t), t.assignedTo].filter(Boolean).join(" "))}
-            />
-          )}
-          {threads.length === 0 && (
-            <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-              No logged interactions yet. Log a call, email, or meeting to start this company&apos;s history.
-            </div>
-          )}
-        </div>
-
         {/* ---- activity (#21) — merged feed + real-note composer ---- */}
         <div style={card}>
           <div style={cardHead}>
@@ -647,62 +464,13 @@ export default async function CustomerDetailPage({
           )}
           {feedRows.length === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-              No activity yet — quotes, messages, visits and notes will land here.
+              No activity yet — quotes and notes will land here.
             </div>
           )}
         </div>
 
-        {/* documents (#218) — company files; customer uploads show as New */}
+        {/* documents (#218) — company files */}
         <DocumentsCard customerId={cust.id} />
-
-        {/* projects & orders */}
-        <div style={card}>
-          <div style={cardHead}>
-            <div style={{ fontSize: 14.5, fontWeight: 600 }}>Projects &amp; orders</div>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{custProjects.length}</span>
-          </div>
-          {custProjects.length > 0 && (
-            <ShortList
-              searchPlaceholder="Search projects & orders…"
-              items={custProjects.map((p) => {
-                const label = p.stageMeta?.label ?? p.stage;
-                const done = isDone(p);
-                const risk = !done && riskFlags(p).length > 0;
-                const m = done
-                  ? { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", l: label }
-                  : risk
-                    ? { ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4", l: label }
-                    : { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", l: label };
-                return (
-                  <Link
-                    key={p.id}
-                    href={`/projects?id=${encodeURIComponent(p.id)}`}
-                    className="cu-d-row"
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                  >
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: "block", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {p.name || p.id}
-                      </span>
-                      <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
-                        {p.id} · {p.kind === "order" ? "Sales order" : "Project"} · {formatJobValue(p, money)}
-                      </span>
-                    </span>
-                    <span style={{ fontSize: 9.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
-                      {m.l}
-                    </span>
-                  </Link>
-                );
-              })}
-              searchText={custProjects.map((p) => [p.name, p.id, p.stageMeta?.label ?? p.stage].filter(Boolean).join(" "))}
-            />
-          )}
-          {custProjects.length === 0 && (
-            <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-              No active projects for this company.
-            </div>
-          )}
-        </div>
 
         <div className="cu-detail-grid">
           {/* quotes */}
@@ -754,48 +522,8 @@ export default async function CustomerDetailPage({
             )}
           </div>
 
-          {/* right column: surveys + contacts */}
+          {/* right column: roles, vendor quotes, details, contacts */}
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <div style={{ ...card, marginBottom: 0 }}>
-              <div style={cardHead}>
-                <span style={{ fontSize: 14.5, fontWeight: 600 }}>Site surveys</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{custSurveys.length}</span>
-              </div>
-              {custSurveys.length > 0 && (
-                <ShortList
-                  searchPlaceholder="Search site surveys…"
-                  items={custSurveys.map((s) => {
-                    const sm = surveyStageMeta(s.stage || "requested");
-                    return (
-                      <Link
-                        key={s.id}
-                        href={`/venue-assessments?id=${encodeURIComponent(s.id)}`}
-                        className="cu-d-row"
-                        style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                      >
-                        <span style={{ fontSize: 10, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
-                          {sm.label}
-                        </span>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {s.venue || s.venueType || "Site survey"}
-                        </span>
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", flexShrink: 0 }}>{s.id}</span>
-                      </Link>
-                    );
-                  })}
-                  searchText={custSurveys.map((s) => [s.venue, s.venueType, s.id, surveyStageMeta(s.stage || "requested").label].filter(Boolean).join(" "))}
-                />
-              )}
-              {custSurveys.length === 0 && (
-                <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-                  No site surveys yet.
-                </div>
-              )}
-            </div>
-
-            {/* #340 assessments engine — this company's assessments and findings (with the customer code) */}
-            <AssessmentsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
-            <FindingsCard customerId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             {/* #348 — leads / estimates / projects this company is on (owner, GC, EC, architect, vendor…) */}
             <CompanyRolesCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
             <QuotesReceivedCard companyId={cust.id} style={{ ...card, marginBottom: 0 }} headStyle={cardHead} />
@@ -860,121 +588,7 @@ export default async function CustomerDetailPage({
 
             <CompanyLogoCard companyId={cust.id} companyName={cust.name} logoSrc={companyLogo?.dataUrl ?? null} />
 
-            <PortalAccessCard
-              customerId={cust.id}
-              contacts={(cust.contacts || []).map((ct) => ({
-                name: ct.name,
-                email: ct.email || "",
-              }))}
-              grants={portalGrants}
-            />
 
-            {/* #245 — Portal activity: counts over this company's portal-catalog
-                quotes. Hidden when there are none; no /quotes?customer= filter
-                exists yet, so this is plain text, not a link. */}
-            {portalQuotes.length > 0 && (
-              <div style={{ fontSize: 12, color: "#8c919c", padding: "0 2px" }}>
-                Portal activity: {portalQuotes.length} portal quote
-                {portalQuotes.length === 1 ? "" : "s"}
-                {portalAwaitingApproval > 0 &&
-                  ` · ${portalAwaitingApproval} awaiting approval`}
-                {portalInReview > 0 && ` · ${portalInReview} in review`}
-              </div>
-            )}
-
-            {/* ---- site visits (D76/#34) — Inbox-scheduled + lead-requested ---- */}
-            {visits.length > 0 && (
-              <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>
-                  Site visits
-                </div>
-                <VisitConflictProvider ids={conflictIds} version={conflictVersion}>
-                <ShortList
-                  searchPlaceholder="Search site visits…"
-                  items={visits.map((v) => {
-                    const sm = VISIT_STAGE_META[v.stage];
-                    const va = visitAddr.get(v.id);
-                    return (
-                      <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
-                            {v.reason}
-                            {v.venue ? " · " + v.venue : ""}
-                          </div>
-                          <span
-                            style={{
-                              fontSize: 9.5,
-                              fontWeight: 600,
-                              color: sm.ink,
-                              background: sm.soft,
-                              border: `1px solid ${sm.bd}`,
-                              padding: "1px 7px",
-                              borderRadius: 20,
-                              whiteSpace: "nowrap",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {sm.label}
-                          </span>
-                          <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
-                          <VisitConflictChip id={v.id} />
-                          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
-                            {v.stage === "scheduled" && v.startAt != null && v.endAt != null ? (
-                              <EditVisitButton
-                                visit={{
-                                  id: v.id,
-                                  customerId: v.customerId,
-                                  locationId: v.locationId,
-                                  address: v.address,
-                                  title: [v.reason, v.venue].filter(Boolean).join(" · "),
-                                  startAt: v.startAt,
-                                  endAt: v.endAt,
-                                  assignedTo: v.assignedTo,
-                                  attendees: v.attendees,
-                                }}
-                                team={teamNames}
-                                canEdit={canChangeVisit(v, me, visitRoster)}
-                              />
-                            ) : null}
-                            {can("create", me.roles) && (
-                              <Link
-                                href={`/assessments/new?visit=${encodeURIComponent(v.id)}`}
-                                style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}
-                              >
-                                Start assessment
-                              </Link>
-                            )}
-                            <DeleteVisitButton id={v.id} canDelete={canChangeVisit(v, me, visitRoster)} />
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
-                          {v.startAt != null
-                            ? new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-                            : v.preferredTiming || "Not scheduled yet"}
-                          {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
-                          {v.attendees.length ? " + " + v.attendees.join(", ") : ""}
-                          {v.invite?.sentAt ? " · invite sent" : ""}
-                        </div>
-                        {v.stage !== "done" && va && va.status !== "verified" && (
-                          <div style={{ marginTop: 3 }}>
-                            <AddressFlagBadge flag={{ text: FLAG_TEXT.unverified, fix: va.fix }} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  searchText={visits.map((v) => [v.reason, v.venue, VISIT_STAGE_META[v.stage]?.label, v.assignedTo].filter(Boolean).join(" "))}
-                />
-                </VisitConflictProvider>
-              </div>
-            )}
-
-            {/* ---- recordings (Krisp spec §6) — every recording under this customer ---- */}
-            <CustomerRecordingsCard customerId={cust.id} />
-
-            {/* ---- #323 Krisp meetings linked here + what the customer owes us ---- */}
-            <MeetingsCard kind="company" id={cust.id} viewerId={me.id} />
-            <WaitingOnCustomerCard by="customerId" ids={[cust.id]} />
 
 
           </div>

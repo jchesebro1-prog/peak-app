@@ -1,16 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type CSSProperties, type MouseEvent } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { openGridDesignForQuoteAction } from "./grid-design-actions";
-import { GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
-import { addPackageFileAction, generateGridDrawingsAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction, setPackagePeakHeaderAction } from "./package-actions";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { addPackageFileAction, packagePanelAction, rebuildPackageZipAction, removePackageFileAction, setPackagePeakHeaderAction } from "./package-actions";
 import { putPackageFile } from "./package-file-upload";
-import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";
 import { PACKAGE_FILE_ACCEPT, PACKAGE_FILE_KIND_LABEL, PACKAGE_FILE_KINDS, PACKAGE_FILES_COPY, type PackageFileKind } from "@/lib/estimate-output/package-files";
 import type { PackagePanel } from "@/lib/estimate-output/package-panel-server";
-import { GRID_SET_COPY } from "@/lib/design/grid-set-print";
 import { BOOK_COVER_COPY, quoteDatasheetsPdfPath } from "@/lib/part-docs/datasheet-book-cover";
 import { postChanged } from "@/lib/popout/channel";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
@@ -23,9 +17,8 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
  * after each action — no quote data comes from the Estimator.
  * #305: `section` lets the Package step show the package half and Send & track the responses.
  * #333: Build package splits it — "documents" (gap chips, the datasheet book,
- * drawings, Rebuild package, Include Peak header) on the Client package tab,
- * "grid" (Design in the Grid, authoring) on the Narrative tab; "all" (the
- * default) is the Client link panel's whole block. `refreshKey` re-reads the
+ * drawings, Rebuild package, Include Peak header) on the Client package tab;
+ * "all" (the default) is the Client link panel's whole block. `refreshKey` re-reads the
  * panel when it changes (the project's package selection after a write lands).
  */
 
@@ -40,19 +33,16 @@ const linkBtn: CSSProperties = { background: "none", border: "none", padding: 0,
 export function PackageStaffPanel({
   quoteId,
   section = "all",
-  beforeGrid,
   refreshKey,
   onFiles,
   onPdf,
 }: {
   quoteId: string;
-  section?: "all" | "documents" | "grid" | "responses";
+  section?: "all" | "documents" | "responses";
   /** #333: a change re-reads the panel (gap chips follow the saved selection). */
   refreshKey?: string;
   /** #333: how many drawings the client would see (an upload hides a Grid file of its kind) — the Client package tab's count. */
   onFiles?: (visible: number) => void;
-  /** #316: saves the estimate's unsaved edits first (the Estimator's awaitable `saveNow`) — the Grid's From-estimate tray reads the SAVED quote. Resolves to false when nothing was written. Omitted = nothing to save. */
-  beforeGrid?: () => Promise<number | false>;
   /** Spec 2026-10-16 §4: a drawing change re-rendered the customer PDF — hand the Estimator its view (Updating PDF…). */
   onPdf?: (v: QuotePdfView) => void;
 }) {
@@ -62,11 +52,6 @@ export function PackageStaffPanel({
   const [kind, setKind] = useState<PackageFileKind>("drawing");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  /** #314: "Design in the Grid" runs on its own, so the drawings controls stay usable meanwhile. */
-  const [gridPending, startGrid] = useTransition();
-  /** #316: the save that runs before the Grid opens (label reads "Saving…" meanwhile). */
-  const [gridSaving, setGridSaving] = useState(false);
-  const router = useRouter();
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -158,87 +143,6 @@ export function PackageStaffPanel({
       await reload();
     });
 
-  const generate = () =>
-    start(async () => {
-      setErr(null);
-      setNote(GRID_SET_COPY.generating);
-      let r: Awaited<ReturnType<typeof generateGridDrawingsAction>>;
-      try {
-        r = await generateGridDrawingsAction(quoteId);
-      } catch {
-        setNote(null);
-        setErr(FAILED);
-        return;
-      }
-      setNote(r.ok ? GRID_SET_COPY.generated : null);
-      if (r.ok && r.pdf) onPdf?.(r.pdf);
-      if (!r.ok) setErr(r.error);
-      else postChanged("quote", quoteId);
-      // Spec 2026-10-16 §4: the drawing set used this request's time — the PDF renders in a new request
-      // (the PDF's own Retry path). If this call fails the PDF already reads "Out of date" with Retry.
-      if (r.ok && r.appendixMoved) {
-        const next = await retryQuotePdfAction(quoteId).catch(() => null);
-        if (next) onPdf?.(next);
-      }
-      await reload();
-    });
-
-  /** #316: the Grid reads the SAVED estimate, so unsaved edits are written before ANY trip to it.
-   *  saveNow reports its own cause in the Estimator's banner; this says why the Grid did not open.
-   *  True = go ahead (nothing to save, or it saved). */
-  const saveBeforeGrid = async (): Promise<boolean> => {
-    if (!beforeGrid) return true;
-    setGridSaving(true);
-    let saved: number | false = false;
-    try {
-      saved = await beforeGrid();
-    } catch {
-      saved = false;
-    } finally {
-      setGridSaving(false);
-    }
-    if (saved === false) {
-      setErr(GRID_LINK_COPY.saveFailed);
-      return false;
-    }
-    return true;
-  };
-
-  /** #316: "Open Grid design →" stays a real link (middle-click, copy link) — a plain left click saves first. */
-  const openLinkedGrid = (e: MouseEvent<HTMLAnchorElement>, href: string) => {
-    if (!beforeGrid) return;
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    e.preventDefault();
-    if (gridPending) return;
-    startGrid(async () => {
-      setErr(null);
-      setNote(null);
-      if (!(await saveBeforeGrid())) return;
-      router.push(href);
-    });
-  };
-
-  /** #314 — open (or start) the Grid design that draws this estimate. */
-  const designInGrid = () =>
-    startGrid(async () => {
-      setErr(null);
-      setNote(null);
-      if (!(await saveBeforeGrid())) return;
-      let r: Awaited<ReturnType<typeof openGridDesignForQuoteAction>>;
-      try {
-        r = await openGridDesignForQuoteAction(quoteId);
-      } catch {
-        setErr(FAILED);
-        return;
-      }
-      if (!r.ok) {
-        setErr(r.error);
-        return;
-      }
-      postChanged("quote", quoteId);
-      router.push(`/design/grid/${encodeURIComponent(r.projectId)}`);
-    });
-
   const rebuild = () =>
     start(async () => {
       setErr(null);
@@ -257,7 +161,6 @@ export function PackageStaffPanel({
   if (!panel) return <span style={small}>{err || "Loading the client package…"}</span>;
   const canUpload = panel.canSend && panel.uploads && !pending;
   const showDocuments = section === "all" || section === "documents";
-  const showGrid = section === "all" || section === "grid";
 
   return (
     <div data-testid="package-staff" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
@@ -333,56 +236,10 @@ export function PackageStaffPanel({
                 if (file) upload(file);
               }}
             />
-            <button
-              type="button"
-              onClick={generate}
-              disabled={!canUpload || !panel.grid}
-              title={panel.grid ? `From ${panel.grid.label}` : GRID_LINK_COPY.generateNeedsDesign}
-              style={{ ...btn, ...(canUpload && panel.grid ? {} : off) }}
-            >
-              Generate from Grid
-            </button>
           </div>
           {!panel.uploads && <span style={small}>{PACKAGE_FILES_COPY.noStorage}</span>}
         </>
       )}
-      {showGrid && (
-        <>
-          {/* #314 — draw this estimate's plans in the Grid; the estimate keeps its parts and prices. */}
-          {panel.gridEligible && (
-            <div data-testid="package-grid-design" style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
-              {panel.grid ? (
-                <Link
-                  href={`/design/grid/${encodeURIComponent(panel.grid.projectId)}`}
-                  onClick={(e) => openLinkedGrid(e, `/design/grid/${encodeURIComponent(panel.grid!.projectId)}`)}
-                  aria-busy={gridPending}
-                  style={{ ...btn, textDecoration: "none", alignSelf: "flex-start", ...(gridPending ? { opacity: 0.55 } : {}) }}
-                >
-                  {gridSaving ? GRID_LINK_COPY.saving : GRID_LINK_COPY.open}
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  onClick={designInGrid}
-                  disabled={gridPending || !panel.canCreate}
-                  title={panel.canCreate ? "Start a Grid design from this estimate — place its parts on the plan" : "You can't create designs."}
-                  style={{ ...btn, alignSelf: "flex-start", ...(gridPending || !panel.canCreate ? off : {}) }}
-                >
-                  {gridSaving ? GRID_LINK_COPY.saving : gridPending ? GRID_LINK_COPY.opening : GRID_LINK_COPY.design}
-                </button>
-              )}
-              <span style={small}>
-                {panel.grid
-                  ? panel.grid.estimateOwned
-                    ? `${panel.grid.label} — drawings only; parts and prices stay here.`
-                    : `${panel.grid.label}`
-                  : "Plans, riser and drawing set from this estimate's parts. Parts and prices stay here."}
-              </span>
-            </div>
-          )}
-        </>
-      )}
-
       {(section === "all" || section === "responses") && (
         <>
           <span style={label}>Client responses</span>

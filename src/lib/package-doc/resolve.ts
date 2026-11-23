@@ -5,7 +5,6 @@ import type { SpecSection } from "@/app/(app)/estimator/types";
 import { lineOwnModel } from "@/lib/catalog-rename/sku";
 import { photoTagText } from "@/lib/estimate-output/photo-models";
 import { PLACEHOLDER_SRC } from "@/lib/part-image-fallback";
-import { rewardPointsAppliedLabel } from "@/lib/rewards/points";
 import { findLine, findSection, resolveChip } from "./chips";
 import { lineAnchorInBom, productBlockInBom } from "./gaps";
 import { linePlaceholder } from "./print";
@@ -32,7 +31,7 @@ import { nextLastSide, resolveAutoAlign, type Side } from "./photo-sides";
  *   systemTotal → the system's name + systemSellTotal (alternate systems
  *     flagged); a missing system → dropped
  *   priceTable → printed In-total systems (name · systemSellTotal), the tax
- *     and Rewards credit rows, Total = t.grand — the totals block's numbers;
+ *     row, Total = t.grand — the totals block's numbers;
  *     printed alternates listed separately ("priced separately")
  */
 
@@ -152,14 +151,10 @@ export function productImageOf(b: PDProductImage, ctx: Pick<PackageDocCtx, "sect
 export function priceTableOf(ctx: PackageDocCtx): RPriceTable {
   const secs = Array.isArray(ctx.sections) ? ctx.sections : [];
   const row = (s: SpecSection): RPriceRow => ({ name: s.name || "", price: fmt(systemSellTotal(s)) });
-  const credit = ctx.t.credit || 0;
   return {
     t: "price",
     rows: secs.filter((s) => s && s.alternate !== true && systemPrintsInBody(s)).map(row),
-    extra: [
-      ...(ctx.t.tax > 0 ? [{ name: `Sales tax (${ctx.taxRatePct ?? 0}%)`, price: fmt(ctx.t.tax) }] : []),
-      ...(credit > 0 ? [{ name: rewardPointsAppliedLabel(credit), price: "−" + fmt(credit) }] : []),
-    ],
+    extra: ctx.t.tax > 0 ? [{ name: `Sales tax (${ctx.taxRatePct ?? 0}%)`, price: fmt(ctx.t.tax) }] : [],
     totalLabel: ctx.totalLabel || "Total",
     total: fmt(ctx.t.grand),
     alternates: secs.filter((s) => s && s.alternate === true && systemPrintsInBody(s)).map(row),

@@ -1,5 +1,5 @@
 import { quoteBom } from "@/lib/client-package-server";
-import { internalSkuCheck } from "@/lib/design/grid-virtual-parts";
+import { internalSkuCheck } from "@/lib/quote-line-ids";
 import type { FixtureRecord } from "@/lib/fixture-assemblies";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadScopedCoverage } from "@/lib/part-docs/load";
@@ -16,7 +16,7 @@ import { normalizePackageSelection, type PackageSelection } from "./package-sele
  * #301 slice C (D-l) — the documents an estimate package offers, for one
  * quote spec (a sent revision's for the client; the live quote's for the
  * staff gap chip). The staff client package's BOM rule (quoteBom: rack
- * lines expand into their members, labor / credit / zero-qty lines drop
+ * lines expand into their members, labor / zero-qty lines drop
  * out) and its coverage rule (resolvePackageDocs in the quote's own
  * context), over scoped reads only (Slice C adaptation 1). Server-only.
  *

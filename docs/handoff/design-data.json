@@ -1,0 +1,8020 @@
+{
+ "_about": {
+  "what": "Built-in data for an offline 'plan, place devices, BOM' program spun out of the Quartzite Design tab.",
+  "generated": "2026-11-19, by running the repository's own modules (bundled with esbuild) and dumping their exported constants; prose strings were written by hand from the same files.",
+  "units": "Feet unless a key says otherwise. Template polygons: x right, y DOWN, origin at the top-left of the drawing's bounding box, stage/platform at the top.",
+  "spec": "docs/handoff/design-spec.md",
+  "noDollars": "The app carries no built-in equipment prices: every equation item is priced from an Equipment map that starts empty. Only the seed fabric rates and the percentage defaults below are money-related."
+ },
+ "tiers": {
+  "list": [
+   {
+    "key": "good",
+    "label": "Good",
+    "blurb": "Value spec — proven economy gear",
+    "referenceCostMul": 0.8,
+    "referencePriceMul": 0.84
+   },
+   {
+    "key": "better",
+    "label": "Better",
+    "blurb": "Balanced spec — pro-grade, best value",
+    "referenceCostMul": 1,
+    "referencePriceMul": 1
+   },
+   {
+    "key": "best",
+    "label": "Best",
+    "blurb": "Premium spec — top-tier, future-proof",
+    "referenceCostMul": 1.3,
+    "referencePriceMul": 1.42
+   }
+  ],
+  "note": "referenceCostMul / referencePriceMul are inert for map-priced systems (every system priced from the Equipment map is 'tierFixed' and ignores them). A tier changes price only through (a) which part is mapped per tier, (b) the line-set dial, (c) the tier multipliers on Cable Package, wire pull and labor.",
+  "defaultTier": "better",
+  "tierMultipliersDefault": {
+   "good": 1,
+   "better": 1.15,
+   "best": 1.3
+  },
+  "tierMultiplierMax": 3,
+  "specTextBySystem": {
+   "good": {
+    "rigging": "Manual counterweight, basic line sets",
+    "curtains": "22 oz Encore velour, fixed track",
+    "lighting": "LED Pars & basic ellipsoidals, manual focus",
+    "controls": "Entry console, single universe, basic distro",
+    "audio": "Compact line array, single sub, digital mixer",
+    "video": "1080p laser projector, manual screen",
+    "acoustical": "Rolling shell towers, fabric ceiling",
+    "pit": "Legged deck infill, manual rails"
+   },
+   "better": {
+    "rigging": "Counterweight / motor-assist, T-track guides",
+    "curtains": "25 oz Charisma velour, walkalong / draw track",
+    "lighting": "Pro RGBA LED wash + profile spots, DMX movers on key positions",
+    "controls": "Pro console + touchscreen, multi-universe sACN, managed distro",
+    "audio": "Pro line array + subs, networked digital console & DSP",
+    "video": "4K laser projector, motorized screen / entry LED wall",
+    "acoustical": "Modular towers + acoustic ceiling, lighting taps",
+    "pit": "Engineered legged / clear-span deck, removable rails"
+   },
+   "best": {
+    "rigging": "Fully automated hoists, variable-speed control & monitoring",
+    "curtains": "25 oz Memorable velour, motorized track & added fullness",
+    "lighting": "Full moving-light rig, color-mixing profiles, networked sACN + spares",
+    "controls": "Flagship console + tracking backup, redundant network & architectural integration",
+    "audio": "Premium array, cardioid subs, redundant Dante DSP",
+    "video": "Dual-4K stack or fine-pitch LED wall, redundant processing",
+    "acoustical": "Automated shell, hard ceiling, motorized transport",
+    "pit": "Clear-span structural deck, flush finish, fast-change hardware"
+   }
+  },
+  "defaultFabricSkuByTier": {
+   "good": {
+    "draw": "RB-EN-16",
+    "legs": "RB-EN-16",
+    "border": "RB-EN-16",
+    "fullstage": "RB-EN-16"
+   },
+   "better": {
+    "draw": "RB-MARVEL",
+    "legs": "RB-MARVEL",
+    "border": "RB-MARVEL",
+    "fullstage": "RB-MARVEL"
+   },
+   "best": {
+    "draw": "RB-MV-MN",
+    "legs": "RB-MV-MN",
+    "border": "RB-MV-MN",
+    "fullstage": "RB-MV-MN"
+   }
+  },
+  "lineSetDial": {
+   "perTier": true,
+   "default": null,
+   "meaning": "null = the equation's own line-set count (rigSets); a number 1-300 rescales every rigging quantity by dial / rigSets, each rounded, never below 0."
+  }
+ },
+ "systems": [
+  {
+   "key": "rigging",
+   "equipmentMapLabel": "Rigging",
+   "quickDesignLabel": "Rigging",
+   "subtitle": "Counterweight line sets",
+   "quickDesignColor": "#7b3f8a",
+   "gridScope": "Rigging",
+   "autoFillable": true,
+   "subOptions": {
+    "mode": "single",
+    "stateKey": "rigType",
+    "options": [
+     {
+      "key": "counterweight",
+      "label": "Counterweight"
+     },
+     {
+      "key": "deadhung",
+      "label": "Dead Hung"
+     },
+     {
+      "key": "motorized",
+      "label": "Motorized"
+     }
+    ]
+   }
+  },
+  {
+   "key": "curtains",
+   "equipmentMapLabel": "Curtains",
+   "quickDesignLabel": "Curtains",
+   "subtitle": "Drapery, curtains, tracks",
+   "quickDesignColor": "#b4543a",
+   "gridScope": "Curtains",
+   "autoFillable": true,
+   "subOptions": {
+    "mode": "multi",
+    "stateKey": "drape",
+    "options": [
+     {
+      "key": "draw",
+      "label": "Draw"
+     },
+     {
+      "key": "legs",
+      "label": "Legs"
+     },
+     {
+      "key": "border",
+      "label": "Border"
+     },
+     {
+      "key": "scenerytrack",
+      "label": "Scenery"
+     },
+     {
+      "key": "fullstage",
+      "label": "Full"
+     }
+    ]
+   }
+  },
+  {
+   "key": "lighting",
+   "equipmentMapLabel": "Lighting",
+   "quickDesignLabel": "Fixtures",
+   "subtitle": "Fixtures, dimming, electrics",
+   "quickDesignColor": "#c98a2b",
+   "gridScope": "Lighting",
+   "autoFillable": true,
+   "subOptions": {
+    "mode": "multi",
+    "stateKey": "fixtures",
+    "options": [
+     {
+      "key": "par",
+      "label": "Par"
+     },
+     {
+      "key": "front",
+      "label": "Front"
+     },
+     {
+      "key": "cyc",
+      "label": "Cyc"
+     },
+     {
+      "key": "side",
+      "label": "Side"
+     },
+     {
+      "key": "automated",
+      "label": "Mover"
+     }
+    ]
+   }
+  },
+  {
+   "key": "controls",
+   "equipmentMapLabel": "Controls",
+   "quickDesignLabel": "Controls",
+   "subtitle": "Console, network, E-stop",
+   "quickDesignColor": "#1f7a52",
+   "gridScope": null,
+   "autoFillable": false,
+   "subOptions": {
+    "mode": "multi",
+    "stateKey": "ctrl",
+    "options": [
+     {
+      "key": "console",
+      "label": "Console"
+     },
+     {
+      "key": "architectural",
+      "label": "Architectural"
+     },
+     {
+      "key": "data",
+      "label": "Data"
+     }
+    ]
+   }
+  },
+  {
+   "key": "acoustical",
+   "equipmentMapLabel": "Acoustical",
+   "quickDesignLabel": "Acoustical Shell",
+   "subtitle": "Orchestra shell towers & ceiling",
+   "quickDesignColor": "#6f6f78",
+   "gridScope": null,
+   "autoFillable": false,
+   "subOptions": {
+    "mode": "multi",
+    "stateKey": "shell",
+    "options": [
+     {
+      "key": "towers",
+      "label": "Towers"
+     },
+     {
+      "key": "ceiling",
+      "label": "Ceiling"
+     },
+     {
+      "key": "transport",
+      "label": "Transport"
+     }
+    ]
+   }
+  },
+  {
+   "key": "pit",
+   "equipmentMapLabel": "Pit",
+   "quickDesignLabel": "Pit Filler",
+   "subtitle": "Pit lift cover & decking",
+   "quickDesignColor": "#9a4a6a",
+   "gridScope": null,
+   "autoFillable": false,
+   "subOptions": {
+    "mode": "single",
+    "stateKey": "pitType",
+    "options": [
+     {
+      "key": "legged",
+      "label": "Legged"
+     },
+     {
+      "key": "clearspan",
+      "label": "Clear-Span"
+     }
+    ]
+   }
+  },
+  {
+   "key": "audio",
+   "equipmentMapLabel": "Audio",
+   "quickDesignLabel": "Audio",
+   "subtitle": "Speakers, mixing, DSP",
+   "quickDesignColor": "#3155a8",
+   "gridScope": "Audio",
+   "autoFillable": true,
+   "subOptions": null
+  },
+  {
+   "key": "video",
+   "equipmentMapLabel": "Video",
+   "quickDesignLabel": "Video",
+   "subtitle": "Projection / LED, switching",
+   "quickDesignColor": "#2a7d8a",
+   "gridScope": "Video",
+   "autoFillable": true,
+   "subOptions": null
+  }
+ ],
+ "gridScopes": {
+  "layers": [
+   {
+    "key": "Lighting",
+    "color": "#e08b1f",
+    "drawingSheetPrefix": "L"
+   },
+   {
+    "key": "Rigging",
+    "color": "#6b4fa1",
+    "drawingSheetPrefix": "R"
+   },
+   {
+    "key": "Curtains",
+    "color": "#b0367c",
+    "drawingSheetPrefix": "R"
+   },
+   {
+    "key": "Audio",
+    "color": "#2e9e6b",
+    "drawingSheetPrefix": "A"
+   },
+   {
+    "key": "Video",
+    "color": "#3155a8",
+    "drawingSheetPrefix": "V"
+   },
+   {
+    "key": "Unscoped",
+    "color": "#8c919c",
+    "drawingSheetPrefix": "G"
+   }
+  ],
+  "note": "Every placed device has exactly one scope, computed from its part (part.gridScope, else catalog group, else trade, else Unscoped). Curtains print with Rigging on the R sheets.",
+  "catalogGroupToScope": {
+   "Lighting Controls": "Lighting",
+   "Fixtures": "Lighting",
+   "Video Controls": "Video",
+   "Speakers": "Audio",
+   "Audio Controls": "Audio",
+   "Curtains": "Curtains"
+  },
+  "tradeToScope": {
+   "Lighting": "Lighting",
+   "Rigging": "Rigging"
+  },
+  "drawingSystems": [
+   {
+    "key": "lighting",
+    "prefix": "L",
+    "title": "Lighting plan",
+    "scopes": [
+     "Lighting"
+    ]
+   },
+   {
+    "key": "audio",
+    "prefix": "A",
+    "title": "Audio plan",
+    "scopes": [
+     "Audio"
+    ]
+   },
+   {
+    "key": "video",
+    "prefix": "V",
+    "title": "Video plan",
+    "scopes": [
+     "Video"
+    ]
+   },
+   {
+    "key": "rigging",
+    "prefix": "R",
+    "title": "Rigging & drapery plan",
+    "scopes": [
+     "Rigging",
+     "Curtains"
+    ]
+   },
+   {
+    "key": "general",
+    "prefix": "G",
+    "title": "General devices plan",
+    "scopes": [
+     "Unscoped"
+    ]
+   }
+  ],
+  "bomHeadings": [
+   {
+    "key": "rigging",
+    "label": "Rigging"
+   },
+   {
+    "key": "curtains",
+    "label": "Curtains"
+   },
+   {
+    "key": "lighting",
+    "label": "Lighting"
+   },
+   {
+    "key": "audio",
+    "label": "Audio"
+   },
+   {
+    "key": "video",
+    "label": "Video"
+   },
+   {
+    "key": "controls",
+    "label": "Controls"
+   },
+   {
+    "key": "general",
+    "label": "General"
+   },
+   {
+    "key": "conduit",
+    "label": "Conduit"
+   }
+  ],
+  "deviceTypesPrintedUnderControls": [
+   "control-networking",
+   "dimming-power",
+   "rigging-control"
+  ],
+  "symbolColorKeys": {
+   "Lighting Controls": "#a66f00",
+   "Fixtures": "#d55e00",
+   "Video Controls": "#0072b2",
+   "Speakers": "#008060",
+   "Audio Controls": "#b0508a",
+   "Curtains": "#8c7b00",
+   "Lighting": "#7f4f24",
+   "Rigging": "#5e4b8b",
+   "AV": "#4b5db0",
+   "Other": "#6b7280"
+  },
+  "spaceColors": [
+   "#8a6d3b",
+   "#3b7a8a",
+   "#7a3b8a",
+   "#5f8a3b",
+   "#8a3b55",
+   "#3b508a"
+  ]
+ },
+ "venueKinds": {
+  "list": [
+   {
+    "key": "school",
+    "label": "Auditorium",
+    "subtitle": "Auditorium",
+    "planKind": "proscenium",
+    "template": "proscenium@1",
+    "hiddenDims": {},
+    "fields": [
+     {
+      "key": "width",
+      "label": "Proscenium width",
+      "note": "Opening, edge to edge",
+      "unit": "ft",
+      "default": 36,
+      "min": 20,
+      "max": 80,
+      "step": 1
+     },
+     {
+      "key": "ph",
+      "label": "Proscenium height",
+      "note": "Opening, floor to header",
+      "unit": "ft",
+      "default": 18,
+      "min": 10,
+      "max": 50,
+      "step": 1
+     },
+     {
+      "key": "depth",
+      "label": "Stage depth",
+      "note": "Plaster line to back wall",
+      "unit": "ft",
+      "default": 26,
+      "min": 14,
+      "max": 52,
+      "step": 1
+     },
+     {
+      "key": "grid",
+      "label": "Grid height",
+      "note": "Floor to grid steel",
+      "unit": "ft",
+      "default": 24,
+      "min": 16,
+      "max": 84,
+      "step": 1
+     },
+     {
+      "key": "wing",
+      "label": "Stage wing width",
+      "note": "Offstage, each side",
+      "unit": "ft",
+      "default": 12,
+      "min": 4,
+      "max": 40,
+      "step": 1
+     },
+     {
+      "key": "houseWidthFt",
+      "label": "House width",
+      "note": "Inside walls, at the back of the house",
+      "unit": "ft",
+      "default": 60,
+      "min": 45,
+      "max": 200,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     },
+     {
+      "key": "houseDepthFt",
+      "label": "House depth",
+      "note": "Plaster line to back wall",
+      "unit": "ft",
+      "default": 69,
+      "min": 40,
+      "max": 200,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     }
+    ],
+    "sizePresets": {
+     "small": {
+      "width": 28,
+      "depth": 20,
+      "grid": 19,
+      "wing": 9,
+      "ph": 14
+     },
+     "medium": {
+      "width": 36,
+      "depth": 26,
+      "grid": 24,
+      "wing": 12,
+      "ph": 18
+     },
+     "large": {
+      "width": 46,
+      "depth": 33,
+      "grid": 31,
+      "wing": 15,
+      "ph": 23
+     }
+    },
+    "defaultSystems": {
+     "rigging": true,
+     "curtains": true,
+     "lighting": true,
+     "controls": false,
+     "audio": true,
+     "video": false,
+     "acoustical": true,
+     "pit": false
+    }
+   },
+   {
+    "key": "church",
+    "label": "Church",
+    "subtitle": "Worship / MPR",
+    "planKind": "church",
+    "template": "church-traditional@1",
+    "hiddenDims": {
+     "wing": 0,
+     "ph": 18
+    },
+    "fields": [
+     {
+      "key": "width",
+      "label": "Platform width",
+      "note": "Across the back of the platform",
+      "unit": "ft",
+      "default": 34,
+      "min": 20,
+      "max": 80,
+      "step": 1
+     },
+     {
+      "key": "depth",
+      "label": "Platform depth",
+      "note": "Front edge to back wall",
+      "unit": "ft",
+      "default": 22,
+      "min": 14,
+      "max": 52,
+      "step": 1
+     },
+     {
+      "key": "grid",
+      "label": "Ceiling height",
+      "note": "Floor to ceiling",
+      "unit": "ft",
+      "default": 24,
+      "min": 16,
+      "max": 84,
+      "step": 1
+     },
+     {
+      "key": "houseWidthFt",
+      "label": "Nave width",
+      "note": "Inside walls, wall to wall",
+      "unit": "ft",
+      "default": 80,
+      "min": 50,
+      "max": 200,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     },
+     {
+      "key": "houseDepthFt",
+      "label": "Nave depth",
+      "note": "Platform front to the back-room wall",
+      "unit": "ft",
+      "default": 55,
+      "min": 20,
+      "max": 200,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     }
+    ],
+    "sizePresets": {
+     "small": {
+      "width": 27,
+      "depth": 17,
+      "grid": 19,
+      "wing": 4,
+      "ph": 14
+     },
+     "medium": {
+      "width": 34,
+      "depth": 22,
+      "grid": 24,
+      "wing": 4,
+      "ph": 18
+     },
+     "large": {
+      "width": 44,
+      "depth": 28,
+      "grid": 31,
+      "wing": 4,
+      "ph": 23
+     }
+    },
+    "defaultSystems": {
+     "rigging": false,
+     "curtains": true,
+     "lighting": true,
+     "controls": false,
+     "audio": true,
+     "video": true,
+     "acoustical": false,
+     "pit": false
+    }
+   },
+   {
+    "key": "pac",
+    "label": "PAC",
+    "subtitle": "Performing arts",
+    "planKind": "proscenium",
+    "template": "proscenium@1",
+    "hiddenDims": {},
+    "fields": [
+     {
+      "key": "width",
+      "label": "Proscenium width",
+      "note": "Opening, edge to edge",
+      "unit": "ft",
+      "default": 48,
+      "min": 20,
+      "max": 80,
+      "step": 1
+     },
+     {
+      "key": "ph",
+      "label": "Proscenium height",
+      "note": "Opening, floor to header",
+      "unit": "ft",
+      "default": 28,
+      "min": 10,
+      "max": 50,
+      "step": 1
+     },
+     {
+      "key": "depth",
+      "label": "Stage depth",
+      "note": "Plaster line to back wall",
+      "unit": "ft",
+      "default": 34,
+      "min": 14,
+      "max": 52,
+      "step": 1
+     },
+     {
+      "key": "grid",
+      "label": "Grid height",
+      "note": "Floor to grid steel",
+      "unit": "ft",
+      "default": 58,
+      "min": 16,
+      "max": 84,
+      "step": 1
+     },
+     {
+      "key": "wing",
+      "label": "Stage wing width",
+      "note": "Offstage, each side",
+      "unit": "ft",
+      "default": 18,
+      "min": 4,
+      "max": 40,
+      "step": 1
+     },
+     {
+      "key": "houseWidthFt",
+      "label": "House width",
+      "note": "Inside walls, at the back of the house",
+      "unit": "ft",
+      "default": 84,
+      "min": 48,
+      "max": 200,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     },
+     {
+      "key": "houseDepthFt",
+      "label": "House depth",
+      "note": "Plaster line to back wall",
+      "unit": "ft",
+      "default": 69,
+      "min": 40,
+      "max": 200,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     }
+    ],
+    "sizePresets": {
+     "small": {
+      "width": 37,
+      "depth": 27,
+      "grid": 45,
+      "wing": 14,
+      "ph": 22
+     },
+     "medium": {
+      "width": 48,
+      "depth": 34,
+      "grid": 58,
+      "wing": 18,
+      "ph": 28
+     },
+     "large": {
+      "width": 61,
+      "depth": 44,
+      "grid": 74,
+      "wing": 23,
+      "ph": 36
+     }
+    },
+    "defaultSystems": {
+     "rigging": true,
+     "curtains": true,
+     "lighting": true,
+     "controls": true,
+     "audio": true,
+     "video": true,
+     "acoustical": true,
+     "pit": true
+    }
+   },
+   {
+    "key": "concenter",
+    "label": "Conference",
+    "subtitle": "Conference center",
+    "planKind": "flat",
+    "template": "blackbox@1",
+    "hiddenDims": {
+     "wing": 0,
+     "ph": 24
+    },
+    "fields": [
+     {
+      "key": "width",
+      "label": "Room width",
+      "note": "Wall to wall",
+      "unit": "ft",
+      "default": 50,
+      "min": 20,
+      "max": 80,
+      "step": 1
+     },
+     {
+      "key": "depth",
+      "label": "Room depth",
+      "note": "Front to back",
+      "unit": "ft",
+      "default": 30,
+      "min": 14,
+      "max": 52,
+      "step": 1
+     },
+     {
+      "key": "grid",
+      "label": "Ceiling height",
+      "note": "Floor to ceiling",
+      "unit": "ft",
+      "default": 34,
+      "min": 16,
+      "max": 84,
+      "step": 1
+     }
+    ],
+    "sizePresets": {
+     "small": {
+      "width": 39,
+      "depth": 23,
+      "grid": 27,
+      "wing": 4,
+      "ph": 19
+     },
+     "medium": {
+      "width": 50,
+      "depth": 30,
+      "grid": 34,
+      "wing": 4,
+      "ph": 24
+     },
+     "large": {
+      "width": 64,
+      "depth": 38,
+      "grid": 44,
+      "wing": 4,
+      "ph": 31
+     }
+    },
+    "defaultSystems": {
+     "rigging": true,
+     "curtains": true,
+     "lighting": true,
+     "controls": true,
+     "audio": true,
+     "video": true,
+     "acoustical": false,
+     "pit": false
+    }
+   },
+   {
+    "key": "blackbox",
+    "label": "Black Box",
+    "subtitle": "Black box theater",
+    "planKind": "blackbox",
+    "template": "blackbox@1",
+    "hiddenDims": {
+     "wing": 0,
+     "ph": 16
+    },
+    "fields": [
+     {
+      "key": "width",
+      "label": "Room width",
+      "note": "Wall to wall",
+      "unit": "ft",
+      "default": 26,
+      "min": 20,
+      "max": 80,
+      "step": 1
+     },
+     {
+      "key": "depth",
+      "label": "Room depth",
+      "note": "Front to back",
+      "unit": "ft",
+      "default": 24,
+      "min": 14,
+      "max": 52,
+      "step": 1
+     },
+     {
+      "key": "grid",
+      "label": "Grid height",
+      "note": "Floor to tension grid",
+      "unit": "ft",
+      "default": 18,
+      "min": 16,
+      "max": 84,
+      "step": 1
+     }
+    ],
+    "sizePresets": {
+     "small": {
+      "width": 20,
+      "depth": 19,
+      "grid": 16,
+      "wing": 4,
+      "ph": 12
+     },
+     "medium": {
+      "width": 26,
+      "depth": 24,
+      "grid": 18,
+      "wing": 4,
+      "ph": 16
+     },
+     "large": {
+      "width": 33,
+      "depth": 31,
+      "grid": 23,
+      "wing": 4,
+      "ph": 20
+     }
+    },
+    "defaultSystems": {
+     "rigging": true,
+     "curtains": true,
+     "lighting": true,
+     "controls": true,
+     "audio": true,
+     "video": false,
+     "acoustical": true,
+     "pit": false
+    }
+   },
+   {
+    "key": "gym",
+    "label": "Gym Stage",
+    "subtitle": "Gymnasium stage",
+    "planKind": "gym",
+    "template": "gym-stage@1",
+    "hiddenDims": {},
+    "fields": [
+     {
+      "key": "width",
+      "label": "Opening",
+      "note": "Proscenium opening, edge to edge",
+      "unit": "ft",
+      "default": 40,
+      "min": 20,
+      "max": 80,
+      "step": 1
+     },
+     {
+      "key": "ph",
+      "label": "Stage height",
+      "note": "Floor to proscenium header",
+      "unit": "ft",
+      "default": 14,
+      "min": 10,
+      "max": 50,
+      "step": 1
+     },
+     {
+      "key": "depth",
+      "label": "Stage depth",
+      "note": "Plaster line to back wall",
+      "unit": "ft",
+      "default": 30,
+      "min": 14,
+      "max": 52,
+      "step": 1
+     },
+     {
+      "key": "grid",
+      "label": "Ceiling height",
+      "note": "Floor to structure",
+      "unit": "ft",
+      "default": 26,
+      "min": 16,
+      "max": 84,
+      "step": 1
+     },
+     {
+      "key": "wing",
+      "label": "Wings",
+      "note": "Return wall to stage side wall, each side",
+      "unit": "ft",
+      "default": 10,
+      "min": 4,
+      "max": 40,
+      "step": 1
+     },
+     {
+      "key": "houseWidthFt",
+      "label": "Gym floor width",
+      "note": "Inside walls, wall to wall",
+      "unit": "ft",
+      "default": 120,
+      "min": 69,
+      "max": 250,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     },
+     {
+      "key": "houseDepthFt",
+      "label": "Gym floor depth",
+      "note": "Stage front to back wall",
+      "unit": "ft",
+      "default": 50,
+      "min": 21,
+      "max": 200,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     }
+    ],
+    "sizePresets": {
+     "small": {
+      "width": 31,
+      "depth": 23,
+      "grid": 20,
+      "wing": 8,
+      "ph": 11
+     },
+     "medium": {
+      "width": 40,
+      "depth": 30,
+      "grid": 26,
+      "wing": 10,
+      "ph": 14
+     },
+     "large": {
+      "width": 51,
+      "depth": 38,
+      "grid": 33,
+      "wing": 13,
+      "ph": 18
+     }
+    },
+    "defaultSystems": {
+     "rigging": true,
+     "curtains": true,
+     "lighting": true,
+     "controls": false,
+     "audio": true,
+     "video": false,
+     "acoustical": false,
+     "pit": false
+    }
+   },
+   {
+    "key": "arena",
+    "label": "Arena",
+    "subtitle": "Arena / open floor",
+    "planKind": "arena",
+    "template": "arena@1",
+    "hiddenDims": {
+     "wing": 0,
+     "ph": 20
+    },
+    "fields": [
+     {
+      "key": "width",
+      "label": "Stage width",
+      "note": "End stage, edge to edge",
+      "unit": "ft",
+      "default": 40,
+      "min": 20,
+      "max": 80,
+      "step": 1
+     },
+     {
+      "key": "depth",
+      "label": "Stage depth",
+      "note": "Front edge to back",
+      "unit": "ft",
+      "default": 16,
+      "min": 14,
+      "max": 52,
+      "step": 1
+     },
+     {
+      "key": "grid",
+      "label": "Clearance height",
+      "note": "Floor to structure",
+      "unit": "ft",
+      "default": 60,
+      "min": 16,
+      "max": 84,
+      "step": 1
+     },
+     {
+      "key": "houseWidthFt",
+      "label": "Floor width",
+      "note": "Arena floor, side to side",
+      "unit": "ft",
+      "default": 90,
+      "min": 59,
+      "max": 250,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     },
+     {
+      "key": "houseDepthFt",
+      "label": "Floor length",
+      "note": "Arena floor, end to end",
+      "unit": "ft",
+      "default": 134,
+      "min": 88,
+      "max": 400,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     },
+     {
+      "key": "bowlDepthFt",
+      "label": "Bowl depth",
+      "note": "Seating, even all round",
+      "unit": "ft",
+      "default": 15,
+      "min": 0,
+      "max": 60,
+      "step": 1,
+      "houseField": true,
+      "defaultIsDerived": true
+     }
+    ],
+    "sizePresets": {
+     "small": {
+      "width": 31,
+      "depth": 14,
+      "grid": 47,
+      "wing": 4,
+      "ph": 16
+     },
+     "medium": {
+      "width": 40,
+      "depth": 16,
+      "grid": 60,
+      "wing": 4,
+      "ph": 20
+     },
+     "large": {
+      "width": 51,
+      "depth": 20,
+      "grid": 77,
+      "wing": 4,
+      "ph": 26
+     }
+    },
+    "defaultSystems": {
+     "rigging": true,
+     "curtains": false,
+     "lighting": true,
+     "controls": true,
+     "audio": true,
+     "video": true,
+     "acoustical": false,
+     "pit": false
+    }
+   }
+  ],
+  "sizePresets": {
+   "multipliers": {
+    "small": 0.78,
+    "medium": 1,
+    "large": 1.28
+   },
+   "rule": "Picking a venue or a size sets each of width/depth/grid/wing/ph to clamp(round(base x multiplier), min, max). The size key (small/medium/large) ALSO drives the equations' pick(small, medium, large) factors independently of the typed dimensions."
+  },
+  "dimensionLimits": {
+   "width": [
+    20,
+    80
+   ],
+   "depth": [
+    14,
+    52
+   ],
+   "grid": [
+    16,
+    84
+   ],
+   "wing": [
+    4,
+    40
+   ],
+   "ph": [
+    10,
+    50
+   ]
+  },
+  "clampRule": "A non-number becomes the range midpoint; anything else is clamped to [min, max]. Applied on every save and every geometry read.",
+  "houseFieldRules": "House-field limits and defaults depend on the other fields - see venueTemplates.<id>.houseFields. A blank house field means 'use the default'.",
+  "hiddenDimsNote": "A venue kind that does not show a field still carries its value (used by the equations): e.g. a church has ph 18 and wing 0.",
+  "venueTypes": {
+   "note": "CRM venue types (Settings > Venue types). Each 'works like' a built-in kind and has a Background template. A design draws: its own template override, else its venue type's Background, else the kind default.",
+   "seed": [
+    {
+     "key": "proscenium",
+     "label": "Proscenium / Auditorium",
+     "worksLike": "proscenium",
+     "order": 0
+    },
+    {
+     "key": "church",
+     "label": "Worship / Church",
+     "worksLike": "church",
+     "order": 1
+    },
+    {
+     "key": "flat",
+     "label": "Flat floor / Conference",
+     "worksLike": "flat",
+     "order": 2
+    },
+    {
+     "key": "blackbox",
+     "label": "Black box",
+     "worksLike": "blackbox",
+     "order": 3
+    },
+    {
+     "key": "arena",
+     "label": "Arena / Open floor",
+     "worksLike": "arena",
+     "order": 4
+    },
+    {
+     "key": "gymstage",
+     "label": "Gym Stage",
+     "worksLike": "proscenium",
+     "order": 5
+    }
+   ],
+   "planKindWorksLike": {
+    "proscenium": "proscenium",
+    "church": "church",
+    "flat": "flat",
+    "blackbox": "blackbox",
+    "gym": "proscenium",
+    "arena": "arena"
+   },
+   "planKindDefaultTypeKey": {
+    "proscenium": "proscenium",
+    "church": "church",
+    "flat": "flat",
+    "blackbox": "blackbox",
+    "gym": "gymstage",
+    "arena": "arena"
+   }
+  },
+  "gridIntakeDefault": {
+   "venue": "school",
+   "size": "large",
+   "width": 50,
+   "depth": 30,
+   "ph": 20,
+   "wing": 10,
+   "grid": 45,
+   "systems": "the Auditorium preset's"
+  },
+  "quickDesignDefault": {
+   "venue": "concenter",
+   "size": "large",
+   "width": 50,
+   "depth": 30,
+   "grid": 50,
+   "wing": 10,
+   "ph": 20,
+   "sys": {
+    "rigging": true,
+    "curtains": true,
+    "lighting": true,
+    "controls": true,
+    "audio": false,
+    "video": false,
+    "acoustical": true,
+    "pit": true
+   },
+   "tier": "better",
+   "rigType": "motorized",
+   "drape": {
+    "draw": true,
+    "legs": true,
+    "border": true,
+    "scenerytrack": false,
+    "fullstage": true
+   },
+   "fixtures": {
+    "par": true,
+    "front": true,
+    "cyc": true,
+    "side": true,
+    "automated": true
+   },
+   "ctrl": {
+    "console": true,
+    "architectural": true,
+    "data": true
+   },
+   "shell": {
+    "towers": true,
+    "ceiling": true,
+    "transport": true
+   },
+   "pitType": "clearspan",
+   "mode": "auto"
+  }
+ },
+ "venueTemplates": {
+  "_note": "Simplified outlines at each template's own drawn size: inside faces of the named areas, curves sampled to short straight runs (arena outlines thinned to about 30 points). Enough to draw a base plan and to place by rule; not the full drawing (the full line work is src/lib/design/venue-templates/<kind>.json, 12-75 segments each, drawing inches, y up).",
+  "canvas": {
+   "note": "The app lays a stretched template on a 640 px wide canvas and stores placements as fractions 0..1 of that sheet. An offline program can use feet directly.",
+   "prosceniumMarginsPx": "see prosGeom in src/app/(app)/design/quick/plan-svg.tsx",
+   "churchMarginsPx": {
+    "W": 640,
+    "ML": 62,
+    "MR": 40,
+    "MT": 54,
+    "MB": 44
+   }
+  },
+  "templates": {
+   "proscenium@1": {
+    "label": "Auditorium / PAC",
+    "family": "proscenium",
+    "retired": false,
+    "worksLike": [
+     "proscenium"
+    ],
+    "defaultForKinds": [
+     "proscenium"
+    ],
+    "defaultForVenueTypes": [],
+    "drawnAt": {
+     "proWidthFt": 50,
+     "wingFt": 15,
+     "stageDepthFt": 30,
+     "houseWidthFt": 79.767,
+     "houseDepthFt": 68.842
+    },
+    "drawnAtNote": "The size the source drawing was made at (the stretch is the identity here). proWidthFt/wingFt/stageDepthFt/houseWidthFt/houseDepthFt are the engine's generic stretch inputs; see stretch.inputs for what each means in this template.",
+    "boundsFt": {
+     "w": 81,
+     "h": 110.34
+    },
+    "wallThicknessFt": 0.5,
+    "roles": {
+     "stage": "Stage",
+     "house": "House",
+     "booth": "Booth",
+     "catwalk": "Catwalk"
+    },
+    "starterSpacesInOrder": [
+     {
+      "id": "Stage",
+      "label": "Stage"
+     },
+     {
+      "id": "Pit",
+      "label": "Pit"
+     },
+     {
+      "id": "House",
+      "label": "House"
+     },
+     {
+      "id": "Catwalk",
+      "label": "Catwalk"
+     },
+     {
+      "id": "Center Aisle",
+      "label": "Center Aisle"
+     },
+     {
+      "id": "Booth",
+      "label": "Booth"
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room"
+     },
+     {
+      "id": "MISC Rooms",
+      "label": "MISC Rooms"
+     }
+    ],
+    "areas": [
+     {
+      "id": "Stage",
+      "label": "Stage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 0.5,
+       "w": 80,
+       "h": 30
+      },
+      "polygonFt": [
+       [
+        0.5,
+        0.5
+       ],
+       [
+        80.5,
+        0.5
+       ],
+       [
+        80.5,
+        30.5
+       ],
+       [
+        0.5,
+        30.5
+       ]
+      ]
+     },
+     {
+      "id": "Pit",
+      "label": "Pit",
+      "bboxFt": {
+       "x": 21.5,
+       "y": 34.25,
+       "w": 38,
+       "h": 7.12
+      },
+      "polygonFt": [
+       [
+        21.5,
+        34.25
+       ],
+       [
+        59.5,
+        34.25
+       ],
+       [
+        59.5,
+        41.37
+       ],
+       [
+        21.5,
+        41.37
+       ]
+      ]
+     },
+     {
+      "id": "House",
+      "label": "House",
+      "bboxFt": {
+       "x": 0.64,
+       "y": 38,
+       "w": 79.86,
+       "h": 49.66
+      },
+      "polygonFt": [
+       [
+        10.69,
+        38
+       ],
+       [
+        15.5,
+        38
+       ],
+       [
+        65.5,
+        38
+       ],
+       [
+        70.31,
+        38
+       ],
+       [
+        80.5,
+        69.19
+       ],
+       [
+        80.5,
+        87.66
+       ],
+       [
+        0.74,
+        87.66
+       ],
+       [
+        0.64,
+        68.75
+       ]
+      ]
+     },
+     {
+      "id": "Catwalk",
+      "label": "Catwalk",
+      "bboxFt": {
+       "x": 0.73,
+       "y": 49.85,
+       "w": 79.77,
+       "h": 4.65
+      },
+      "polygonFt": [
+       [
+        0.73,
+        49.85
+       ],
+       [
+        80.5,
+        49.85
+       ],
+       [
+        80.5,
+        54.5
+       ],
+       [
+        0.73,
+        54.5
+       ]
+      ]
+     },
+     {
+      "id": "Center Aisle",
+      "label": "Center Aisle",
+      "bboxFt": {
+       "x": 0.73,
+       "y": 83,
+       "w": 79.77,
+       "h": 4.65
+      },
+      "polygonFt": [
+       [
+        0.73,
+        83
+       ],
+       [
+        80.5,
+        83
+       ],
+       [
+        80.5,
+        87.65
+       ],
+       [
+        0.73,
+        87.65
+       ]
+      ]
+     },
+     {
+      "id": "Booth",
+      "label": "Booth",
+      "bboxFt": {
+       "x": 30.62,
+       "y": 99.17,
+       "w": 20,
+       "h": 10.67
+      },
+      "polygonFt": [
+       [
+        30.62,
+        99.17
+       ],
+       [
+        50.62,
+        99.17
+       ],
+       [
+        50.62,
+        109.84
+       ],
+       [
+        30.62,
+        109.84
+       ]
+      ]
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room",
+      "bboxFt": {
+       "x": 58.18,
+       "y": 97.74,
+       "w": 22.32,
+       "h": 12.1
+      },
+      "polygonFt": [
+       [
+        58.18,
+        97.74
+       ],
+       [
+        80.5,
+        97.74
+       ],
+       [
+        80.5,
+        109.84
+       ],
+       [
+        58.18,
+        109.84
+       ]
+      ]
+     },
+     {
+      "id": "MISC Rooms",
+      "label": "MISC Rooms",
+      "bboxFt": {
+       "x": 0.59,
+       "y": 98.2,
+       "w": 22.3,
+       "h": 11.64
+      },
+      "polygonFt": [
+       [
+        0.59,
+        98.2
+       ],
+       [
+        22.89,
+        98.2
+       ],
+       [
+        22.89,
+        109.84
+       ],
+       [
+        0.59,
+        109.84
+       ]
+      ]
+     }
+    ],
+    "namedLinesFt": {
+     "plaster": [
+      [
+       15.5,
+       30.5
+      ],
+      [
+       17.5,
+       30.5
+      ],
+      [
+       19.5,
+       30.5
+      ],
+      [
+       21.5,
+       30.5
+      ],
+      [
+       23.5,
+       30.5
+      ],
+      [
+       25.5,
+       30.5
+      ],
+      [
+       27.5,
+       30.5
+      ],
+      [
+       29.5,
+       30.5
+      ],
+      [
+       31.5,
+       30.5
+      ],
+      [
+       33.5,
+       30.5
+      ],
+      [
+       35.5,
+       30.5
+      ],
+      [
+       37.5,
+       30.5
+      ],
+      [
+       39.5,
+       30.5
+      ],
+      [
+       41.5,
+       30.5
+      ],
+      [
+       43.5,
+       30.5
+      ],
+      [
+       45.5,
+       30.5
+      ],
+      [
+       47.5,
+       30.5
+      ],
+      [
+       49.5,
+       30.5
+      ],
+      [
+       51.5,
+       30.5
+      ],
+      [
+       53.5,
+       30.5
+      ],
+      [
+       55.5,
+       30.5
+      ],
+      [
+       57.5,
+       30.5
+      ],
+      [
+       59.5,
+       30.5
+      ],
+      [
+       61.5,
+       30.5
+      ],
+      [
+       63.5,
+       30.5
+      ],
+      [
+       65.5,
+       30.5
+      ]
+     ],
+     "stageEdge": [
+      [
+       15.5,
+       38
+      ],
+      [
+       17.48,
+       39.24
+      ],
+      [
+       19.52,
+       40.39
+      ],
+      [
+       21.62,
+       41.42
+      ],
+      [
+       23.76,
+       42.35
+      ],
+      [
+       25.96,
+       43.15
+      ],
+      [
+       28.19,
+       43.85
+      ],
+      [
+       30.45,
+       44.43
+      ],
+      [
+       32.74,
+       44.9
+      ],
+      [
+       35.06,
+       45.23
+      ],
+      [
+       37.38,
+       45.46
+      ],
+      [
+       39.72,
+       45.56
+      ],
+      [
+       42.06,
+       45.54
+      ],
+      [
+       44.39,
+       45.39
+      ],
+      [
+       46.72,
+       45.14
+      ],
+      [
+       49.02,
+       44.75
+      ],
+      [
+       51.31,
+       44.25
+      ],
+      [
+       53.56,
+       43.63
+      ],
+      [
+       55.78,
+       42.9
+      ],
+      [
+       57.96,
+       42.04
+      ],
+      [
+       60.09,
+       41.09
+      ],
+      [
+       62.16,
+       40.01
+      ],
+      [
+       64.19,
+       38.84
+      ]
+     ],
+     "catwalk": [
+      [
+       0.73,
+       52.17
+      ],
+      [
+       3.72,
+       52.17
+      ],
+      [
+       6.72,
+       52.17
+      ],
+      [
+       9.71,
+       52.17
+      ],
+      [
+       12.7,
+       52.17
+      ],
+      [
+       15.69,
+       52.17
+      ],
+      [
+       18.68,
+       52.17
+      ],
+      [
+       21.67,
+       52.17
+      ],
+      [
+       24.66,
+       52.17
+      ],
+      [
+       27.65,
+       52.17
+      ],
+      [
+       30.65,
+       52.17
+      ],
+      [
+       33.64,
+       52.17
+      ],
+      [
+       36.63,
+       52.17
+      ],
+      [
+       39.62,
+       52.17
+      ],
+      [
+       42.61,
+       52.17
+      ],
+      [
+       45.6,
+       52.17
+      ],
+      [
+       48.59,
+       52.17
+      ],
+      [
+       51.58,
+       52.17
+      ],
+      [
+       54.58,
+       52.17
+      ],
+      [
+       57.57,
+       52.17
+      ],
+      [
+       60.56,
+       52.17
+      ],
+      [
+       63.55,
+       52.17
+      ],
+      [
+       66.54,
+       52.17
+      ],
+      [
+       69.53,
+       52.17
+      ],
+      [
+       72.52,
+       52.17
+      ],
+      [
+       75.51,
+       52.17
+      ],
+      [
+       78.51,
+       52.17
+      ]
+     ]
+    },
+    "keyPointsFt": {
+     "top": [
+      40.5,
+      0
+     ],
+     "centre": [
+      40.5,
+      30.5
+     ],
+     "proL": [
+      15.5,
+      30.5
+     ],
+     "proR": [
+      65.5,
+      30.5
+     ],
+     "stageBack": [
+      40.5,
+      0.5
+     ],
+     "stageOuterL": [
+      0,
+      14.58
+     ],
+     "stageOuterR": [
+      81,
+      14.58
+     ],
+     "wingL": [
+      0.5,
+      14.58
+     ],
+     "wingR": [
+      80.5,
+      14.58
+     ],
+     "backWall": [
+      40.5,
+      99.34
+     ],
+     "houseL": [
+      0.62,
+      85.42
+     ],
+     "houseR": [
+      80.38,
+      85.42
+     ],
+     "handleL": [
+      0.62,
+      75.83
+     ],
+     "handleR": [
+      80.38,
+      75.83
+     ],
+     "mix": [
+      40.5,
+      68.75
+     ]
+    },
+    "movableRooms": [],
+    "movableClearanceIn": null,
+    "pitRegion": "Pit",
+    "stretch": {
+     "inputs": {
+      "proWidthFt": "Proscenium width",
+      "wingFt": "Stage wing width (each side)",
+      "stageDepthFt": "Stage depth",
+      "houseWidthFt": "House width (inside walls at the back)",
+      "houseDepthFt": "House depth (plaster line to back wall)",
+      "pit": "Pit filler system on/off"
+     },
+     "sideToSide": "Symmetric about the centreline. From the stage down to the stage edge's lowest point: the opening's half follows proscenium width / 2, then each wing follows wing width; outer walls keep 6 in. At the back of the house: the booth and vestibules (the middle 35 ft 4.5 in) keep their size and the rest follows house width. Between those two lines the mapping blends linearly, so the house side walls splay (or slant inward when the house is narrower than the stage).",
+     "frontToBack": "The plaster line never moves. Above it the stage follows stage depth; the back wall stays 6 in. Below it the proscenium wall, forestage, pit and stage-edge curve keep their size (about 15 ft); the catwalk band (4 ft 8 in) and the cross aisle / curved back wall / booth row (about 27 ft 4 in) keep their size; the two seating spans between them share whatever is left of house depth in proportion to their drawn lengths (4.28 ft and 28.5 ft).",
+     "other": "The Pit region, its lines and its label are hidden when the pit system is off. The stage-edge curve and the curved house back wall are sampled arcs that follow the map.",
+     "houseFields": {
+      "houseWidthFt": {
+       "min": "max(45, ceil(proscenium width))",
+       "max": 200,
+       "default": "proscenium width + 2 x wing width"
+      },
+      "houseDepthFt": {
+       "min": 40,
+       "max": 200,
+       "default": 68.84
+      },
+      "warning": "House narrower than proscenium width + 2 x wing: 'The house is narrower than the stage, so its side walls slant inward.'"
+     }
+    }
+   },
+   "church-traditional@1": {
+    "label": "Church — Traditional",
+    "family": "church",
+    "retired": false,
+    "worksLike": [
+     "church"
+    ],
+    "defaultForKinds": [
+     "church"
+    ],
+    "defaultForVenueTypes": [],
+    "drawnAt": {
+     "proWidthFt": 51.394,
+     "wingFt": 0,
+     "stageDepthFt": 26.375,
+     "houseWidthFt": 79.975,
+     "houseDepthFt": 55.198
+    },
+    "drawnAtNote": "The size the source drawing was made at (the stretch is the identity here). proWidthFt/wingFt/stageDepthFt/houseWidthFt/houseDepthFt are the engine's generic stretch inputs; see stretch.inputs for what each means in this template.",
+    "boundsFt": {
+     "w": 80.99,
+     "h": 101.7
+    },
+    "wallThicknessFt": 0.5,
+    "roles": {
+     "stage": "Platform",
+     "house": "Nave"
+    },
+    "starterSpacesInOrder": [
+     {
+      "id": "Platform",
+      "label": "Platform"
+     },
+     {
+      "id": "Apse",
+      "label": "Apse"
+     },
+     {
+      "id": "Nave",
+      "label": "Nave"
+     },
+     {
+      "id": "Entry",
+      "label": "Entry"
+     },
+     {
+      "id": "Choir Room",
+      "label": "Choir Room"
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room"
+     },
+     {
+      "id": "Cry Room",
+      "label": "Cry Room"
+     },
+     {
+      "id": "Storage",
+      "label": "Storage"
+     }
+    ],
+    "areas": [
+     {
+      "id": "Platform",
+      "label": "Platform",
+      "bboxFt": {
+       "x": 10.51,
+       "y": 7.48,
+       "w": 59.98,
+       "h": 26.37
+      },
+      "polygonFt": [
+       [
+        10.51,
+        33.85
+       ],
+       [
+        70.49,
+        33.85
+       ],
+       [
+        70.49,
+        26.85
+       ],
+       [
+        66.2,
+        26.85
+       ],
+       [
+        66.2,
+        7.48
+       ],
+       [
+        14.8,
+        7.48
+       ],
+       [
+        14.8,
+        26.85
+       ],
+       [
+        10.51,
+        26.85
+       ]
+      ]
+     },
+     {
+      "id": "Apse",
+      "label": "Apse",
+      "bboxFt": {
+       "x": 28.19,
+       "y": 0.63,
+       "w": 24.62,
+       "h": 6.85
+      },
+      "polygonFt": [
+       [
+        52.81,
+        7.48
+       ],
+       [
+        52.28,
+        6.65
+       ],
+       [
+        51.69,
+        5.86
+       ],
+       [
+        51.04,
+        5.11
+       ],
+       [
+        50.35,
+        4.41
+       ],
+       [
+        49.61,
+        3.76
+       ],
+       [
+        48.83,
+        3.16
+       ],
+       [
+        48,
+        2.62
+       ],
+       [
+        47.14,
+        2.13
+       ],
+       [
+        46.25,
+        1.7
+       ],
+       [
+        45.34,
+        1.34
+       ],
+       [
+        44.4,
+        1.04
+       ],
+       [
+        43.44,
+        0.8
+       ],
+       [
+        42.47,
+        0.63
+       ],
+       [
+        38.53,
+        0.63
+       ],
+       [
+        37.56,
+        0.8
+       ],
+       [
+        36.6,
+        1.04
+       ],
+       [
+        35.66,
+        1.34
+       ],
+       [
+        34.75,
+        1.7
+       ],
+       [
+        33.86,
+        2.13
+       ],
+       [
+        33,
+        2.62
+       ],
+       [
+        32.17,
+        3.16
+       ],
+       [
+        31.39,
+        3.76
+       ],
+       [
+        30.65,
+        4.41
+       ],
+       [
+        29.96,
+        5.11
+       ],
+       [
+        29.31,
+        5.86
+       ],
+       [
+        28.72,
+        6.65
+       ],
+       [
+        28.19,
+        7.48
+       ]
+      ]
+     },
+     {
+      "id": "Nave",
+      "label": "Nave",
+      "bboxFt": {
+       "x": 0.52,
+       "y": 29.85,
+       "w": 79.97,
+       "h": 59.2
+      },
+      "polygonFt": [
+       [
+        0.52,
+        29.85
+       ],
+       [
+        10.51,
+        29.85
+       ],
+       [
+        10.51,
+        33.85
+       ],
+       [
+        70.49,
+        33.85
+       ],
+       [
+        70.49,
+        29.85
+       ],
+       [
+        80.49,
+        29.85
+       ],
+       [
+        80.49,
+        89.05
+       ],
+       [
+        0.57,
+        89.05
+       ]
+      ]
+     },
+     {
+      "id": "Entry",
+      "label": "Entry",
+      "bboxFt": {
+       "x": 31.1,
+       "y": 89.05,
+       "w": 19,
+       "h": 12.15
+      },
+      "polygonFt": [
+       [
+        31.1,
+        89.05
+       ],
+       [
+        50.1,
+        89.05
+       ],
+       [
+        50.1,
+        101.2
+       ],
+       [
+        31.1,
+        101.2
+       ]
+      ]
+     },
+     {
+      "id": "Choir Room",
+      "label": "Choir Room",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 7.48,
+       "w": 13.8,
+       "h": 21.87
+      },
+      "polygonFt": [
+       [
+        0.5,
+        7.48
+       ],
+       [
+        14.3,
+        7.48
+       ],
+       [
+        14.3,
+        26.35
+       ],
+       [
+        10.01,
+        26.35
+       ],
+       [
+        10.01,
+        29.35
+       ],
+       [
+        0.52,
+        29.35
+       ]
+      ]
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room",
+      "bboxFt": {
+       "x": 66.7,
+       "y": 7.48,
+       "w": 13.79,
+       "h": 21.87
+      },
+      "polygonFt": [
+       [
+        66.7,
+        7.48
+       ],
+       [
+        80.49,
+        7.48
+       ],
+       [
+        80.49,
+        29.35
+       ],
+       [
+        70.99,
+        29.35
+       ],
+       [
+        70.99,
+        26.35
+       ],
+       [
+        66.7,
+        26.35
+       ]
+      ]
+     },
+     {
+      "id": "Cry Room",
+      "label": "Cry Room",
+      "bboxFt": {
+       "x": 0.57,
+       "y": 89.55,
+       "w": 30.03,
+       "h": 11.65
+      },
+      "polygonFt": [
+       [
+        0.57,
+        89.55
+       ],
+       [
+        30.6,
+        89.55
+       ],
+       [
+        30.6,
+        101.2
+       ],
+       [
+        0.58,
+        101.2
+       ]
+      ]
+     },
+     {
+      "id": "Storage",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 50.6,
+       "y": 89.55,
+       "w": 29.89,
+       "h": 11.65
+      },
+      "polygonFt": [
+       [
+        50.6,
+        89.55
+       ],
+       [
+        80.49,
+        89.55
+       ],
+       [
+        80.49,
+        101.2
+       ],
+       [
+        50.6,
+        101.2
+       ]
+      ]
+     }
+    ],
+    "namedLinesFt": {
+     "platformFront": [
+      [
+       10.51,
+       33.85
+      ],
+      [
+       12.51,
+       33.85
+      ],
+      [
+       14.51,
+       33.85
+      ],
+      [
+       16.51,
+       33.85
+      ],
+      [
+       18.51,
+       33.85
+      ],
+      [
+       20.51,
+       33.85
+      ],
+      [
+       22.51,
+       33.85
+      ],
+      [
+       24.51,
+       33.85
+      ],
+      [
+       26.51,
+       33.85
+      ],
+      [
+       28.51,
+       33.85
+      ],
+      [
+       30.5,
+       33.85
+      ],
+      [
+       32.5,
+       33.85
+      ],
+      [
+       34.5,
+       33.85
+      ],
+      [
+       36.5,
+       33.85
+      ],
+      [
+       38.5,
+       33.85
+      ],
+      [
+       40.5,
+       33.85
+      ],
+      [
+       42.5,
+       33.85
+      ],
+      [
+       44.5,
+       33.85
+      ],
+      [
+       46.5,
+       33.85
+      ],
+      [
+       48.5,
+       33.85
+      ],
+      [
+       50.5,
+       33.85
+      ],
+      [
+       52.49,
+       33.85
+      ],
+      [
+       54.49,
+       33.85
+      ],
+      [
+       56.49,
+       33.85
+      ],
+      [
+       58.49,
+       33.85
+      ],
+      [
+       60.49,
+       33.85
+      ],
+      [
+       62.49,
+       33.85
+      ],
+      [
+       64.49,
+       33.85
+      ],
+      [
+       66.49,
+       33.85
+      ],
+      [
+       68.49,
+       33.85
+      ],
+      [
+       70.49,
+       33.85
+      ]
+     ]
+    },
+    "keyPointsFt": {
+     "centre": [
+      40.5,
+      33.85
+     ],
+     "platBack": [
+      40.5,
+      7.48
+     ],
+     "platBackL": [
+      14.8,
+      7.48
+     ],
+     "platBackR": [
+      66.2,
+      7.48
+     ],
+     "platFrontL": [
+      10.51,
+      33.85
+     ],
+     "platFrontR": [
+      70.49,
+      33.85
+     ],
+     "naveL": [
+      0.51,
+      61.02
+     ],
+     "naveR": [
+      80.49,
+      61.02
+     ],
+     "naveBack": [
+      40.5,
+      89.05
+     ],
+     "handleL": [
+      0.51,
+      61.02
+     ],
+     "handleR": [
+      80.49,
+      61.02
+     ],
+     "handleBack": [
+      40.5,
+      89.05
+     ],
+     "mix": [
+      40.5,
+      68.08
+     ],
+     "aisle": [
+      40.6,
+      89.05
+     ]
+    },
+    "movableRooms": [],
+    "movableClearanceIn": null,
+    "pitRegion": null,
+    "stretch": {
+     "inputs": {
+      "proWidthFt": "Platform width (chancel inside width)",
+      "stageDepthFt": "Platform depth (front edge to back wall)",
+      "houseWidthFt": "Nave width",
+      "houseDepthFt": "Nave depth (platform front to the back-room wall)"
+     },
+     "sideToSide": "Above the back-room wall: the chancel follows platform width; the chancel wall, the front step's overhang and the notch wall keep their size (about 4 ft 9 in each side); the side rooms (Choir Room left, Electrical Room right) absorb the rest out to the nave's inside face. At and below the back-room wall: the Entry and its walls (about 20 ft 2.5 in wide) keep their size; Cry Room and Storage absorb the rest.",
+     "frontToBack": "The platform front never moves. The chancel's back part follows platform depth; the notch wall, side-room wall and the 7 ft front step keep their size (7 ft 6 in); the nave follows nave depth; the back rooms and outer wall keep their size (about 12 ft 8 in).",
+     "other": "The apse stays a true arc: radius and chord scale with platform width. No booth room - the FOH mix position (62 % of the nave's depth, on the centreline) stands in for it. Pews are drawn by code: straight rows every 3 ft from 6 ft behind the platform front to 8 ft short of the back wall, 4 ft clear of the nave walls, split by a 5 ft centre aisle lined up with the Entry.",
+     "houseFields": {
+      "houseWidthFt": {
+       "min": "ceil(platform width) + 16",
+       "max": 200,
+       "default": "max(79.97, ceil(platform width) + 16)"
+      },
+      "houseDepthFt": {
+       "min": 20,
+       "max": 200,
+       "default": 55.2
+      },
+      "warning": "Typed width below the minimum: 'The nave needs 8' beside the platform on each side, so the plan widens it to fit.'"
+     }
+    }
+   },
+   "church-contemporary@1": {
+    "label": "Church — Contemporary (earlier drawing)",
+    "family": "church",
+    "retired": true,
+    "worksLike": [
+     "church"
+    ],
+    "defaultForKinds": [],
+    "defaultForVenueTypes": [],
+    "drawnAt": {
+     "proWidthFt": 42.657,
+     "wingFt": 0,
+     "stageDepthFt": 23.344,
+     "houseWidthFt": 121.449,
+     "houseDepthFt": 55.448
+    },
+    "drawnAtNote": "The size the source drawing was made at (the stretch is the identity here). proWidthFt/wingFt/stageDepthFt/houseWidthFt/houseDepthFt are the engine's generic stretch inputs; see stretch.inputs for what each means in this template.",
+    "boundsFt": {
+     "w": 122.86,
+     "h": 90.54
+    },
+    "wallThicknessFt": 0.5,
+    "roles": {
+     "stage": "Platform",
+     "house": "Nave",
+     "booth": "Control Booth"
+    },
+    "starterSpacesInOrder": [
+     {
+      "id": "Platform",
+      "label": "Platform"
+     },
+     {
+      "id": "Nave",
+      "label": "Nave"
+     },
+     {
+      "id": "Backstage",
+      "label": "Backstage"
+     },
+     {
+      "id": "storage-1",
+      "label": "Storage"
+     },
+     {
+      "id": "storage-2",
+      "label": "Storage"
+     },
+     {
+      "id": "Green Room",
+      "label": "Green Room"
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room"
+     },
+     {
+      "id": "storage-3",
+      "label": "Storage"
+     },
+     {
+      "id": "Control Booth",
+      "label": "Control Booth"
+     },
+     {
+      "id": "storage-4",
+      "label": "Storage"
+     },
+     {
+      "id": "Cry Room",
+      "label": "Cry Room"
+     }
+    ],
+    "areas": [
+     {
+      "id": "Platform",
+      "label": "Platform",
+      "bboxFt": {
+       "x": 31.09,
+       "y": 11,
+       "w": 60.69,
+       "h": 23.34
+      },
+      "polygonFt": [
+       [
+        40.1,
+        11
+       ],
+       [
+        82.76,
+        11
+       ],
+       [
+        91.78,
+        20.02
+       ],
+       [
+        90.15,
+        21.38
+       ],
+       [
+        88.48,
+        22.68
+       ],
+       [
+        86.76,
+        23.93
+       ],
+       [
+        85,
+        25.12
+       ],
+       [
+        83.2,
+        26.25
+       ],
+       [
+        81.37,
+        27.31
+       ],
+       [
+        79.5,
+        28.32
+       ],
+       [
+        77.59,
+        29.26
+       ],
+       [
+        75.66,
+        30.13
+       ],
+       [
+        73.69,
+        30.94
+       ],
+       [
+        71.7,
+        31.68
+       ],
+       [
+        69.69,
+        32.35
+       ],
+       [
+        67.66,
+        32.95
+       ],
+       [
+        65.6,
+        33.49
+       ],
+       [
+        63.53,
+        33.95
+       ],
+       [
+        61.44,
+        34.34
+       ],
+       [
+        59.33,
+        33.95
+       ],
+       [
+        57.26,
+        33.49
+       ],
+       [
+        55.21,
+        32.95
+       ],
+       [
+        53.17,
+        32.35
+       ],
+       [
+        51.16,
+        31.68
+       ],
+       [
+        49.17,
+        30.94
+       ],
+       [
+        47.21,
+        30.13
+       ],
+       [
+        45.27,
+        29.26
+       ],
+       [
+        43.37,
+        28.32
+       ],
+       [
+        41.5,
+        27.31
+       ],
+       [
+        39.66,
+        26.25
+       ],
+       [
+        37.86,
+        25.12
+       ],
+       [
+        36.11,
+        23.93
+       ],
+       [
+        34.39,
+        22.68
+       ],
+       [
+        32.71,
+        21.38
+       ],
+       [
+        31.09,
+        20.02
+       ]
+      ]
+     },
+     {
+      "id": "Nave",
+      "label": "Nave",
+      "bboxFt": {
+       "x": 0.71,
+       "y": 20.02,
+       "w": 121.45,
+       "h": 69.77
+      },
+      "polygonFt": [
+       [
+        31.09,
+        20.02
+       ],
+       [
+        32.71,
+        21.38
+       ],
+       [
+        34.39,
+        22.68
+       ],
+       [
+        36.11,
+        23.93
+       ],
+       [
+        37.86,
+        25.12
+       ],
+       [
+        39.66,
+        26.25
+       ],
+       [
+        41.5,
+        27.31
+       ],
+       [
+        43.37,
+        28.32
+       ],
+       [
+        45.27,
+        29.26
+       ],
+       [
+        47.21,
+        30.13
+       ],
+       [
+        49.17,
+        30.94
+       ],
+       [
+        51.16,
+        31.68
+       ],
+       [
+        53.17,
+        32.35
+       ],
+       [
+        55.21,
+        32.95
+       ],
+       [
+        57.26,
+        33.49
+       ],
+       [
+        59.33,
+        33.95
+       ],
+       [
+        61.42,
+        34.34
+       ],
+       [
+        63.53,
+        33.95
+       ],
+       [
+        65.6,
+        33.49
+       ],
+       [
+        67.66,
+        32.95
+       ],
+       [
+        69.69,
+        32.35
+       ],
+       [
+        71.7,
+        31.68
+       ],
+       [
+        73.69,
+        30.94
+       ],
+       [
+        75.66,
+        30.13
+       ],
+       [
+        77.59,
+        29.26
+       ],
+       [
+        79.5,
+        28.32
+       ],
+       [
+        81.37,
+        27.31
+       ],
+       [
+        83.2,
+        26.25
+       ],
+       [
+        85,
+        25.12
+       ],
+       [
+        86.76,
+        23.93
+       ],
+       [
+        88.48,
+        22.68
+       ],
+       [
+        90.15,
+        21.38
+       ],
+       [
+        91.78,
+        20.02
+       ],
+       [
+        122.16,
+        50.4
+       ],
+       [
+        82.76,
+        89.79
+       ],
+       [
+        40.1,
+        89.79
+       ],
+       [
+        0.71,
+        50.4
+       ]
+      ]
+     },
+     {
+      "id": "Backstage",
+      "label": "Backstage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 0.5,
+       "w": 121.86,
+       "h": 10
+      },
+      "polygonFt": [
+       [
+        0.5,
+        0.5
+       ],
+       [
+        122.36,
+        0.5
+       ],
+       [
+        122.36,
+        10.5
+       ],
+       [
+        0.5,
+        10.5
+       ]
+      ]
+     },
+     {
+      "id": "storage-1",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 11,
+       "w": 20.42,
+       "h": 38.9
+      },
+      "polygonFt": [
+       [
+        0.5,
+        11
+       ],
+       [
+        20.92,
+        11
+       ],
+       [
+        20.92,
+        29.48
+       ],
+       [
+        0.5,
+        49.9
+       ]
+      ]
+     },
+     {
+      "id": "storage-2",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 101.94,
+       "y": 11,
+       "w": 20.42,
+       "h": 38.9
+      },
+      "polygonFt": [
+       [
+        101.94,
+        11
+       ],
+       [
+        122.36,
+        11
+       ],
+       [
+        122.36,
+        49.9
+       ],
+       [
+        101.94,
+        29.48
+       ]
+      ]
+     },
+     {
+      "id": "Green Room",
+      "label": "Green Room",
+      "bboxFt": {
+       "x": 21.42,
+       "y": 11,
+       "w": 17.98,
+       "h": 17.98
+      },
+      "polygonFt": [
+       [
+        21.42,
+        11
+       ],
+       [
+        39.4,
+        11
+       ],
+       [
+        21.42,
+        28.98
+       ]
+      ]
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room",
+      "bboxFt": {
+       "x": 83.47,
+       "y": 11,
+       "w": 17.97,
+       "h": 17.98
+      },
+      "polygonFt": [
+       [
+        83.47,
+        11
+       ],
+       [
+        101.44,
+        11
+       ],
+       [
+        101.44,
+        28.98
+       ]
+      ]
+     },
+     {
+      "id": "storage-3",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 50.9,
+       "w": 19.22,
+       "h": 38.44
+      },
+      "polygonFt": [
+       [
+        0.5,
+        50.9
+       ],
+       [
+        19.72,
+        70.12
+       ],
+       [
+        0.5,
+        89.34
+       ]
+      ]
+     },
+     {
+      "id": "Control Booth",
+      "label": "Control Booth",
+      "bboxFt": {
+       "x": 0.75,
+       "y": 70.47,
+       "w": 38.65,
+       "h": 19.32
+      },
+      "polygonFt": [
+       [
+        20.07,
+        70.47
+       ],
+       [
+        39.4,
+        89.79
+       ],
+       [
+        0.75,
+        89.79
+       ]
+      ]
+     },
+     {
+      "id": "storage-4",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 103.14,
+       "y": 50.9,
+       "w": 19.22,
+       "h": 38.44
+      },
+      "polygonFt": [
+       [
+        122.36,
+        50.9
+       ],
+       [
+        122.36,
+        89.34
+       ],
+       [
+        103.14,
+        70.12
+       ]
+      ]
+     },
+     {
+      "id": "Cry Room",
+      "label": "Cry Room",
+      "bboxFt": {
+       "x": 83.47,
+       "y": 70.47,
+       "w": 38.64,
+       "h": 19.32
+      },
+      "polygonFt": [
+       [
+        102.79,
+        70.47
+       ],
+       [
+        122.11,
+        89.79
+       ],
+       [
+        83.47,
+        89.79
+       ]
+      ]
+     }
+    ],
+    "namedLinesFt": {},
+    "keyPointsFt": {
+     "centre": [
+      61.43,
+      34.34
+     ],
+     "platBack": [
+      61.43,
+      11
+     ],
+     "platBackL": [
+      40.1,
+      11
+     ],
+     "platBackR": [
+      82.76,
+      11
+     ],
+     "platFrontL": [
+      31.09,
+      20.02
+     ],
+     "platFrontR": [
+      91.78,
+      20.02
+     ],
+     "naveL": [
+      0.71,
+      50.4
+     ],
+     "naveR": [
+      122.16,
+      50.4
+     ],
+     "naveBack": [
+      61.43,
+      89.79
+     ],
+     "handleL": [
+      0.71,
+      50.4
+     ],
+     "handleR": [
+      122.16,
+      50.4
+     ],
+     "handleBack": [
+      61.43,
+      89.79
+     ],
+     "mix": [
+      61.43,
+      63.18
+     ],
+     "spkL": [
+      31.5,
+      23.59
+     ],
+     "spkR": [
+      91.36,
+      23.59
+     ],
+     "aisle": [
+      61.43,
+      89.79
+     ]
+    },
+    "movableRooms": [],
+    "movableClearanceIn": null,
+    "pitRegion": null,
+    "stretch": {
+     "inputs": {
+      "proWidthFt": "Platform width at its back wall",
+      "stageDepthFt": "Platform depth (back wall to tip)",
+      "houseWidthFt": "Nave width at its widest",
+      "houseDepthFt": "Nave depth (platform tip to back wall)"
+     },
+     "sideToSide": "The nave's inside face is a profile: platform width at the platform's back wall, nave width at the widest point, platform width again at the back wall; straight 45-degree-style splays between (they stay straight at any size). Rooms behind the splays follow their own wall; all walls stay 6 in.",
+     "frontToBack": "A fixed 10 ft Backstage band across the top; the platform follows platform depth (never more than 2.2 x platform width - deeper is shortened with a warning); the nave follows nave depth.",
+     "other": "RETIRED earlier drawing (same outlines at default size). Its nave stretch lets the side rooms grow with a deep nave. Kept only so designs stamped with it still draw.",
+     "houseFields": {
+      "houseWidthFt": {
+       "min": "ceil(platform width) + 24",
+       "max": 250,
+       "default": "max(121.45, platform width + 24)"
+      },
+      "houseDepthFt": {
+       "min": 20,
+       "max": 200,
+       "default": 55.45
+      },
+      "warning": "'The nave needs 12' beside the platform on each side at its widest, so the plan widens it to fit.' / 'The pointed front needs a platform no deeper than 2.2 x its width, so the plan shortens it.'"
+     }
+    }
+   },
+   "church-contemporary@2": {
+    "label": "Church — Contemporary",
+    "family": "church",
+    "retired": false,
+    "worksLike": [
+     "church"
+    ],
+    "defaultForKinds": [],
+    "defaultForVenueTypes": [],
+    "drawnAt": {
+     "proWidthFt": 42.657,
+     "wingFt": 0,
+     "stageDepthFt": 23.344,
+     "houseWidthFt": 121.449,
+     "houseDepthFt": 55.448
+    },
+    "drawnAtNote": "The size the source drawing was made at (the stretch is the identity here). proWidthFt/wingFt/stageDepthFt/houseWidthFt/houseDepthFt are the engine's generic stretch inputs; see stretch.inputs for what each means in this template.",
+    "boundsFt": {
+     "w": 122.86,
+     "h": 90.54
+    },
+    "wallThicknessFt": 0.5,
+    "roles": {
+     "stage": "Platform",
+     "house": "Nave",
+     "booth": "Control Booth"
+    },
+    "starterSpacesInOrder": [
+     {
+      "id": "Platform",
+      "label": "Platform"
+     },
+     {
+      "id": "Nave",
+      "label": "Nave"
+     },
+     {
+      "id": "Backstage",
+      "label": "Backstage"
+     },
+     {
+      "id": "storage-1",
+      "label": "Storage"
+     },
+     {
+      "id": "storage-2",
+      "label": "Storage"
+     },
+     {
+      "id": "Green Room",
+      "label": "Green Room"
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room"
+     },
+     {
+      "id": "storage-3",
+      "label": "Storage"
+     },
+     {
+      "id": "Control Booth",
+      "label": "Control Booth"
+     },
+     {
+      "id": "storage-4",
+      "label": "Storage"
+     },
+     {
+      "id": "Cry Room",
+      "label": "Cry Room"
+     }
+    ],
+    "areas": [
+     {
+      "id": "Platform",
+      "label": "Platform",
+      "bboxFt": {
+       "x": 31.09,
+       "y": 11,
+       "w": 60.69,
+       "h": 23.34
+      },
+      "polygonFt": [
+       [
+        40.1,
+        11
+       ],
+       [
+        82.76,
+        11
+       ],
+       [
+        91.78,
+        20.02
+       ],
+       [
+        90.15,
+        21.38
+       ],
+       [
+        88.48,
+        22.68
+       ],
+       [
+        86.76,
+        23.93
+       ],
+       [
+        85,
+        25.12
+       ],
+       [
+        83.2,
+        26.25
+       ],
+       [
+        81.37,
+        27.31
+       ],
+       [
+        79.5,
+        28.32
+       ],
+       [
+        77.59,
+        29.26
+       ],
+       [
+        75.66,
+        30.13
+       ],
+       [
+        73.69,
+        30.94
+       ],
+       [
+        71.7,
+        31.68
+       ],
+       [
+        69.69,
+        32.35
+       ],
+       [
+        67.66,
+        32.95
+       ],
+       [
+        65.6,
+        33.49
+       ],
+       [
+        63.53,
+        33.95
+       ],
+       [
+        61.44,
+        34.34
+       ],
+       [
+        59.33,
+        33.95
+       ],
+       [
+        57.26,
+        33.49
+       ],
+       [
+        55.21,
+        32.95
+       ],
+       [
+        53.17,
+        32.35
+       ],
+       [
+        51.16,
+        31.68
+       ],
+       [
+        49.17,
+        30.94
+       ],
+       [
+        47.21,
+        30.13
+       ],
+       [
+        45.27,
+        29.26
+       ],
+       [
+        43.37,
+        28.32
+       ],
+       [
+        41.5,
+        27.31
+       ],
+       [
+        39.66,
+        26.25
+       ],
+       [
+        37.86,
+        25.12
+       ],
+       [
+        36.11,
+        23.93
+       ],
+       [
+        34.39,
+        22.68
+       ],
+       [
+        32.71,
+        21.38
+       ],
+       [
+        31.09,
+        20.02
+       ]
+      ]
+     },
+     {
+      "id": "Nave",
+      "label": "Nave",
+      "bboxFt": {
+       "x": 0.71,
+       "y": 20.02,
+       "w": 121.45,
+       "h": 69.77
+      },
+      "polygonFt": [
+       [
+        31.09,
+        20.02
+       ],
+       [
+        32.71,
+        21.38
+       ],
+       [
+        34.39,
+        22.68
+       ],
+       [
+        36.11,
+        23.93
+       ],
+       [
+        37.86,
+        25.12
+       ],
+       [
+        39.66,
+        26.25
+       ],
+       [
+        41.5,
+        27.31
+       ],
+       [
+        43.37,
+        28.32
+       ],
+       [
+        45.27,
+        29.26
+       ],
+       [
+        47.21,
+        30.13
+       ],
+       [
+        49.17,
+        30.94
+       ],
+       [
+        51.16,
+        31.68
+       ],
+       [
+        53.17,
+        32.35
+       ],
+       [
+        55.21,
+        32.95
+       ],
+       [
+        57.26,
+        33.49
+       ],
+       [
+        59.33,
+        33.95
+       ],
+       [
+        61.42,
+        34.34
+       ],
+       [
+        63.53,
+        33.95
+       ],
+       [
+        65.6,
+        33.49
+       ],
+       [
+        67.66,
+        32.95
+       ],
+       [
+        69.69,
+        32.35
+       ],
+       [
+        71.7,
+        31.68
+       ],
+       [
+        73.69,
+        30.94
+       ],
+       [
+        75.66,
+        30.13
+       ],
+       [
+        77.59,
+        29.26
+       ],
+       [
+        79.5,
+        28.32
+       ],
+       [
+        81.37,
+        27.31
+       ],
+       [
+        83.2,
+        26.25
+       ],
+       [
+        85,
+        25.12
+       ],
+       [
+        86.76,
+        23.93
+       ],
+       [
+        88.48,
+        22.68
+       ],
+       [
+        90.15,
+        21.38
+       ],
+       [
+        91.78,
+        20.02
+       ],
+       [
+        122.16,
+        50.4
+       ],
+       [
+        82.76,
+        89.79
+       ],
+       [
+        40.1,
+        89.79
+       ],
+       [
+        0.71,
+        50.4
+       ]
+      ]
+     },
+     {
+      "id": "Backstage",
+      "label": "Backstage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 0.5,
+       "w": 121.86,
+       "h": 10
+      },
+      "polygonFt": [
+       [
+        0.5,
+        0.5
+       ],
+       [
+        122.36,
+        0.5
+       ],
+       [
+        122.36,
+        10.5
+       ],
+       [
+        0.5,
+        10.5
+       ]
+      ]
+     },
+     {
+      "id": "storage-1",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 11,
+       "w": 20.42,
+       "h": 38.9
+      },
+      "polygonFt": [
+       [
+        0.5,
+        11
+       ],
+       [
+        20.92,
+        11
+       ],
+       [
+        20.92,
+        29.48
+       ],
+       [
+        0.5,
+        49.9
+       ]
+      ]
+     },
+     {
+      "id": "storage-2",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 101.94,
+       "y": 11,
+       "w": 20.42,
+       "h": 38.9
+      },
+      "polygonFt": [
+       [
+        101.94,
+        11
+       ],
+       [
+        122.36,
+        11
+       ],
+       [
+        122.36,
+        49.9
+       ],
+       [
+        101.94,
+        29.48
+       ]
+      ]
+     },
+     {
+      "id": "Green Room",
+      "label": "Green Room",
+      "bboxFt": {
+       "x": 21.42,
+       "y": 11,
+       "w": 17.98,
+       "h": 17.98
+      },
+      "polygonFt": [
+       [
+        21.42,
+        11
+       ],
+       [
+        39.4,
+        11
+       ],
+       [
+        21.42,
+        28.98
+       ]
+      ]
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room",
+      "bboxFt": {
+       "x": 83.47,
+       "y": 11,
+       "w": 17.97,
+       "h": 17.98
+      },
+      "polygonFt": [
+       [
+        83.47,
+        11
+       ],
+       [
+        101.44,
+        11
+       ],
+       [
+        101.44,
+        28.98
+       ]
+      ]
+     },
+     {
+      "id": "storage-3",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 50.9,
+       "w": 19.22,
+       "h": 38.44
+      },
+      "polygonFt": [
+       [
+        0.5,
+        50.9
+       ],
+       [
+        19.72,
+        70.12
+       ],
+       [
+        0.5,
+        89.34
+       ]
+      ]
+     },
+     {
+      "id": "Control Booth",
+      "label": "Control Booth",
+      "bboxFt": {
+       "x": 0.75,
+       "y": 70.47,
+       "w": 38.65,
+       "h": 19.32
+      },
+      "polygonFt": [
+       [
+        20.07,
+        70.47
+       ],
+       [
+        39.4,
+        89.79
+       ],
+       [
+        0.75,
+        89.79
+       ]
+      ]
+     },
+     {
+      "id": "storage-4",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 103.14,
+       "y": 50.9,
+       "w": 19.22,
+       "h": 38.44
+      },
+      "polygonFt": [
+       [
+        122.36,
+        50.9
+       ],
+       [
+        122.36,
+        89.34
+       ],
+       [
+        103.14,
+        70.12
+       ]
+      ]
+     },
+     {
+      "id": "Cry Room",
+      "label": "Cry Room",
+      "bboxFt": {
+       "x": 83.47,
+       "y": 70.47,
+       "w": 38.64,
+       "h": 19.32
+      },
+      "polygonFt": [
+       [
+        102.79,
+        70.47
+       ],
+       [
+        122.11,
+        89.79
+       ],
+       [
+        83.47,
+        89.79
+       ]
+      ]
+     }
+    ],
+    "namedLinesFt": {},
+    "keyPointsFt": {
+     "centre": [
+      61.43,
+      34.34
+     ],
+     "platBack": [
+      61.43,
+      11
+     ],
+     "platBackL": [
+      40.1,
+      11
+     ],
+     "platBackR": [
+      82.76,
+      11
+     ],
+     "platFrontL": [
+      31.09,
+      20.02
+     ],
+     "platFrontR": [
+      91.78,
+      20.02
+     ],
+     "naveL": [
+      0.71,
+      50.4
+     ],
+     "naveR": [
+      122.16,
+      50.4
+     ],
+     "naveBack": [
+      61.43,
+      89.79
+     ],
+     "handleL": [
+      0.71,
+      50.4
+     ],
+     "handleR": [
+      122.16,
+      50.4
+     ],
+     "handleBack": [
+      61.43,
+      89.79
+     ],
+     "mix": [
+      61.43,
+      63.18
+     ],
+     "spkL": [
+      31.5,
+      23.59
+     ],
+     "spkR": [
+      91.36,
+      23.59
+     ],
+     "aisle": [
+      61.43,
+      89.79
+     ]
+    },
+    "movableRooms": [],
+    "movableClearanceIn": null,
+    "pitRegion": null,
+    "stretch": {
+     "inputs": {
+      "proWidthFt": "Platform width at its back wall",
+      "stageDepthFt": "Platform depth (back wall to tip)",
+      "houseWidthFt": "Nave width at its widest",
+      "houseDepthFt": "Nave depth (platform tip to back wall)"
+     },
+     "sideToSide": "The nave's inside face is a profile: platform width at the platform's back wall, nave width at the widest point, platform width again at the back wall; straight 45-degree-style splays between (they stay straight at any size). Rooms behind the splays follow their own wall; all walls stay 6 in.",
+     "frontToBack": "A fixed 10 ft Backstage band across the top; the platform follows platform depth (never more than 2.2 x platform width - deeper is shortened with a warning); the nave follows nave depth.",
+     "other": "The pointed platform front is two true arcs whose radius scales with platform width. Version @2 keeps the side rooms' width under a deep nave; @1 is retired (still drawn for designs stamped with it, never offered for new ones). Control Booth is the booth role.",
+     "houseFields": {
+      "houseWidthFt": {
+       "min": "ceil(platform width) + 24",
+       "max": 250,
+       "default": "max(121.45, platform width + 24)"
+      },
+      "houseDepthFt": {
+       "min": 20,
+       "max": 200,
+       "default": 55.45
+      },
+      "warning": "'The nave needs 12' beside the platform on each side at its widest, so the plan widens it to fit.' / 'The pointed front needs a platform no deeper than 2.2 x its width, so the plan shortens it.'"
+     }
+    }
+   },
+   "gym-stage@1": {
+    "label": "Gym Stage",
+    "family": "proscenium",
+    "retired": false,
+    "worksLike": [
+     "proscenium"
+    ],
+    "defaultForKinds": [],
+    "defaultForVenueTypes": [
+     "gymstage"
+    ],
+    "drawnAt": {
+     "proWidthFt": 40,
+     "wingFt": 10,
+     "stageDepthFt": 20,
+     "houseWidthFt": 120,
+     "houseDepthFt": 49.5
+    },
+    "drawnAtNote": "The size the source drawing was made at (the stretch is the identity here). proWidthFt/wingFt/stageDepthFt/houseWidthFt/houseDepthFt are the engine's generic stretch inputs; see stretch.inputs for what each means in this template.",
+    "boundsFt": {
+     "w": 121,
+     "h": 81
+    },
+    "wallThicknessFt": 0.5,
+    "roles": {
+     "stage": "Stage",
+     "house": "Gym Floor",
+     "booth": "Booth"
+    },
+    "starterSpacesInOrder": [
+     {
+      "id": "Stage",
+      "label": "Stage"
+     },
+     {
+      "id": "Gym Floor",
+      "label": "Gym Floor"
+     },
+     {
+      "id": "Storage",
+      "label": "Storage"
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room"
+     },
+     {
+      "id": "Booth",
+      "label": "Booth"
+     }
+    ],
+    "areas": [
+     {
+      "id": "Stage",
+      "label": "Stage",
+      "bboxFt": {
+       "x": 30.5,
+       "y": 0.5,
+       "w": 60,
+       "h": 20
+      },
+      "polygonFt": [
+       [
+        30.5,
+        0.5
+       ],
+       [
+        90.5,
+        0.5
+       ],
+       [
+        90.5,
+        20.5
+       ],
+       [
+        30.5,
+        20.5
+       ]
+      ]
+     },
+     {
+      "id": "Gym Floor",
+      "label": "Gym Floor",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 21,
+       "w": 120,
+       "h": 49
+      },
+      "polygonFt": [
+       [
+        0.5,
+        21
+       ],
+       [
+        120.5,
+        21
+       ],
+       [
+        120.5,
+        70
+       ],
+       [
+        0.5,
+        70
+       ]
+      ]
+     },
+     {
+      "id": "Storage",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 0.5,
+       "w": 29.5,
+       "h": 20
+      },
+      "polygonFt": [
+       [
+        0.5,
+        0.5
+       ],
+       [
+        30,
+        0.5
+       ],
+       [
+        30,
+        20.5
+       ],
+       [
+        0.5,
+        20.5
+       ]
+      ]
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room",
+      "bboxFt": {
+       "x": 91,
+       "y": 0.5,
+       "w": 29.5,
+       "h": 20
+      },
+      "polygonFt": [
+       [
+        91,
+        0.5
+       ],
+       [
+        120.5,
+        0.5
+       ],
+       [
+        120.5,
+        20.5
+       ],
+       [
+        91,
+        20.5
+       ]
+      ]
+     },
+     {
+      "id": "Booth",
+      "label": "Booth",
+      "bboxFt": {
+       "x": 50.5,
+       "y": 70.5,
+       "w": 20,
+       "h": 10
+      },
+      "polygonFt": [
+       [
+        50.5,
+        70.5
+       ],
+       [
+        70.5,
+        70.5
+       ],
+       [
+        70.5,
+        80.5
+       ],
+       [
+        50.5,
+        80.5
+       ]
+      ]
+     }
+    ],
+    "namedLinesFt": {
+     "plaster": [
+      [
+       40.5,
+       20.5
+      ],
+      [
+       42.5,
+       20.5
+      ],
+      [
+       44.5,
+       20.5
+      ],
+      [
+       46.5,
+       20.5
+      ],
+      [
+       48.5,
+       20.5
+      ],
+      [
+       50.5,
+       20.5
+      ],
+      [
+       52.5,
+       20.5
+      ],
+      [
+       54.5,
+       20.5
+      ],
+      [
+       56.5,
+       20.5
+      ],
+      [
+       58.5,
+       20.5
+      ],
+      [
+       60.5,
+       20.5
+      ],
+      [
+       62.5,
+       20.5
+      ],
+      [
+       64.5,
+       20.5
+      ],
+      [
+       66.5,
+       20.5
+      ],
+      [
+       68.5,
+       20.5
+      ],
+      [
+       70.5,
+       20.5
+      ],
+      [
+       72.5,
+       20.5
+      ],
+      [
+       74.5,
+       20.5
+      ],
+      [
+       76.5,
+       20.5
+      ],
+      [
+       78.5,
+       20.5
+      ],
+      [
+       80.5,
+       20.5
+      ]
+     ]
+    },
+    "keyPointsFt": {
+     "top": [
+      60.5,
+      0
+     ],
+     "centre": [
+      60.5,
+      20.5
+     ],
+     "proL": [
+      40.5,
+      20.5
+     ],
+     "proR": [
+      80.5,
+      20.5
+     ],
+     "stageBack": [
+      60.5,
+      0.5
+     ],
+     "stageOuterL": [
+      30,
+      11.01
+     ],
+     "stageOuterR": [
+      91,
+      11.01
+     ],
+     "wingL": [
+      30.5,
+      11.01
+     ],
+     "wingR": [
+      90.5,
+      11.01
+     ],
+     "backWall": [
+      60.5,
+      70
+     ],
+     "houseL": [
+      0.5,
+      48.51
+     ],
+     "houseR": [
+      120.5,
+      48.51
+     ],
+     "handleL": [
+      0.5,
+      45.18
+     ],
+     "handleR": [
+      120.5,
+      45.18
+     ],
+     "mix": [
+      60.5,
+      51.01
+     ]
+    },
+    "movableRooms": [
+     {
+      "id": "booth",
+      "region": "Booth",
+      "sized": false,
+      "homeWall": "back",
+      "walls": [
+       "back",
+       "left",
+       "right"
+      ],
+      "wallLabels": {
+       "back": "Back",
+       "left": "Left",
+       "right": "Right"
+      }
+     }
+    ],
+    "movableClearanceIn": 24,
+    "pitRegion": null,
+    "stretch": {
+     "inputs": {
+      "proWidthFt": "Opening",
+      "wingFt": "Wings (return wall to stage side wall, each side)",
+      "stageDepthFt": "Stage depth",
+      "houseWidthFt": "Gym floor width",
+      "houseDepthFt": "Gym floor depth"
+     },
+     "sideToSide": "Stage zone: opening half follows opening / 2, each wing follows wing width, the 6 in stage side wall is fixed, and Storage (left) / Electrical Room (right) absorb the rest out to the gym floor's inside face. Gym floor: the whole floor follows gym floor width.",
+     "frontToBack": "Stage follows stage depth; gym floor follows gym floor depth; walls 6 in.",
+     "other": "The Booth (20 ft x 10 ft) keeps its size and is movable: home is the back wall, centred; it may sit on the back, left or right wall of the gym floor, outside the wall.",
+     "houseFields": {
+      "houseWidthFt": {
+       "min": "ceil(opening + 2 x wing) + 9",
+       "max": 250,
+       "default": "max(120, ceil(opening + 2 x wing) + 9)"
+      },
+      "houseDepthFt": {
+       "min": 21,
+       "max": 200,
+       "default": 49.5
+      },
+      "warning": "Typed width below the minimum: 'The gym floor needs room for the stage and its side rooms, so the plan widens it to fit.'"
+     }
+    }
+   },
+   "blackbox@1": {
+    "label": "Blackbox",
+    "family": "blackbox",
+    "retired": false,
+    "worksLike": [
+     "blackbox",
+     "flat"
+    ],
+    "defaultForKinds": [
+     "blackbox",
+     "flat"
+    ],
+    "defaultForVenueTypes": [],
+    "drawnAt": {
+     "proWidthFt": 49,
+     "wingFt": 0,
+     "stageDepthFt": 0,
+     "houseWidthFt": 49,
+     "houseDepthFt": 49
+    },
+    "drawnAtNote": "The size the source drawing was made at (the stretch is the identity here). proWidthFt/wingFt/stageDepthFt/houseWidthFt/houseDepthFt are the engine's generic stretch inputs; see stretch.inputs for what each means in this template.",
+    "boundsFt": {
+     "w": 70,
+     "h": 70
+    },
+    "wallThicknessFt": 0.5,
+    "roles": {
+     "stage": "Blackbox",
+     "house": "Blackbox",
+     "booth": "Booth"
+    },
+    "starterSpacesInOrder": [
+     {
+      "id": "Blackbox",
+      "label": "Blackbox"
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room"
+     },
+     {
+      "id": "Booth",
+      "label": "Booth"
+     },
+     {
+      "id": "storage-1",
+      "label": "Storage"
+     },
+     {
+      "id": "storage-2",
+      "label": "Storage"
+     }
+    ],
+    "areas": [
+     {
+      "id": "Blackbox",
+      "label": "Blackbox",
+      "bboxFt": {
+       "x": 10.5,
+       "y": 10.5,
+       "w": 49,
+       "h": 49
+      },
+      "polygonFt": [
+       [
+        10.5,
+        10.5
+       ],
+       [
+        59.5,
+        10.5
+       ],
+       [
+        59.5,
+        59.5
+       ],
+       [
+        10.5,
+        59.5
+       ]
+      ]
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room",
+      "bboxFt": {
+       "x": 0.5,
+       "y": 25.5,
+       "w": 9.5,
+       "h": 19
+      },
+      "polygonFt": [
+       [
+        0.5,
+        25.5
+       ],
+       [
+        10,
+        25.5
+       ],
+       [
+        10,
+        44.5
+       ],
+       [
+        0.5,
+        44.5
+       ]
+      ]
+     },
+     {
+      "id": "Booth",
+      "label": "Booth",
+      "bboxFt": {
+       "x": 25.5,
+       "y": 60,
+       "w": 19,
+       "h": 9.5
+      },
+      "polygonFt": [
+       [
+        25.5,
+        60
+       ],
+       [
+        44.5,
+        60
+       ],
+       [
+        44.5,
+        69.5
+       ],
+       [
+        25.5,
+        69.5
+       ]
+      ]
+     },
+     {
+      "id": "storage-1",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 25.5,
+       "y": 0.5,
+       "w": 19,
+       "h": 9.5
+      },
+      "polygonFt": [
+       [
+        25.5,
+        0.5
+       ],
+       [
+        44.5,
+        0.5
+       ],
+       [
+        44.5,
+        10
+       ],
+       [
+        25.5,
+        10
+       ]
+      ]
+     },
+     {
+      "id": "storage-2",
+      "label": "Storage",
+      "bboxFt": {
+       "x": 60,
+       "y": 25.5,
+       "w": 9.5,
+       "h": 19
+      },
+      "polygonFt": [
+       [
+        60,
+        25.5
+       ],
+       [
+        69.5,
+        25.5
+       ],
+       [
+        69.5,
+        44.5
+       ],
+       [
+        60,
+        44.5
+       ]
+      ]
+     }
+    ],
+    "namedLinesFt": {},
+    "keyPointsFt": {
+     "centre": [
+      35,
+      35
+     ]
+    },
+    "movableRooms": [
+     {
+      "id": "electrical",
+      "region": "Electrical Room",
+      "sized": false,
+      "homeWall": "left",
+      "walls": [
+       "bottom",
+       "right",
+       "top",
+       "left"
+      ],
+      "wallLabels": {
+       "bottom": "Bottom",
+       "right": "Right",
+       "top": "Top",
+       "left": "Left"
+      }
+     },
+     {
+      "id": "booth",
+      "region": "Booth",
+      "sized": false,
+      "homeWall": "bottom",
+      "walls": [
+       "bottom",
+       "right",
+       "top",
+       "left"
+      ],
+      "wallLabels": {
+       "bottom": "Bottom",
+       "right": "Right",
+       "top": "Top",
+       "left": "Left"
+      }
+     },
+     {
+      "id": "storage-top",
+      "region": "storage-1",
+      "sized": false,
+      "homeWall": "top",
+      "walls": [
+       "bottom",
+       "right",
+       "top",
+       "left"
+      ],
+      "wallLabels": {
+       "bottom": "Bottom",
+       "right": "Right",
+       "top": "Top",
+       "left": "Left"
+      }
+     },
+     {
+      "id": "storage-right",
+      "region": "storage-2",
+      "sized": false,
+      "homeWall": "right",
+      "walls": [
+       "bottom",
+       "right",
+       "top",
+       "left"
+      ],
+      "wallLabels": {
+       "bottom": "Bottom",
+       "right": "Right",
+       "top": "Top",
+       "left": "Left"
+      }
+     }
+    ],
+    "movableClearanceIn": 24,
+    "pitRegion": null,
+    "stretch": {
+     "inputs": {
+      "proWidthFt": "Room width (inside)",
+      "houseDepthFt": "Room depth (inside)"
+     },
+     "sideToSide": "The room's half-width follows room width / 2; walls 6 in.",
+     "frontToBack": "The room follows room depth; walls 6 in.",
+     "other": "Four rooms (Electrical Room, Booth, two Storage), drawn 20 ft x 10 ft outside the walls (9.5 ft x 19 ft clear inside), keep their size and are all movable along any of the four walls (home: Electrical left, Booth bottom, Storage top and right; 24 in clearance between two rooms on one wall). Used by Black Box and by Conference; Conference adds a low platform across the front, drawn by code. No house fields.",
+     "houseFields": null
+    }
+   },
+   "arena@1": {
+    "label": "Arena",
+    "family": "arena",
+    "retired": false,
+    "worksLike": [
+     "arena"
+    ],
+    "defaultForKinds": [
+     "arena"
+    ],
+    "defaultForVenueTypes": [],
+    "drawnAt": {
+     "proWidthFt": 50,
+     "wingFt": 15,
+     "stageDepthFt": 94,
+     "houseWidthFt": 64,
+     "houseDepthFt": 108
+    },
+    "drawnAtNote": "The size the source drawing was made at (the stretch is the identity here). proWidthFt/wingFt/stageDepthFt/houseWidthFt/houseDepthFt are the engine's generic stretch inputs; see stretch.inputs for what each means in this template. For the arena these are court width, bowl depth, court length and the floor's straight runs (floor 90 x 134 ft); the end stage is shown at 40 x 16 ft.",
+    "boundsFt": {
+     "w": 140,
+     "h": 164
+    },
+    "wallThicknessFt": 0,
+    "roles": {
+     "stage": "Stage",
+     "house": "Arena Floor",
+     "booth": "Booth"
+    },
+    "starterSpacesInOrder": [
+     {
+      "id": "Seating Bowl",
+      "label": "Seating Bowl"
+     },
+     {
+      "id": "Arena Floor",
+      "label": "Arena Floor"
+     },
+     {
+      "id": "Court",
+      "label": "Court"
+     },
+     {
+      "id": "Stage",
+      "label": "Stage"
+     },
+     {
+      "id": "Booth",
+      "label": "Booth"
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room"
+     }
+    ],
+    "areas": [
+     {
+      "id": "Seating Bowl",
+      "label": "Seating Bowl",
+      "bboxFt": {
+       "x": 10,
+       "y": 0,
+       "w": 120,
+       "h": 164
+      },
+      "polygonFt": [
+       [
+        38,
+        0
+       ],
+       [
+        55,
+        0
+       ],
+       [
+        72,
+        0
+       ],
+       [
+        89,
+        0
+       ],
+       [
+        105.9,
+        0.27
+       ],
+       [
+        120.74,
+        7.19
+       ],
+       [
+        129.17,
+        21.23
+       ],
+       [
+        130,
+        38
+       ],
+       [
+        130,
+        55
+       ],
+       [
+        130,
+        72
+       ],
+       [
+        130,
+        89
+       ],
+       [
+        130,
+        106
+       ],
+       [
+        130,
+        123
+       ],
+       [
+        129.73,
+        139.9
+       ],
+       [
+        122.81,
+        154.74
+       ],
+       [
+        108.77,
+        163.17
+       ],
+       [
+        92,
+        164
+       ],
+       [
+        75,
+        164
+       ],
+       [
+        58,
+        164
+       ],
+       [
+        41,
+        164
+       ],
+       [
+        24.85,
+        160.72
+       ],
+       [
+        13.28,
+        149.15
+       ],
+       [
+        10,
+        133
+       ],
+       [
+        10,
+        116
+       ],
+       [
+        10,
+        99
+       ],
+       [
+        10,
+        82
+       ],
+       [
+        10,
+        65
+       ],
+       [
+        10,
+        48
+       ],
+       [
+        10,
+        31
+       ],
+       [
+        13.28,
+        14.85
+       ],
+       [
+        24.85,
+        3.28
+       ]
+      ]
+     },
+     {
+      "id": "Arena Floor",
+      "label": "Arena Floor",
+      "bboxFt": {
+       "x": 25.07,
+       "y": 15.03,
+       "w": 89.86,
+       "h": 133.94
+      },
+      "polygonFt": [
+       [
+        102.91,
+        15.03
+       ],
+       [
+        106.45,
+        15.78
+       ],
+       [
+        108.89,
+        16.98
+       ],
+       [
+        111.03,
+        18.65
+       ],
+       [
+        113.26,
+        21.5
+       ],
+       [
+        114.36,
+        23.98
+       ],
+       [
+        114.93,
+        26.64
+       ],
+       [
+        114.72,
+        138.7
+       ],
+       [
+        113.88,
+        141.29
+       ],
+       [
+        111.96,
+        144.36
+       ],
+       [
+        109.27,
+        146.78
+       ],
+       [
+        106.87,
+        148.05
+       ],
+       [
+        104.26,
+        148.8
+       ],
+       [
+        37.09,
+        148.97
+       ],
+       [
+        33.55,
+        148.22
+       ],
+       [
+        31.11,
+        147.02
+       ],
+       [
+        28.97,
+        145.35
+       ],
+       [
+        26.74,
+        142.5
+       ],
+       [
+        25.64,
+        140.02
+       ],
+       [
+        25.07,
+        137.36
+       ],
+       [
+        25.28,
+        25.3
+       ],
+       [
+        26.12,
+        22.71
+       ],
+       [
+        28.04,
+        19.64
+       ],
+       [
+        30.73,
+        17.22
+       ],
+       [
+        33.13,
+        15.95
+       ],
+       [
+        35.74,
+        15.2
+       ]
+      ]
+     },
+     {
+      "id": "Court",
+      "label": "Court",
+      "bboxFt": {
+       "x": 45,
+       "y": 35,
+       "w": 50,
+       "h": 94
+      },
+      "polygonFt": [
+       [
+        45,
+        35
+       ],
+       [
+        95,
+        35
+       ],
+       [
+        95,
+        129
+       ],
+       [
+        45,
+        129
+       ]
+      ]
+     },
+     {
+      "id": "Booth",
+      "label": "Booth",
+      "bboxFt": {
+       "x": 0,
+       "y": 59.67,
+       "w": 10,
+       "h": 44.66
+      },
+      "polygonFt": [
+       [
+        0,
+        59.67
+       ],
+       [
+        10,
+        59.67
+       ],
+       [
+        10,
+        104.33
+       ],
+       [
+        0,
+        104.33
+       ]
+      ]
+     },
+     {
+      "id": "Electrical Room",
+      "label": "Electrical Room",
+      "bboxFt": {
+       "x": 130,
+       "y": 59.67,
+       "w": 10,
+       "h": 44.66
+      },
+      "polygonFt": [
+       [
+        130,
+        59.67
+       ],
+       [
+        140,
+        59.67
+       ],
+       [
+        140,
+        104.33
+       ],
+       [
+        130,
+        104.33
+       ]
+      ]
+     },
+     {
+      "id": "Stage",
+      "label": "Stage",
+      "bboxFt": {
+       "x": 50,
+       "y": 15,
+       "w": 40,
+       "h": 16
+      },
+      "polygonFt": [
+       [
+        50,
+        15
+       ],
+       [
+        90,
+        15
+       ],
+       [
+        90,
+        31
+       ],
+       [
+        50,
+        31
+       ]
+      ]
+     }
+    ],
+    "namedLinesFt": {
+     "inner": [
+      [
+       102.91,
+       15.03
+      ],
+      [
+       106.45,
+       15.78
+      ],
+      [
+       108.89,
+       16.98
+      ],
+      [
+       111.03,
+       18.65
+      ],
+      [
+       113.26,
+       21.5
+      ],
+      [
+       114.36,
+       23.98
+      ],
+      [
+       114.93,
+       26.64
+      ],
+      [
+       114.72,
+       138.7
+      ],
+      [
+       113.88,
+       141.29
+      ],
+      [
+       111.96,
+       144.36
+      ],
+      [
+       109.27,
+       146.78
+      ],
+      [
+       106.87,
+       148.05
+      ],
+      [
+       104.26,
+       148.8
+      ],
+      [
+       37.09,
+       148.97
+      ],
+      [
+       33.55,
+       148.22
+      ],
+      [
+       31.11,
+       147.02
+      ],
+      [
+       28.97,
+       145.35
+      ],
+      [
+       26.74,
+       142.5
+      ],
+      [
+       25.64,
+       140.02
+      ],
+      [
+       25.07,
+       137.36
+      ],
+      [
+       25.28,
+       25.3
+      ],
+      [
+       26.12,
+       22.71
+      ],
+      [
+       28.04,
+       19.64
+      ],
+      [
+       30.73,
+       17.22
+      ],
+      [
+       33.13,
+       15.95
+      ],
+      [
+       35.74,
+       15.2
+      ]
+     ],
+     "outer": [
+      [
+       38,
+       0
+      ],
+      [
+       55,
+       0
+      ],
+      [
+       72,
+       0
+      ],
+      [
+       89,
+       0
+      ],
+      [
+       105.9,
+       0.27
+      ],
+      [
+       120.74,
+       7.19
+      ],
+      [
+       129.17,
+       21.23
+      ],
+      [
+       130,
+       38
+      ],
+      [
+       130,
+       55
+      ],
+      [
+       130,
+       72
+      ],
+      [
+       130,
+       89
+      ],
+      [
+       130,
+       106
+      ],
+      [
+       130,
+       123
+      ],
+      [
+       129.73,
+       139.9
+      ],
+      [
+       122.81,
+       154.74
+      ],
+      [
+       108.77,
+       163.17
+      ],
+      [
+       92,
+       164
+      ],
+      [
+       75,
+       164
+      ],
+      [
+       58,
+       164
+      ],
+      [
+       41,
+       164
+      ],
+      [
+       24.85,
+       160.72
+      ],
+      [
+       13.28,
+       149.15
+      ],
+      [
+       10,
+       133
+      ],
+      [
+       10,
+       116
+      ],
+      [
+       10,
+       99
+      ],
+      [
+       10,
+       82
+      ],
+      [
+       10,
+       65
+      ],
+      [
+       10,
+       48
+      ],
+      [
+       10,
+       31
+      ],
+      [
+       13.28,
+       14.85
+      ],
+      [
+       24.85,
+       3.28
+      ]
+     ]
+    },
+    "keyPointsFt": {
+     "centre": [
+      70,
+      82
+     ]
+    },
+    "movableRooms": [
+     {
+      "id": "booth",
+      "region": "Booth",
+      "sized": false,
+      "homeWall": "left",
+      "walls": [
+       "bottom",
+       "right",
+       "top",
+       "left"
+      ],
+      "wallLabels": {
+       "bottom": "Bottom end",
+       "right": "Right side",
+       "top": "Top end",
+       "left": "Left side"
+      }
+     },
+     {
+      "id": "electrical",
+      "region": "Electrical Room",
+      "sized": false,
+      "homeWall": "right",
+      "walls": [
+       "bottom",
+       "right",
+       "top",
+       "left"
+      ],
+      "wallLabels": {
+       "bottom": "Bottom end",
+       "right": "Right side",
+       "top": "Top end",
+       "left": "Left side"
+      }
+     },
+     {
+      "id": "stage",
+      "region": "Stage",
+      "sized": true,
+      "homeWall": "floorTop",
+      "walls": [
+       "floorTop",
+       "floorRight",
+       "floorBottom",
+       "floorLeft"
+      ],
+      "wallLabels": {
+       "floorTop": "Top end",
+       "floorRight": "Right side",
+       "floorBottom": "Bottom end",
+       "floorLeft": "Left side"
+      }
+     }
+    ],
+    "movableClearanceIn": 24,
+    "pitRegion": null,
+    "stretch": {
+     "inputs": {
+      "houseWidthFt": "Floor width",
+      "houseDepthFt": "Floor length",
+      "bowlDepthFt": "Bowl depth",
+      "width": "End stage width",
+      "depth": "End stage depth"
+     },
+     "sideToSide": "From the centre out: the court's half (court width = floor width x 300/540), the floor's straight run, the 13 ft corner radius (fixed), then the bowl (bowl depth).",
+     "frontToBack": "Same, mirrored about the centre: court length = floor length x 564/804, straight run, 13 ft corner radius, bowl.",
+     "other": "Floor and bowl are true rounded rectangles (floor corner radius 13 ft; bowl corner radius 13 ft + bowl depth, same centres, so the bowl is an even band). Single lines, no wall thickness. Booth and Electrical Room (10 ft x 44 ft 8 in) move along the bowl's four straight outer sides (home: left and right). The end stage is a code-drawn rectangle (stage width x stage depth) that moves along the floor's four straight edges (home: top end, centred); it is shrunk to fit - no longer than that edge's straight run (edge length minus 26 ft) and no deeper than half the floor across it - with the warning 'The stage is bigger than the floor takes there, so the plan shrinks it to fit.'",
+     "houseFields": {
+      "houseWidthFt": {
+       "min": 59,
+       "max": 250,
+       "default": 90
+      },
+      "houseDepthFt": {
+       "min": 88,
+       "max": 400,
+       "default": 134
+      },
+      "bowlDepthFt": {
+       "min": 0,
+       "max": 60,
+       "default": 15
+      }
+     }
+    }
+   }
+  }
+ },
+ "equipmentVocab": {
+  "count": 51,
+  "note": "Every item the estimate equations can emit, keyed system:itemKey. Keys are stable; labels may be relabelled. autoPlace: each = one marker per unit; lot = one marker carrying the quantity; curtain = a curtain drop-in on the mapped fabric; none = never placed on a plan (priced in Quick Design only). W = width, D = depth, G = grid height, E = max(1, electrics), wUnit = max(1, round(W/8)); three numbers a / b / c are small / medium / large size.",
+  "rows": [
+   {
+    "key": "rigging:electricHoist",
+    "system": "rigging",
+    "itemKey": "electricHoist",
+    "label": "Electric hoist",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "hoist",
+     "motor"
+    ],
+    "defaultQuantityRule": "motorized: m.el x max(2, floor(D/30)); m.el = 2 / 3 / 4 (small / medium / large)"
+   },
+   {
+    "key": "rigging:lowCapHoist",
+    "system": "rigging",
+    "itemKey": "lowCapHoist",
+    "label": "Low-capacity hoist",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "hoist",
+     "motor"
+    ],
+    "defaultQuantityRule": "motorized: m.lo x floor(D/10); m.lo = 2 / 3 / 4"
+   },
+   {
+    "key": "rigging:highCapHoist",
+    "system": "rigging",
+    "itemKey": "highCapHoist",
+    "label": "High-capacity hoist",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "hoist",
+     "motor"
+    ],
+    "defaultQuantityRule": "motorized: m.hi x floor(D/10); m.hi = 2 / 3 / 2"
+   },
+   {
+    "key": "rigging:varSpeedHoist",
+    "system": "rigging",
+    "itemKey": "varSpeedHoist",
+    "label": "Variable-speed hoist",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "variable",
+     "hoist",
+     "motor"
+    ],
+    "defaultQuantityRule": "motorized: m.vs x floor(D/10); m.vs = 0 / 1 / 2 (no line when 0)"
+   },
+   {
+    "key": "rigging:riggingPoint",
+    "system": "rigging",
+    "itemKey": "riggingPoint",
+    "label": "Rigging point",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "rigging point",
+     "beam clamp",
+     "shackle"
+    ],
+    "defaultQuantityRule": "dead hung: sets x floor(W/10), sets = (5 / 6 / 7) x floor(D/10)"
+   },
+   {
+    "key": "rigging:headblock",
+    "system": "rigging",
+    "itemKey": "headblock",
+    "label": "Headblock",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "head block",
+     "headblock"
+    ],
+    "defaultQuantityRule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:footblock",
+    "system": "rigging",
+    "itemKey": "footblock",
+    "label": "Footblock",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "foot block",
+     "footblock",
+     "tension"
+    ],
+    "defaultQuantityRule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:arbor",
+    "system": "rigging",
+    "itemKey": "arbor",
+    "label": "Arbor",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "arbor"
+    ],
+    "defaultQuantityRule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:tbarTrack",
+    "system": "rigging",
+    "itemKey": "tbarTrack",
+    "label": "T-bar track",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "t-bar",
+     "track"
+    ],
+    "defaultQuantityRule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:lockRail",
+    "system": "rigging",
+    "itemKey": "lockRail",
+    "label": "Lock rail",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "rope lock",
+     "lock rail"
+    ],
+    "defaultQuantityRule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:handline",
+    "system": "rigging",
+    "itemKey": "handline",
+    "label": "Handline",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "handline",
+     "hand line",
+     "rope"
+    ],
+    "defaultQuantityRule": "counterweight: sets x 2 x G (ft)"
+   },
+   {
+    "key": "rigging:loftblock",
+    "system": "rigging",
+    "itemKey": "loftblock",
+    "label": "Loftblock",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "loft block",
+     "loftblock"
+    ],
+    "defaultQuantityRule": "counterweight: sets x max(1, floor(W/10))"
+   },
+   {
+    "key": "rigging:pipe",
+    "system": "rigging",
+    "itemKey": "pipe",
+    "label": "Pipe",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "pipe",
+     "batten"
+    ],
+    "defaultQuantityRule": "counterweight and dead hung: sets x pipe length (ft); pipe length = W + 4 for a proscenium-kind venue, else W"
+   },
+   {
+    "key": "rigging:aircraftCable",
+    "system": "rigging",
+    "itemKey": "aircraftCable",
+    "label": "Suspension Method",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "aircraft cable",
+     "wire rope"
+    ],
+    "defaultQuantityRule": "counterweight: loftblocks x (2G + W) ft; dead hung: points x G ft"
+   },
+   {
+    "key": "rigging:chainWrap",
+    "system": "rigging",
+    "itemKey": "chainWrap",
+    "label": "Batten Termination",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "chain"
+    ],
+    "defaultQuantityRule": "counterweight: loftblocks; dead hung: points"
+   },
+   {
+    "key": "rigging:terminationKit",
+    "system": "rigging",
+    "itemKey": "terminationKit",
+    "label": "Beginning Termination",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "termination",
+     "swage",
+     "thimble"
+    ],
+    "defaultQuantityRule": "counterweight: loftblocks x 2; dead hung: points x 2"
+   },
+   {
+    "key": "curtains:draw",
+    "system": "curtains",
+    "itemKey": "draw",
+    "label": "Draw",
+    "unit": "ea",
+    "autoPlace": "curtain",
+    "searchHints": [
+     "velour",
+     "drape"
+    ],
+    "curtain": {
+     "quickDesignDrape": "Draw",
+     "gridCurtainType": "Draw"
+    },
+    "defaultQuantityRule": "floor(D/10) x 1, when Draw is on"
+   },
+   {
+    "key": "curtains:legs",
+    "system": "curtains",
+    "itemKey": "legs",
+    "label": "Leg",
+    "unit": "ea",
+    "autoPlace": "curtain",
+    "searchHints": [
+     "velour",
+     "leg"
+    ],
+    "curtain": {
+     "quickDesignDrape": "Legs",
+     "gridCurtainType": "Leg"
+    },
+    "defaultQuantityRule": "floor(D/10) x 2, when Legs is on"
+   },
+   {
+    "key": "curtains:border",
+    "system": "curtains",
+    "itemKey": "border",
+    "label": "Border",
+    "unit": "ea",
+    "autoPlace": "curtain",
+    "searchHints": [
+     "velour",
+     "border"
+    ],
+    "curtain": {
+     "quickDesignDrape": "Border",
+     "gridCurtainType": "Border"
+    },
+    "defaultQuantityRule": "floor(D/10) x 1, when Border is on"
+   },
+   {
+    "key": "curtains:fullstage",
+    "system": "curtains",
+    "itemKey": "fullstage",
+    "label": "Full stage",
+    "unit": "ea",
+    "autoPlace": "curtain",
+    "searchHints": [
+     "velour",
+     "traveler"
+    ],
+    "curtain": {
+     "quickDesignDrape": "Rear",
+     "gridCurtainType": "Full"
+    },
+    "defaultQuantityRule": "floor(D/10) x 1, when Full is on"
+   },
+   {
+    "key": "curtains:scenerytrack",
+    "system": "curtains",
+    "itemKey": "scenerytrack",
+    "label": "Scenery track",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "track",
+     "traveler"
+    ],
+    "defaultQuantityRule": "floor(D/10) x pipe length (ft), when Scenery is on and floor(D/10) > 0"
+   },
+   {
+    "key": "lighting:par",
+    "system": "lighting",
+    "itemKey": "par",
+    "label": "Par",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "par",
+     "wash"
+    ],
+    "defaultQuantityRule": "round(E x wUnit x (0.7 / 1 / 1.2))"
+   },
+   {
+    "key": "lighting:front",
+    "system": "lighting",
+    "itemKey": "front",
+    "label": "Front",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "ellipsoidal",
+     "profile",
+     "leko"
+    ],
+    "defaultQuantityRule": "round(wUnit x (2 / 2.5 / 3))"
+   },
+   {
+    "key": "lighting:cyc",
+    "system": "lighting",
+    "itemKey": "cyc",
+    "label": "Cyc",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "cyc"
+    ],
+    "defaultQuantityRule": "round(wUnit x (1 / 1.25 / 1.5))"
+   },
+   {
+    "key": "lighting:side",
+    "system": "lighting",
+    "itemKey": "side",
+    "label": "Side light",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "wash",
+     "side"
+    ],
+    "defaultQuantityRule": "round(E x wUnit x (0 / 0.5 / 0.75))"
+   },
+   {
+    "key": "lighting:automated",
+    "system": "lighting",
+    "itemKey": "automated",
+    "label": "Automated",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "moving",
+     "automated"
+    ],
+    "defaultQuantityRule": "round(E x wUnit x (0 / 0.5 / 0.9))"
+   },
+   {
+    "key": "lighting:cablePackage",
+    "system": "lighting",
+    "itemKey": "cablePackage",
+    "label": "Cable Package",
+    "unit": "ea",
+    "autoPlace": "lot",
+    "searchHints": [
+     "cable",
+     "jumper",
+     "extension"
+    ],
+    "defaultQuantityRule": "ceil(total fixture quantity x perFixture x tier multiplier); no fixtures -> no line"
+   },
+   {
+    "key": "controls:console",
+    "system": "controls",
+    "itemKey": "console",
+    "label": "Console",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "console"
+    ],
+    "defaultQuantityRule": "1 when Console is on"
+   },
+   {
+    "key": "controls:consoleTouch",
+    "system": "controls",
+    "itemKey": "consoleTouch",
+    "label": "Console Accessories",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "touch",
+     "monitor"
+    ],
+    "defaultQuantityRule": "1 / 2 / 2 when Console is on"
+   },
+   {
+    "key": "controls:batteryBackup",
+    "system": "controls",
+    "itemKey": "batteryBackup",
+    "label": "Emergency",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "ups",
+     "battery"
+    ],
+    "defaultQuantityRule": "1 when Console is on and size is large"
+   },
+   {
+    "key": "controls:processor",
+    "system": "controls",
+    "itemKey": "processor",
+    "label": "Power Controls – Production",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "processor",
+     "architectural"
+    ],
+    "defaultQuantityRule": "1 when Architectural is on"
+   },
+   {
+    "key": "controls:button",
+    "system": "controls",
+    "itemKey": "button",
+    "label": "Power Controls – Architectural",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "button",
+     "station"
+    ],
+    "defaultQuantityRule": "floor(W/20) / floor(W/10) / floor(W/5) when Architectural is on"
+   },
+   {
+    "key": "controls:archTouch",
+    "system": "controls",
+    "itemKey": "archTouch",
+    "label": "Architectural Controls",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "touch"
+    ],
+    "defaultQuantityRule": "1 when Architectural is on and size is large"
+   },
+   {
+    "key": "controls:inputStation",
+    "system": "controls",
+    "itemKey": "inputStation",
+    "label": "DMX Distribution",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "input",
+     "node"
+    ],
+    "defaultQuantityRule": "1 / 2 / 4 when Data is on"
+   },
+   {
+    "key": "controls:distro",
+    "system": "controls",
+    "itemKey": "distro",
+    "label": "Labor",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "distro",
+     "switch",
+     "gateway"
+    ],
+    "defaultQuantityRule": "1 when Data is on"
+   },
+   {
+    "key": "audio:lineArray",
+    "system": "audio",
+    "itemKey": "lineArray",
+    "label": "Line-array loudspeaker",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "line array",
+     "loudspeaker",
+     "speaker"
+    ],
+    "defaultQuantityRule": "clamp(round(W/3), 6, 24)"
+   },
+   {
+    "key": "audio:subwoofer",
+    "system": "audio",
+    "itemKey": "subwoofer",
+    "label": "Subwoofer",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "subwoofer"
+    ],
+    "defaultQuantityRule": "clamp(round(W/12), 2, 8)"
+   },
+   {
+    "key": "audio:mixerDsp",
+    "system": "audio",
+    "itemKey": "mixerDsp",
+    "label": "Digital mixer, DSP & amplifiers",
+    "unit": "lot",
+    "autoPlace": "each",
+    "searchHints": [
+     "mixer",
+     "dsp",
+     "amplifier"
+    ],
+    "defaultQuantityRule": "1"
+   },
+   {
+    "key": "video:projector",
+    "system": "video",
+    "itemKey": "projector",
+    "label": "Laser projector, 4K",
+    "unit": "ea",
+    "autoPlace": "each",
+    "searchHints": [
+     "projector"
+    ],
+    "defaultQuantityRule": "clamp(round(W/24), 1, 4)"
+   },
+   {
+    "key": "video:screen",
+    "system": "video",
+    "itemKey": "screen",
+    "label": "Projection screen / LED wall",
+    "unit": "lot",
+    "autoPlace": "each",
+    "searchHints": [
+     "screen",
+     "led wall"
+    ],
+    "defaultQuantityRule": "1"
+   },
+   {
+    "key": "video:processor",
+    "system": "video",
+    "itemKey": "processor",
+    "label": "Video processor & switcher",
+    "unit": "lot",
+    "autoPlace": "each",
+    "searchHints": [
+     "switcher",
+     "scaler",
+     "video processor"
+    ],
+    "defaultQuantityRule": "1"
+   },
+   {
+    "key": "acoustical:tower",
+    "system": "acoustical",
+    "itemKey": "tower",
+    "label": "Tower",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "shell",
+     "tower"
+    ],
+    "defaultQuantityRule": "floor(W/10) + 2 x floor(D/10), when Towers is on"
+   },
+   {
+    "key": "acoustical:ceiling",
+    "system": "acoustical",
+    "itemKey": "ceiling",
+    "label": "Ceiling",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "shell",
+     "ceiling"
+    ],
+    "defaultQuantityRule": "floor(D/10), when Ceiling is on"
+   },
+   {
+    "key": "acoustical:transport",
+    "system": "acoustical",
+    "itemKey": "transport",
+    "label": "Transport",
+    "unit": "ea",
+    "autoPlace": "none",
+    "searchHints": [
+     "cart",
+     "transport"
+    ],
+    "defaultQuantityRule": "floor(D/10), when Transport is on"
+   },
+   {
+    "key": "pit:legged",
+    "system": "pit",
+    "itemKey": "legged",
+    "label": "Legged pit filler deck",
+    "unit": "sqft",
+    "autoPlace": "none",
+    "searchHints": [
+     "pit",
+     "deck"
+    ],
+    "defaultQuantityRule": "W x 10 (sq ft), when pit type is Legged"
+   },
+   {
+    "key": "pit:clearspan",
+    "system": "pit",
+    "itemKey": "clearspan",
+    "label": "Clear-span pit filler deck",
+    "unit": "sqft",
+    "autoPlace": "none",
+    "searchHints": [
+     "pit",
+     "deck"
+    ],
+    "defaultQuantityRule": "W x 10 (sq ft), when pit type is Clear-Span"
+   },
+   {
+    "key": "rigging:wirePull",
+    "system": "rigging",
+    "itemKey": "wirePull",
+    "label": "Wire pull",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "wire rope",
+     "cable"
+    ],
+    "derived": "wirePull",
+    "defaultQuantityRule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "lighting:wirePull",
+    "system": "lighting",
+    "itemKey": "wirePull",
+    "label": "Wire pull",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "dmx",
+     "cable",
+     "wire"
+    ],
+    "derived": "wirePull",
+    "defaultQuantityRule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "controls:wirePull",
+    "system": "controls",
+    "itemKey": "wirePull",
+    "label": "Wire pull",
+    "unit": "ft",
+    "autoPlace": "none",
+    "searchHints": [
+     "network",
+     "cable",
+     "wire"
+    ],
+    "derived": "wirePull",
+    "defaultQuantityRule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "audio:wirePull",
+    "system": "audio",
+    "itemKey": "wirePull",
+    "label": "Wire pull",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "speaker cable",
+     "cable",
+     "wire"
+    ],
+    "derived": "wirePull",
+    "defaultQuantityRule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "video:wirePull",
+    "system": "video",
+    "itemKey": "wirePull",
+    "label": "Wire pull",
+    "unit": "ft",
+    "autoPlace": "lot",
+    "searchHints": [
+     "sdi",
+     "hdmi",
+     "cable"
+    ],
+    "derived": "wirePull",
+    "defaultQuantityRule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   }
+  ],
+  "lightingFixtureKeys": [
+   "lighting:par",
+   "lighting:front",
+   "lighting:cyc",
+   "lighting:side",
+   "lighting:automated"
+  ],
+  "relabelAliases": {
+   "rigging:Aircraft cable": "rigging:Suspension Method",
+   "rigging:Chain wrap, 3 ft": "rigging:Batten Termination",
+   "rigging:Termination kit": "rigging:Beginning Termination",
+   "controls:Console touch screen": "controls:Console Accessories",
+   "controls:Battery backup": "controls:Emergency",
+   "controls:Processor": "controls:Power Controls – Production",
+   "controls:Button": "controls:Power Controls – Architectural",
+   "controls:Architectural touch screen": "controls:Architectural Controls",
+   "controls:Input station": "controls:DMX Distribution",
+   "controls:Distro system": "controls:Labor"
+  },
+  "equipmentMapCellKinds": [
+   "part (catalog SKU)",
+   "assembly (fixture / System / Hardware / Rack assembly id)",
+   "allowance (confirmed unit cost, optional note and customer-facing description, each <= 200 chars; max $10,000,000)",
+   "none (Not included: $0, never placed, never quoted)",
+   "empty = needs a part"
+  ]
+ },
+ "equations": {
+  "inputs": {
+   "W": "width (ft) - proscenium opening for a proscenium venue; room / platform / stage width otherwise",
+   "D": "depth (ft)",
+   "G": "grid / ceiling height (ft)",
+   "wing": "wing width each side (ft)",
+   "PH": "proscenium height (ft)",
+   "size": "small | medium | large",
+   "tier": "good | better | best",
+   "systemsOn": "per system on/off",
+   "rigType": "counterweight | deadhung | motorized",
+   "drape": "draw, legs, border, scenerytrack, fullstage (multi)",
+   "fixtures": "par, front, cyc, side, automated (multi)",
+   "ctrl": "console, architectural, data (multi)",
+   "shell": "towers, ceiling, transport (multi)",
+   "pitType": "legged | clearspan"
+  },
+  "helpers": {
+   "pick(a,b,c)": "a when size is small, c when large, else b",
+   "dBlk": "floor(D / 10)",
+   "sets": "pick(5,6,7) x dBlk (counterweight and dead hung)",
+   "rigSets": "counterweight / dead hung: sets. motorized: m.el x max(2, floor(D/30)) + m.lo x dBlk + m.hi x dBlk + m.vs x dBlk, with m = {el,lo,hi,vs} = {2,2,2,0} / {3,3,3,1} / {4,4,2,2}",
+   "pipeLenFt": "W + 4 when the venue's plan kind is 'proscenium' (2 ft overhang each side), else W. NOTE: the Gym Stage's plan kind is 'gym', so it uses W.",
+   "electrics": "clamp(round(D / 12), 2, 5) when Lighting is on, else 0",
+   "E": "max(1, electrics)",
+   "wUnit": "max(1, round(W / 8))",
+   "lineSets": "clamp(round(D x 1.5), 12, 72) (display statistic and riser drive-rack count only)",
+   "drapeArea": "round(W x G) (display statistic)",
+   "dimmerRacks": "max(1, ceil(conventional fixtures / 48)) when Lighting is on, else 0; conventional = all fixture lines except Automated (display / riser only)",
+   "rounding": "round = JavaScript Math.round (half up); floor and ceil as usual"
+  },
+  "quantityRules": [
+   {
+    "key": "rigging:electricHoist",
+    "rule": "motorized: m.el x max(2, floor(D/30)); m.el = 2 / 3 / 4 (small / medium / large)"
+   },
+   {
+    "key": "rigging:lowCapHoist",
+    "rule": "motorized: m.lo x floor(D/10); m.lo = 2 / 3 / 4"
+   },
+   {
+    "key": "rigging:highCapHoist",
+    "rule": "motorized: m.hi x floor(D/10); m.hi = 2 / 3 / 2"
+   },
+   {
+    "key": "rigging:varSpeedHoist",
+    "rule": "motorized: m.vs x floor(D/10); m.vs = 0 / 1 / 2 (no line when 0)"
+   },
+   {
+    "key": "rigging:riggingPoint",
+    "rule": "dead hung: sets x floor(W/10), sets = (5 / 6 / 7) x floor(D/10)"
+   },
+   {
+    "key": "rigging:headblock",
+    "rule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:footblock",
+    "rule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:arbor",
+    "rule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:tbarTrack",
+    "rule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:lockRail",
+    "rule": "counterweight: sets"
+   },
+   {
+    "key": "rigging:handline",
+    "rule": "counterweight: sets x 2 x G (ft)"
+   },
+   {
+    "key": "rigging:loftblock",
+    "rule": "counterweight: sets x max(1, floor(W/10))"
+   },
+   {
+    "key": "rigging:pipe",
+    "rule": "counterweight and dead hung: sets x pipe length (ft); pipe length = W + 4 for a proscenium-kind venue, else W"
+   },
+   {
+    "key": "rigging:aircraftCable",
+    "rule": "counterweight: loftblocks x (2G + W) ft; dead hung: points x G ft"
+   },
+   {
+    "key": "rigging:chainWrap",
+    "rule": "counterweight: loftblocks; dead hung: points"
+   },
+   {
+    "key": "rigging:terminationKit",
+    "rule": "counterweight: loftblocks x 2; dead hung: points x 2"
+   },
+   {
+    "key": "curtains:draw",
+    "rule": "floor(D/10) x 1, when Draw is on"
+   },
+   {
+    "key": "curtains:legs",
+    "rule": "floor(D/10) x 2, when Legs is on"
+   },
+   {
+    "key": "curtains:border",
+    "rule": "floor(D/10) x 1, when Border is on"
+   },
+   {
+    "key": "curtains:fullstage",
+    "rule": "floor(D/10) x 1, when Full is on"
+   },
+   {
+    "key": "curtains:scenerytrack",
+    "rule": "floor(D/10) x pipe length (ft), when Scenery is on and floor(D/10) > 0"
+   },
+   {
+    "key": "lighting:par",
+    "rule": "round(E x wUnit x (0.7 / 1 / 1.2))"
+   },
+   {
+    "key": "lighting:front",
+    "rule": "round(wUnit x (2 / 2.5 / 3))"
+   },
+   {
+    "key": "lighting:cyc",
+    "rule": "round(wUnit x (1 / 1.25 / 1.5))"
+   },
+   {
+    "key": "lighting:side",
+    "rule": "round(E x wUnit x (0 / 0.5 / 0.75))"
+   },
+   {
+    "key": "lighting:automated",
+    "rule": "round(E x wUnit x (0 / 0.5 / 0.9))"
+   },
+   {
+    "key": "lighting:cablePackage",
+    "rule": "ceil(total fixture quantity x perFixture x tier multiplier); no fixtures -> no line"
+   },
+   {
+    "key": "controls:console",
+    "rule": "1 when Console is on"
+   },
+   {
+    "key": "controls:consoleTouch",
+    "rule": "1 / 2 / 2 when Console is on"
+   },
+   {
+    "key": "controls:batteryBackup",
+    "rule": "1 when Console is on and size is large"
+   },
+   {
+    "key": "controls:processor",
+    "rule": "1 when Architectural is on"
+   },
+   {
+    "key": "controls:button",
+    "rule": "floor(W/20) / floor(W/10) / floor(W/5) when Architectural is on"
+   },
+   {
+    "key": "controls:archTouch",
+    "rule": "1 when Architectural is on and size is large"
+   },
+   {
+    "key": "controls:inputStation",
+    "rule": "1 / 2 / 4 when Data is on"
+   },
+   {
+    "key": "controls:distro",
+    "rule": "1 when Data is on"
+   },
+   {
+    "key": "audio:lineArray",
+    "rule": "clamp(round(W/3), 6, 24)"
+   },
+   {
+    "key": "audio:subwoofer",
+    "rule": "clamp(round(W/12), 2, 8)"
+   },
+   {
+    "key": "audio:mixerDsp",
+    "rule": "1"
+   },
+   {
+    "key": "video:projector",
+    "rule": "clamp(round(W/24), 1, 4)"
+   },
+   {
+    "key": "video:screen",
+    "rule": "1"
+   },
+   {
+    "key": "video:processor",
+    "rule": "1"
+   },
+   {
+    "key": "acoustical:tower",
+    "rule": "floor(W/10) + 2 x floor(D/10), when Towers is on"
+   },
+   {
+    "key": "acoustical:ceiling",
+    "rule": "floor(D/10), when Ceiling is on"
+   },
+   {
+    "key": "acoustical:transport",
+    "rule": "floor(D/10), when Transport is on"
+   },
+   {
+    "key": "pit:legged",
+    "rule": "W x 10 (sq ft), when pit type is Legged"
+   },
+   {
+    "key": "pit:clearspan",
+    "rule": "W x 10 (sq ft), when pit type is Clear-Span"
+   },
+   {
+    "key": "rigging:wirePull",
+    "rule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "lighting:wirePull",
+    "rule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "controls:wirePull",
+    "rule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "audio:wirePull",
+    "rule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   },
+   {
+    "key": "video:wirePull",
+    "rule": "ceil((stage width + stage depth + house depth) x runs x tier multiplier) ft; runs default 0 = no line; house depth is never collected and counts 0"
+   }
+  ],
+  "curtainGeometry": {
+   "note": "Each curtain line also carries the finished geometry its cost is computed from. PW = W, PH = proscenium height. Geometry does not change with tier.",
+   "draw": {
+    "finishedWidthFtEachPanel": "PW/2 + 2",
+    "finishedHeightFt": "PH + 1",
+    "fullnessPct": 50,
+    "panels": 2
+   },
+   "fullstage": {
+    "same as": "draw (a rear traveller)"
+   },
+   "legs": {
+    "finishedWidthFtEachPanel": 6,
+    "finishedHeightFt": "PH + 1",
+    "fullnessPct": 50,
+    "panels": 2
+   },
+   "border": {
+    "finishedWidthFtEachPanel": "PW",
+    "finishedHeightFt": 5,
+    "fullnessPct": 50,
+    "panels": 1
+   },
+   "costPerDrape": "round( finishedWidth x (1 + fullness/100) x finishedHeight x fabric $/sq ft x (1 + sewing%/100) x max(1, panels) ) - a cost; sell = cost x (1 + catalog markup)",
+   "sewingPctDefault": 10,
+   "sewingPctMax": 100,
+   "fabricRateChain": "part.curtainAreaRate, else the seed rate for that SKU, else part.costPerSqft, else part.cost when the part's unit is sq ft, else 0 (the line needs a part)",
+   "seedFabricRatesPerSqFt": {
+    "RB-CHAR-25": 3.64,
+    "RB-EN-22": 2.84,
+    "RB-EN-16": 2.1,
+    "RB-MV-MN": 4.37,
+    "RB-MUS": 0.9
+   },
+   "gridCurtainFromAuto": "Auto fill drops ONE Grid curtain per unit: width = panel width x panels (rounded to 0.1 ft), height = finished height, fullness as above, type Draw/Leg/Border/Full."
+  },
+  "pipeline": [
+   "1. compute(state) -> item keys and quantities per system (no dollars).",
+   "2. Line-set dial: when the tier's dial differs from rigSets, every rigging quantity = max(0, round(qty x dial / rigSets)).",
+   "3. Cable Package: re-derived for the tier being priced from the EFFECTIVE fixture quantities (a typed quantity override wins).",
+   "4. Wire pull: one 'Wire pull' line per wire system (rigging, lighting, controls, audio, video) that is on and whose runs > 0.",
+   "5. Price every line from the Equipment map cell for that tier (or a per-design swap). Unmapped -> $0, status 'needs a part'.",
+   "6. Quick Design only: the tier's typed quantity overrides replace quantities (whole numbers >= 0).",
+   "7. Totals."
+  ],
+  "cablePackage": {
+   "formula": "qty = ceil( round(fixtures x perFixture x tierMult x 1000) / 1000 )",
+   "perFixtureDefault": 1,
+   "perFixtureMax": 10,
+   "tierMult": {
+    "good": 1,
+    "better": 1.15,
+    "best": 1.3
+   },
+   "note": "'24 fixtures x 1 x 1.15' is shown beside the line."
+  },
+  "wirePull": {
+   "formula": "feet = ceil( round((stageWidth + stageDepth + houseDepth) x runs x tierMult x 1000) / 1000 )",
+   "runsDefault": 0,
+   "runsMax": 20,
+   "houseDepth": "always missing (no form asks for it) -> counts 0 and the line carries the note 'House depth isn't in the design - not counted'",
+   "tierMult": {
+    "good": 1,
+    "better": 1.15,
+    "best": 1.3
+   }
+  },
+  "labor": {
+   "formula": "per system: labor = priced material (sell) x labor% / 100 x tierMult",
+   "laborPctDefault": 18,
+   "laborPctMax": 60,
+   "laborPctFallback": "an unset system % takes the stored legacy flat install % ('system.installPct'), else 18",
+   "systems": [
+    "rigging",
+    "curtains",
+    "lighting",
+    "controls",
+    "acoustical",
+    "pit",
+    "audio",
+    "video",
+    "general"
+   ],
+   "tierMult": {
+    "good": 1,
+    "better": 1.15,
+    "best": 1.3
+   },
+   "noTier": "x 1.0"
+  },
+  "quickDesignTotals": {
+   "material": "sum over systems that are on of (qty x unit sell)",
+   "install": "round(sum over systems of material x labor fraction)",
+   "freight": "round(material x freight% / 100); default 5 (0-20, step 0.5)",
+   "subtotal": "material + install + freight",
+   "contingency": "round(subtotal x contingency% / 100); default 10, whole number 0-25",
+   "grand": "subtotal + contingency, shown in whole dollars",
+   "markupShown": "(material sell - material cost) / material cost"
+  },
+  "pricing": {
+   "part": "sell = the part's list price, else cost x (1 + catalog markup); cost = the part's cost. A part with neither -> needs a part.",
+   "assembly": "cost and sell from the assembly's included members; sell falls back to cost x (1 + markup)",
+   "allowance": "unit cost = the confirmed amount; sell = cost x (1 + markup)",
+   "notIncluded": "$0",
+   "catalogMarkupDefault": "the catalog's default markup setting; the code's default is 0.43 (43 %). An unusable value (negative or >= 19) falls back to 0.43.",
+   "incompleteRule": "If any line with quantity > 0 on a system that is on prices 'needs a part', the estimate shows 'Incomplete - N items need a part' instead of a dollar total and cannot be promoted to a quote."
+  },
+  "workedExample": {
+   "input": {
+    "venue": "school",
+    "size": "medium",
+    "width": 36,
+    "depth": 26,
+    "grid": 24,
+    "wing": 12,
+    "ph": 18,
+    "rigType": "counterweight",
+    "tier": "better",
+    "allSystemsOn": true,
+    "allSubOptionsOn": true,
+    "pitType": "clearspan"
+   },
+   "lineSets": 39,
+   "electrics": 2,
+   "dimmerRacks": 1,
+   "rigSets": 12,
+   "items": [
+    {
+     "key": "rigging:headblock",
+     "qty": 12,
+     "unit": "ea"
+    },
+    {
+     "key": "rigging:footblock",
+     "qty": 12,
+     "unit": "ea"
+    },
+    {
+     "key": "rigging:arbor",
+     "qty": 12,
+     "unit": "ea"
+    },
+    {
+     "key": "rigging:tbarTrack",
+     "qty": 12,
+     "unit": "ea"
+    },
+    {
+     "key": "rigging:lockRail",
+     "qty": 12,
+     "unit": "ea"
+    },
+    {
+     "key": "rigging:handline",
+     "qty": 576,
+     "unit": "ft"
+    },
+    {
+     "key": "rigging:pipe",
+     "qty": 480,
+     "unit": "ft"
+    },
+    {
+     "key": "rigging:loftblock",
+     "qty": 36,
+     "unit": "ea"
+    },
+    {
+     "key": "rigging:aircraftCable",
+     "qty": 3024,
+     "unit": "ft"
+    },
+    {
+     "key": "rigging:terminationKit",
+     "qty": 72,
+     "unit": "ea"
+    },
+    {
+     "key": "rigging:chainWrap",
+     "qty": 36,
+     "unit": "ea"
+    },
+    {
+     "key": "curtains:draw",
+     "qty": 2,
+     "unit": "ea",
+     "drape": {
+      "w": 20,
+      "h": 19,
+      "fullness": 50,
+      "qty": 2
+     }
+    },
+    {
+     "key": "curtains:legs",
+     "qty": 4,
+     "unit": "ea",
+     "drape": {
+      "w": 6,
+      "h": 19,
+      "fullness": 50,
+      "qty": 2
+     }
+    },
+    {
+     "key": "curtains:border",
+     "qty": 2,
+     "unit": "ea",
+     "drape": {
+      "w": 36,
+      "h": 5,
+      "fullness": 50,
+      "qty": 1
+     }
+    },
+    {
+     "key": "curtains:fullstage",
+     "qty": 2,
+     "unit": "ea",
+     "drape": {
+      "w": 20,
+      "h": 19,
+      "fullness": 50,
+      "qty": 2
+     }
+    },
+    {
+     "key": "lighting:par",
+     "qty": 10,
+     "unit": "ea"
+    },
+    {
+     "key": "lighting:front",
+     "qty": 13,
+     "unit": "ea"
+    },
+    {
+     "key": "lighting:cyc",
+     "qty": 6,
+     "unit": "ea"
+    },
+    {
+     "key": "lighting:side",
+     "qty": 5,
+     "unit": "ea"
+    },
+    {
+     "key": "lighting:automated",
+     "qty": 5,
+     "unit": "ea"
+    },
+    {
+     "key": "lighting:cablePackage",
+     "qty": 45,
+     "unit": "ea"
+    },
+    {
+     "key": "controls:console",
+     "qty": 1,
+     "unit": "ea"
+    },
+    {
+     "key": "controls:consoleTouch",
+     "qty": 2,
+     "unit": "ea"
+    },
+    {
+     "key": "controls:processor",
+     "qty": 1,
+     "unit": "ea"
+    },
+    {
+     "key": "controls:button",
+     "qty": 3,
+     "unit": "ea"
+    },
+    {
+     "key": "controls:inputStation",
+     "qty": 2,
+     "unit": "ea"
+    },
+    {
+     "key": "controls:distro",
+     "qty": 1,
+     "unit": "ea"
+    },
+    {
+     "key": "acoustical:tower",
+     "qty": 7,
+     "unit": "ea"
+    },
+    {
+     "key": "acoustical:ceiling",
+     "qty": 2,
+     "unit": "ea"
+    },
+    {
+     "key": "acoustical:transport",
+     "qty": 2,
+     "unit": "ea"
+    },
+    {
+     "key": "pit:clearspan",
+     "qty": 360,
+     "unit": "sqft"
+    },
+    {
+     "key": "audio:lineArray",
+     "qty": 12,
+     "unit": "ea"
+    },
+    {
+     "key": "audio:subwoofer",
+     "qty": 3,
+     "unit": "ea"
+    },
+    {
+     "key": "audio:mixerDsp",
+     "qty": 1,
+     "unit": "lot"
+    },
+    {
+     "key": "video:projector",
+     "qty": 2,
+     "unit": "ea"
+    },
+    {
+     "key": "video:screen",
+     "qty": 1,
+     "unit": "lot"
+    },
+    {
+     "key": "video:processor",
+     "qty": 1,
+     "unit": "lot"
+    }
+   ]
+  }
+ },
+ "deviceTypes": {
+  "note": "The 25 seeded device types. key = slug of the label. code = the designator prefix. icon = glyph id in the app's Grid icon set. An admin can add types (max 60), archive them, change code / icon / drawing, and map catalog categories to types.",
+  "list": [
+   {
+    "key": "fixtures",
+    "label": "Fixtures",
+    "scope": "Lighting",
+    "order": 10,
+    "code": "LX",
+    "icon": "fixture"
+   },
+   {
+    "key": "dimming-power",
+    "label": "Dimming & Power",
+    "scope": "Lighting",
+    "order": 20,
+    "code": "DIM",
+    "icon": "dimmer"
+   },
+   {
+    "key": "control-networking",
+    "label": "Control & Networking",
+    "scope": "Lighting",
+    "order": 30,
+    "code": "LCN",
+    "icon": "lighting-controls"
+   },
+   {
+    "key": "lighting-accessories",
+    "label": "Lighting Accessories",
+    "scope": "Lighting",
+    "order": 40,
+    "code": "LA",
+    "icon": "spotlight"
+   },
+   {
+    "key": "hoists-motors",
+    "label": "Hoists & Motors",
+    "scope": "Rigging",
+    "order": 50,
+    "code": "HST",
+    "icon": "motor"
+   },
+   {
+    "key": "truss-pipe",
+    "label": "Truss & Pipe",
+    "scope": "Rigging",
+    "order": 60,
+    "code": "TR",
+    "icon": "pipe"
+   },
+   {
+    "key": "rigging-hardware",
+    "label": "Rigging Hardware",
+    "scope": "Rigging",
+    "order": 70,
+    "code": "RH",
+    "icon": "hardware"
+   },
+   {
+    "key": "rigging-control",
+    "label": "Rigging Control",
+    "scope": "Rigging",
+    "order": 80,
+    "code": "RC",
+    "icon": "control-panel"
+   },
+   {
+    "key": "drapery",
+    "label": "Drapery",
+    "scope": "Curtains",
+    "order": 90,
+    "code": "DR",
+    "icon": "curtain"
+   },
+   {
+    "key": "tracks-hardware",
+    "label": "Tracks & Hardware",
+    "scope": "Curtains",
+    "order": 100,
+    "code": "TRK",
+    "icon": "track"
+   },
+   {
+    "key": "speakers",
+    "label": "Speakers",
+    "scope": "Audio",
+    "order": 110,
+    "code": "SPK",
+    "icon": "speaker"
+   },
+   {
+    "key": "microphones",
+    "label": "Microphones",
+    "scope": "Audio",
+    "order": 120,
+    "code": "MIC",
+    "icon": "microphone"
+   },
+   {
+    "key": "mixing-processing",
+    "label": "Mixing & Processing",
+    "scope": "Audio",
+    "order": 130,
+    "code": "MIX",
+    "icon": "faders"
+   },
+   {
+    "key": "amplifiers",
+    "label": "Amplifiers",
+    "scope": "Audio",
+    "order": 140,
+    "code": "AMP",
+    "icon": "amplifier"
+   },
+   {
+    "key": "assistive-listening",
+    "label": "Assistive Listening",
+    "scope": "Audio",
+    "order": 150,
+    "code": "ALS",
+    "icon": "assistive-listening"
+   },
+   {
+    "key": "intercom",
+    "label": "Intercom",
+    "scope": "Audio",
+    "order": 160,
+    "code": "COM",
+    "icon": "intercom"
+   },
+   {
+    "key": "displays-projectors",
+    "label": "Displays & Projectors",
+    "scope": "Video",
+    "order": 170,
+    "code": "DSP",
+    "icon": "display"
+   },
+   {
+    "key": "screens-lifts",
+    "label": "Screens & Lifts",
+    "scope": "Video",
+    "order": 180,
+    "code": "SCR",
+    "icon": "screen"
+   },
+   {
+    "key": "cameras",
+    "label": "Cameras",
+    "scope": "Video",
+    "order": 190,
+    "code": "CAM",
+    "icon": "camera"
+   },
+   {
+    "key": "switching-distribution",
+    "label": "Switching & Distribution",
+    "scope": "Video",
+    "order": 200,
+    "code": "SW",
+    "icon": "distribution"
+   },
+   {
+    "key": "cable-connectors",
+    "label": "Cable & Connectors",
+    "scope": "Unscoped",
+    "order": 210,
+    "code": "CBL",
+    "icon": "cable"
+   },
+   {
+    "key": "racks-cases",
+    "label": "Racks & Cases",
+    "scope": "Unscoped",
+    "order": 220,
+    "code": "RACK",
+    "icon": "rack"
+   },
+   {
+    "key": "power-distribution",
+    "label": "Power Distribution",
+    "scope": "Unscoped",
+    "order": 230,
+    "code": "PD",
+    "icon": "power"
+   },
+   {
+    "key": "networking",
+    "label": "Networking",
+    "scope": "Unscoped",
+    "order": 240,
+    "code": "NET",
+    "icon": "network"
+   },
+   {
+    "key": "parts-consumables",
+    "label": "Parts & Consumables",
+    "scope": "Unscoped",
+    "order": 250,
+    "code": "PRT",
+    "icon": "kit"
+   }
+  ],
+  "codeRule": "1-6 characters A-Z / 0-9, upper-cased, unique among active types. A type with no code: the shipped default above, else the first letters of up to three words of its label, or the first three letters of a one-word label; 'DEV' if empty.",
+  "pseudoTypes": {
+   "__unmapped": "Unmapped",
+   "__assembly": "Assemblies",
+   "__allowance": "Allowances"
+  },
+  "legacyShapes": {
+   "shapes": [
+    "rect",
+    "circle",
+    "triangle",
+    "diamond",
+    "hexagon",
+    "speaker",
+    "light",
+    "camera"
+   ],
+   "labels": {
+    "rect": "Rectangle",
+    "circle": "Circle",
+    "triangle": "Triangle",
+    "diamond": "Diamond",
+    "hexagon": "Hexagon",
+    "speaker": "Speaker",
+    "light": "Light",
+    "camera": "Camera"
+   },
+   "defaultCategoryShapes": {
+    "Speakers": "speaker",
+    "Lighting": "light",
+    "Cameras": "camera",
+    "Rigging": "diamond",
+    "Control": "hexagon"
+   },
+   "note": "The older per-category shape setting; markers now draw the device type's icon inside a scope-coloured tile, falling back to these shapes."
+  },
+  "marker": {
+   "defaultSizePx": {
+    "w": 44,
+    "h": 30
+   },
+   "scaleMin": 0.25,
+   "scaleMax": 4,
+   "scaleStep": 0.05,
+   "default": {
+    "scale": 1,
+    "mode": "generic"
+   },
+   "modes": [
+    "generic",
+    "object"
+   ],
+   "hitRadius": "base x max(0.5, scale)"
+  }
+ },
+ "wireTypes": {
+  "note": "Default wire types (Grid Settings > Wire types; max 60). A wire type carries one or more connection types; two ports connect when one wire type carries both ports' connection types and directions are compatible. speaker-pair is the only 'interchangeable' family. symbol / signal / cableSku are blank until 'Add starter cables' or 'Fill symbols from Bray's legend' fills them.",
+  "defaults": [
+   {
+    "id": "dmx-5pin",
+    "label": "DMX 5-pin",
+    "connectionTypes": [
+     "DMX512 (5-pin XLR)"
+    ]
+   },
+   {
+    "id": "cat6",
+    "label": "Cat6 (network/Dante/sACN/HDBaseT)",
+    "connectionTypes": [
+     "sACN/Art-Net (etherCON/Cat6)",
+     "Dante/AES67 (Cat6)",
+     "HDBaseT (Cat6a)"
+    ]
+   },
+   {
+    "id": "speaker-pair",
+    "label": "Speaker pair",
+    "connectionTypes": [
+     "speakON NL2",
+     "speakON NL4",
+     "speakON NL8",
+     "70V pair"
+    ],
+    "interchangeable": true
+   },
+   {
+    "id": "xlr-audio",
+    "label": "XLR audio",
+    "connectionTypes": [
+     "XLR line/mic",
+     "AES/EBU"
+    ]
+   },
+   {
+    "id": "sdi-coax",
+    "label": "SDI coax",
+    "connectionTypes": [
+     "SDI/BNC"
+    ]
+   },
+   {
+    "id": "hdmi",
+    "label": "HDMI",
+    "connectionTypes": [
+     "HDMI"
+    ]
+   },
+   {
+    "id": "contact-closure",
+    "label": "Contact closure",
+    "connectionTypes": [
+     "contact closure"
+    ]
+   },
+   {
+    "id": "fiber",
+    "label": "Fiber",
+    "connectionTypes": [
+     "fiber"
+    ]
+   },
+   {
+    "id": "powercon-power",
+    "label": "powerCON power",
+    "connectionTypes": [
+     "powerCON/True1",
+     "Edison",
+     "stage pin",
+     "Socapex",
+     "bare-end",
+     "line power (unspecified)"
+    ]
+   },
+   {
+    "id": "motor-power",
+    "label": "Motor power",
+    "connectionTypes": [
+     "motor power",
+     "low-voltage pendant control"
+    ]
+   },
+   {
+    "id": "etc-echoconnect",
+    "label": "ETC EchoConnect",
+    "connectionTypes": [
+     "ETC EchoConnect",
+     "ETC EchoConnect (line voltage)"
+    ]
+   },
+   {
+    "id": "etc-linkconnect",
+    "label": "ETC LinkConnect",
+    "connectionTypes": [
+     "ETC LinkConnect",
+     "ETC LinkConnect (Paradigm portable)",
+     "ETC LinkConnect (SPS)"
+    ]
+   },
+   {
+    "id": "etc-fdrive",
+    "label": "ETC F-Drive",
+    "connectionTypes": [
+     "ETC F-Drive ARC",
+     "ETC F-Drive CC",
+     "ETC F-Drive CV",
+     "ETC F-Drive Chroma",
+     "ETC F-Drive FTW",
+     "ETC F-Drive R12 power supply",
+     "ETC F-Drive RX CC",
+     "ETC F-Drive RX CV",
+     "ETC F-Drive RX FTW",
+     "ETC F-Drive RX power supply"
+    ]
+   },
+   {
+    "id": "etc-arcsystem",
+    "label": "ETC ArcSystem driver",
+    "connectionTypes": [
+     "ETC ArcSystem D1HO driver",
+     "ETC ArcSystem D2 driver",
+     "ETC ArcSystem D4 driver"
+    ]
+   },
+   {
+    "id": "etc-feeder",
+    "label": "ETC feeder (208V/480V)",
+    "connectionTypes": [
+     "ETC 208V feeder",
+     "ETC 480V feeder"
+    ]
+   },
+   {
+    "id": "etc-aux-power",
+    "label": "ETC auxiliary power",
+    "connectionTypes": [
+     "ETC auxiliary power"
+    ]
+   },
+   {
+    "id": "etc-dali",
+    "label": "DALI",
+    "connectionTypes": [
+     "ETC DALI"
+    ]
+   },
+   {
+    "id": "etc-0-10v",
+    "label": "0-10V dimming",
+    "connectionTypes": [
+     "ETC 0-10V dimming"
+    ]
+   },
+   {
+    "id": "etc-usb",
+    "label": "USB",
+    "connectionTypes": [
+     "ETC USB"
+    ]
+   },
+   {
+    "id": "etc-midi",
+    "label": "MIDI",
+    "connectionTypes": [
+     "ETC MIDI"
+    ]
+   },
+   {
+    "id": "etc-serial",
+    "label": "Serial / SMPTE",
+    "connectionTypes": [
+     "ETC serial",
+     "ETC SMPTE timecode"
+    ]
+   },
+   {
+    "id": "etc-control",
+    "label": "ETC control",
+    "connectionTypes": [
+     "ETC Control/SafetyLink (MCX)",
+     "ETC LSH control",
+     "ETC Sense",
+     "ETC CANbus",
+     "ETC BluesSystem low voltage",
+     "ETC control (generic)"
+    ]
+   },
+   {
+    "id": "etc-wireless",
+    "label": "ETC wireless (no cable)",
+    "connectionTypes": [
+     "ETC Echoflex (wireless)",
+     "ETC Multiverse (wireless DMX)",
+     "ETC MeshConnect (wireless)"
+    ]
+   }
+  ],
+  "connectionTypes": [
+   "powerCON/True1",
+   "Edison",
+   "stage pin",
+   "Socapex",
+   "bare-end",
+   "DMX512 (5-pin XLR)",
+   "sACN/Art-Net (etherCON/Cat6)",
+   "RDM",
+   "contact closure",
+   "XLR line/mic",
+   "speakON NL2",
+   "speakON NL4",
+   "speakON NL8",
+   "Dante/AES67 (Cat6)",
+   "AES/EBU",
+   "70V pair",
+   "HDMI",
+   "SDI/BNC",
+   "HDBaseT (Cat6a)",
+   "fiber",
+   "motor power",
+   "low-voltage pendant control",
+   "line power (unspecified)",
+   "ETC 0-10V dimming",
+   "ETC 208V feeder",
+   "ETC 480V feeder",
+   "ETC ArcSystem D1HO driver",
+   "ETC ArcSystem D2 driver",
+   "ETC ArcSystem D4 driver",
+   "ETC auxiliary power",
+   "ETC BluesSystem low voltage",
+   "ETC CANbus",
+   "ETC Control/SafetyLink (MCX)",
+   "ETC DALI",
+   "ETC EchoConnect",
+   "ETC EchoConnect (line voltage)",
+   "ETC Echoflex (wireless)",
+   "ETC F-Drive ARC",
+   "ETC F-Drive CC",
+   "ETC F-Drive CV",
+   "ETC F-Drive Chroma",
+   "ETC F-Drive FTW",
+   "ETC F-Drive R12 power supply",
+   "ETC F-Drive RX CC",
+   "ETC F-Drive RX CV",
+   "ETC F-Drive RX FTW",
+   "ETC F-Drive RX power supply",
+   "ETC LSH control",
+   "ETC LinkConnect",
+   "ETC LinkConnect (Paradigm portable)",
+   "ETC LinkConnect (SPS)",
+   "ETC MIDI",
+   "ETC MeshConnect (wireless)",
+   "ETC Multiverse (wireless DMX)",
+   "ETC SMPTE timecode",
+   "ETC Sense",
+   "ETC USB",
+   "ETC control (generic)",
+   "ETC serial"
+  ],
+  "starterCables": [
+   {
+    "sku": "Belden:9729",
+    "manufacturer": "Belden",
+    "modelNumber": "9729",
+    "mfrPartNumber": "9729",
+    "desc": "DMX cable, 2 pair 24 AWG, individually foil-shielded, PVC, CM",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.266,
+    "wireTypeId": "dmx-5pin",
+    "source": "https://catalog.belden.com/techdata/EN/9729_techdata.pdf"
+   },
+   {
+    "sku": "Belden:9841",
+    "manufacturer": "Belden",
+    "modelNumber": "9841",
+    "mfrPartNumber": "9841",
+    "desc": "RS-485 / DMX cable, 1 pair 24 AWG, foil + braid shield, PVC, CM",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.232,
+    "wireTypeId": "dmx-5pin",
+    "source": "https://catalog.belden.com/techdata/EN/9841_techdata.pdf"
+   },
+   {
+    "sku": "TMB:PC244T",
+    "manufacturer": "TMB",
+    "modelNumber": "PC244T",
+    "mfrPartNumber": "PC244T",
+    "desc": "ProPlex installation DMX cable for conduit, 2 pair 24 AWG, individually shielded, CM",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.315,
+    "wireTypeId": "dmx-5pin",
+    "source": "https://tmb.com/docs/proplex/dmx/pdf/ProPlex-PC244T-LTR-web.pdf"
+   },
+   {
+    "sku": "Belden:1583A",
+    "manufacturer": "Belden",
+    "modelNumber": "1583A",
+    "mfrPartNumber": "1583A",
+    "desc": "Cat5e U/UTP, 4 pair 24 AWG solid, riser CMR",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.19,
+    "wireTypeId": "cat6",
+    "source": "https://catalog.belden.com/techdata/EN/1583A_techdata.pdf"
+   },
+   {
+    "sku": "Belden:2412",
+    "manufacturer": "Belden",
+    "modelNumber": "2412",
+    "mfrPartNumber": "2412",
+    "desc": "Cat6+ U/UTP, 4 pair 23 AWG solid, riser CMR",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.224,
+    "wireTypeId": "cat6",
+    "source": "https://catalog.belden.com/techdata/EN/2412_techdata.pdf"
+   },
+   {
+    "sku": "Belden:2413",
+    "manufacturer": "Belden",
+    "modelNumber": "2413",
+    "mfrPartNumber": "2413",
+    "desc": "Cat6+ U/UTP, 4 pair 23 AWG solid, plenum CMP",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.224,
+    "wireTypeId": "cat6",
+    "source": "https://catalog.belden.com/techdata/EN/2413_techdata.pdf"
+   },
+   {
+    "sku": "Belden:2412FS",
+    "manufacturer": "Belden",
+    "modelNumber": "2412FS",
+    "mfrPartNumber": "2412FS",
+    "desc": "Cat6+ F/UTP shielded, 4 pair 23 AWG solid, riser CMR (etherCON / sACN runs)",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.275,
+    "wireTypeId": "cat6",
+    "source": "https://catalog.belden.com/techdata/EN/2412FS_techdata.pdf"
+   },
+   {
+    "sku": "Belden:8451",
+    "manufacturer": "Belden",
+    "modelNumber": "8451",
+    "mfrPartNumber": "8451",
+    "desc": "Mic / line audio cable, 1 pair 22 AWG, overall foil shield, CM",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.138,
+    "wireTypeId": "xlr-audio",
+    "source": "https://catalog.belden.com/techdata/EN/8451_techdata.pdf"
+   },
+   {
+    "sku": "Belden:1800F",
+    "manufacturer": "Belden",
+    "modelNumber": "1800F",
+    "mfrPartNumber": "1800F",
+    "desc": "Digital audio (AES/EBU) / mic cable, 1 pair 24 AWG, 95% braid, flexible, CL2R",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.211,
+    "wireTypeId": "xlr-audio",
+    "source": "https://catalog.belden.com/techdata/EN/1800F_techdata.pdf"
+   },
+   {
+    "sku": "Belden:5100UE",
+    "manufacturer": "Belden",
+    "modelNumber": "5100UE",
+    "mfrPartNumber": "5100UE",
+    "desc": "Speaker cable 14/2, unshielded, riser CL3R",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.218,
+    "wireTypeId": "speaker-pair",
+    "source": "https://catalog.belden.com/techdata/EN/5100UE_techdata.pdf"
+   },
+   {
+    "sku": "Belden:5000UE",
+    "manufacturer": "Belden",
+    "modelNumber": "5000UE",
+    "mfrPartNumber": "5000UE",
+    "desc": "Speaker cable 12/2, unshielded, riser CL3R",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.26,
+    "wireTypeId": "speaker-pair",
+    "source": "https://catalog.belden.com/techdata/EN/5000UE_techdata.pdf"
+   },
+   {
+    "sku": "Belden:5002UP",
+    "manufacturer": "Belden",
+    "modelNumber": "5002UP",
+    "mfrPartNumber": "5002UP",
+    "desc": "Speaker cable 12/4, unshielded, flexible, CL3",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.377,
+    "wireTypeId": "speaker-pair",
+    "source": "https://catalog.belden.com/techdata/EN/5002UP_techdata.pdf"
+   },
+   {
+    "sku": "Belden:5200UE",
+    "manufacturer": "Belden",
+    "modelNumber": "5200UE",
+    "mfrPartNumber": "5200UE",
+    "desc": "70V speaker cable 16/2, unshielded, riser CMR",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.18,
+    "wireTypeId": "speaker-pair",
+    "source": "https://catalog.belden.com/techdata/EN/5200UE_techdata.pdf"
+   },
+   {
+    "sku": "Belden:1694A",
+    "manufacturer": "Belden",
+    "modelNumber": "1694A",
+    "mfrPartNumber": "1694A",
+    "desc": "SDI coax, RG-6, 75 ohm, 18 AWG solid, foil + 95% braid, CMR (12G/6G/HD-SDI)",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.274,
+    "wireTypeId": "sdi-coax",
+    "source": "https://catalog.belden.com/techdata/EN/1694A_techdata.pdf"
+   },
+   {
+    "sku": "Corning:006T8F-31180-29",
+    "manufacturer": "Corning",
+    "modelNumber": "006T8F-31180-29",
+    "mfrPartNumber": "006T8F-31180-29",
+    "desc": "Fiber, 6-strand OM3 50 µm multimode, FREEDM One tight-buffered, indoor/outdoor riser OFNR",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.22,
+    "wireTypeId": "fiber",
+    "source": "https://ecatalog.corning.com/optical-communications/US/en/Fiber-Optic-Cables/Indoor-Outdoor/Indoor-Outdoor-Riser-Cables/FREEDM%C2%AE-One-Tight-Buffered-Cable%2C-Riser/p/006T8F-31180-29"
+   },
+   {
+    "sku": "Belden:8760",
+    "manufacturer": "Belden",
+    "modelNumber": "8760",
+    "mfrPartNumber": "8760",
+    "desc": "0-10V dimming control cable, 18/2 overall foil shield, CM",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.222,
+    "wireTypeId": "etc-0-10v",
+    "source": "https://catalog.belden.com/techdata/EN/8760_techdata.pdf"
+   },
+   {
+    "sku": "Belden:8471",
+    "manufacturer": "Belden",
+    "modelNumber": "8471",
+    "mfrPartNumber": "8471",
+    "desc": "EchoConnect data cable, 16/2 unshielded, CMG (ETC-specified)",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.274,
+    "wireTypeId": "etc-echoconnect",
+    "source": "https://catalog.belden.com/techdata/EN/8471_techdata.pdf"
+   },
+   {
+    "sku": "Belden:8461",
+    "manufacturer": "Belden",
+    "modelNumber": "8461",
+    "mfrPartNumber": "8461",
+    "desc": "Contact closure / control cable, 18/2 unshielded, CMG",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.234,
+    "wireTypeId": "contact-closure",
+    "source": "https://catalog.belden.com/techdata/EN/8461_techdata.pdf"
+   },
+   {
+    "sku": "Southwire:558094",
+    "manufacturer": "Southwire",
+    "modelNumber": "558094",
+    "mfrPartNumber": "558094",
+    "desc": "Portable cord 12/3 SOOW, 600V, black (Royal)",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.608,
+    "wireTypeId": "powercon-power",
+    "source": "https://cabletechsupport.southwire.com/en/cablespec/download_spec/?spec=70000&country=US"
+   },
+   {
+    "sku": "Southwire:558102",
+    "manufacturer": "Southwire",
+    "modelNumber": "558102",
+    "mfrPartNumber": "558102",
+    "desc": "Motor power cord 14/4 SOOW, 600V, black (Royal) — chain hoist feed",
+    "category": "Wire",
+    "unit": "ft",
+    "cost": 0,
+    "list": 0,
+    "cableOdIn": 0.57,
+    "wireTypeId": "motor-power",
+    "source": "https://cabletechsupport.southwire.com/en/cablespec/download_spec/?spec=70000&country=US"
+   }
+  ],
+  "starterLinks": [
+   {
+    "wireTypeId": "dmx-5pin",
+    "cableSku": "Belden:9729",
+    "symbol": "D",
+    "signal": "DMX"
+   },
+   {
+    "wireTypeId": "cat6",
+    "cableSku": "Belden:2412",
+    "symbol": "N",
+    "signal": "Network"
+   },
+   {
+    "wireTypeId": "xlr-audio",
+    "cableSku": "Belden:8451",
+    "symbol": "A",
+    "signal": "Audio"
+   },
+   {
+    "wireTypeId": "speaker-pair",
+    "cableSku": "Belden:5100UE",
+    "symbol": "SP",
+    "signal": "Speaker"
+   },
+   {
+    "wireTypeId": "sdi-coax",
+    "cableSku": "Belden:1694A",
+    "symbol": "V",
+    "signal": "Video (SDI)"
+   },
+   {
+    "wireTypeId": "fiber",
+    "cableSku": "Corning:006T8F-31180-29",
+    "symbol": "F",
+    "signal": "Fiber"
+   },
+   {
+    "wireTypeId": "etc-0-10v",
+    "cableSku": "Belden:8760",
+    "symbol": "LV",
+    "signal": "0-10V dimming"
+   },
+   {
+    "wireTypeId": "etc-echoconnect",
+    "cableSku": "Belden:8471",
+    "symbol": "UE",
+    "signal": "EchoConnect"
+   },
+   {
+    "wireTypeId": "contact-closure",
+    "cableSku": "Belden:8461",
+    "symbol": "CC",
+    "signal": "Contact closure"
+   },
+   {
+    "wireTypeId": "powercon-power",
+    "cableSku": "Southwire:558094",
+    "symbol": "PW",
+    "signal": "Power"
+   },
+   {
+    "wireTypeId": "motor-power",
+    "cableSku": "Southwire:558102",
+    "symbol": "M",
+    "signal": "Motor power"
+   }
+  ],
+  "brayLegend": [
+   {
+    "symbol": "P",
+    "signal": "Panic"
+   },
+   {
+    "symbol": "CC",
+    "signal": "Contact closure"
+   },
+   {
+    "symbol": "UE",
+    "signal": "EchoConnect"
+   },
+   {
+    "symbol": "D",
+    "signal": "DMX"
+   },
+   {
+    "symbol": "N",
+    "signal": "Network"
+   }
+  ],
+  "perLengthUnits": "A part is a wire part when its unit prices by run length (ft, lin ft, ...). Wire footage is summed per part and rounded UP once.",
+  "conduitFill": {
+   "emtAreasSqIn": [
+    {
+     "size": "1/2\"",
+     "area": 0.304
+    },
+    {
+     "size": "3/4\"",
+     "area": 0.533
+    },
+    {
+     "size": "1\"",
+     "area": 0.864
+    },
+    {
+     "size": "1-1/4\"",
+     "area": 1.496
+    },
+    {
+     "size": "1-1/2\"",
+     "area": 2.036
+    },
+    {
+     "size": "2\"",
+     "area": 3.356
+    },
+    {
+     "size": "2-1/2\"",
+     "area": 5.858
+    },
+    {
+     "size": "3\"",
+     "area": 8.846
+    },
+    {
+     "size": "3-1/2\"",
+     "area": 11.545
+    },
+    {
+     "size": "4\"",
+     "area": 14.753
+    }
+   ],
+   "allowedFillPct": {
+    "1 cable": 53,
+    "2 cables": 31,
+    "3 or more": 40
+   },
+   "defaultConduitSize": "3/4\"",
+   "rule": "sum of pi x (OD/2)^2 over the cables in a run vs. the typed size's area x allowed %. Suggest the smallest EMT size that fits; warn when over; unknown when any cable has no outside diameter. Never blocks."
+  },
+  "brayPowerTypes": [
+   {
+    "letter": "A",
+    "type": "Normal",
+    "config": "3Ø, 4 wire+GND",
+    "input": "120V / 200A / 60Hz"
+   },
+   {
+    "letter": "B",
+    "type": "EM",
+    "config": "3Ø, 4 wire+GND",
+    "input": "277V / 100A / 60Hz"
+   },
+   {
+    "letter": "C",
+    "type": "Normal",
+    "config": "1Ø, 2 wire+GND",
+    "input": "120V / 20A / 60Hz"
+   },
+   {
+    "letter": "D",
+    "type": "EM",
+    "config": "1Ø, 2 wire+GND",
+    "input": "120V / 20A / 60Hz"
+   },
+   {
+    "letter": "E",
+    "type": "4-wire 20A max",
+    "config": "Sense feed to engineer-specified normal power source",
+    "input": ""
+   }
+  ]
+ },
+ "sheetSizes": {
+  "sizes": {
+   "b": {
+    "key": "b",
+    "label": "11×17 (ANSI B)",
+    "w": 17,
+    "h": 11,
+    "k": 1,
+    "screenZoom": 0.6
+   },
+   "d": {
+    "key": "d",
+    "label": "24×36 (ARCH D)",
+    "w": 36,
+    "h": 24,
+    "k": 2.1176470588235294,
+    "screenZoom": 0.28
+   }
+  },
+  "marginIn": 0.375,
+  "titleStripWidthIn": 2.5,
+  "areaPadIn": 0.2,
+  "drawingAreaIn": {
+   "b": {
+    "w": 13.3,
+    "h": 9.8
+   },
+   "d": {
+    "w": 28.165,
+    "h": 21.459
+   }
+  },
+  "note": "Landscape. 24x36 is the 11x17 layout scaled by k = 36/17: margins, title strip and type all multiply by k. The title strip runs down the right edge.",
+  "titleBlockFields": [
+   "company name, address lines, phone, logo (the office marked as the quote default, else the first)",
+   "project id (GRD-####), project name, customer, venue, address",
+   "option name (only when the design has more than one option)",
+   "quote number (when the option has a quote)",
+   "revision table: newest first, at most 6 rows (letter, date, label) + 'n earlier' count",
+   "status: 'Rev <letter>' or '— Preliminary' when the design has no revision",
+   "drawn by (default: the design's creator), checked by",
+   "scale: 1\" = <real length per printed inch>, or NTS when the page is not calibrated",
+   "print date",
+   "sheet number, sheet title, 'n of N'"
+  ],
+  "sheetNumbering": {
+   "cover": "T-001 Cover sheet",
+   "plans": "<prefix>-101, -102 ... per drawing system (L Lighting plan, A Audio plan, V Video plan, R Rigging & drapery plan, G General devices plan), one per source sheet page that has devices or wires of that system",
+   "riser": "E-501 System riser",
+   "lightingControlRiser": "E-502, E-503 ... (one per page)",
+   "avConduitRiser": "continues after the lighting control riser's pages",
+   "schedules": "E-601, E-602 ... Equipment schedules",
+   "rule": "Numbers are assigned before exclusions, so excluding a sheet never renumbers another; the index and 'n of N' count only included sheets."
+  },
+  "revisionLetters": "A-Z then AA, AB ... in the order revisions were cut",
+  "generalNotesMaxChars": 4000
+ },
+ "designators": {
+  "format": "<code>-<number>",
+  "example": "MIC-1",
+  "numbering": "Per code within one design option. New devices take the lowest free number (a lot of N needs N consecutive free numbers). Gaps are kept until Renumber.",
+  "lot": "A lot marker of quantity N stores its first number and shows a range: LX-1–24.",
+  "padding": {
+   "setting": "digits 1 or 2 (app setting; 2 is the default since the conduit riser shipped)",
+   "rule": "at 2 digits numbers below 10 print with a leading zero (CRO-01); 123 prints 123"
+  },
+  "codeResolution": [
+   "the part's own designator code, when it has one",
+   "else the part's device type's code",
+   "else (part not mapped to a type) the placement's category, then the part's category, through the category->type map",
+   "else the system letter of the part's scope: L, A, V, R (Rigging and Curtains) or G"
+  ],
+  "readingOrder": "sheet order, page, space (project order; devices in no space last), rows of 0.02 of the sheet height top to bottom, then left to right; id breaks ties",
+  "custom": "Anything that is not <code>-<number> is a custom designator: shown as typed, never renumbered, never counted. Max 24 characters; control and invisible characters stripped; 'MIC - 1' becomes 'MIC-1'; a typed range keeps its first number.",
+  "duplicates": "Overlapping number blocks in the same code (case-insensitive), or equal custom text, are drawn amber (#b7791f). Not blocked.",
+  "curtains": "Curtains never get a designator.",
+  "replacePart": "A number issued in the old type's code is re-issued in the new code when the code changes; a custom or hand-renamed designator is kept.",
+  "renumber": {
+   "targets": [
+    "all",
+    "one code",
+    "selected devices"
+   ],
+   "rule": "Re-issue from the lowest numbers not held by untargeted devices of that code, in reading order. 'Apply current type codes' re-issues each device in its current type code."
+  }
+ },
+ "placementRules": {
+  "coordinates": "x, y as fractions 0..1 of the sheet page",
+  "lotQtyMax": 100000,
+  "curtainTypes": [
+   "Border",
+   "Draw",
+   "Full",
+   "Leg"
+  ],
+  "curtainFullness": [
+   {
+    "label": "Flat",
+    "pct": 0
+   },
+   {
+    "label": "50%",
+    "pct": 50
+   },
+   {
+    "label": "75%",
+    "pct": 75
+   },
+   {
+    "label": "100%",
+    "pct": 100
+   }
+  ],
+  "groupMembersMax": 200,
+  "batchMax": 2000,
+  "snapSpacingsFt": [
+   0.5,
+   1,
+   2,
+   5
+  ],
+  "snapUncalibrated": "1 % of the sheet",
+  "pasteOffset": 0.015,
+  "undoDepth": 100,
+  "zoom": {
+   "min": 0.25,
+   "max": 4
+  },
+  "autoFill": {
+   "eachCap": 120,
+   "note": "See design-spec.md chapter 5 for the placement formulas."
+  }
+ },
+ "source": {
+  "tiers": [
+   "src/app/(app)/design/quick/engine.ts",
+   "src/lib/design/wire-labor.ts",
+   "src/lib/design/equipment-pricing.ts"
+  ],
+  "systems": [
+   "src/app/(app)/design/quick/engine.ts",
+   "src/lib/design/equipment-vocab.ts",
+   "src/lib/design/grid-scopes.ts"
+  ],
+  "gridScopes": [
+   "src/lib/design/grid-scopes.ts",
+   "src/lib/design/grid-bom-groups.ts",
+   "src/lib/design/grid-icons.ts",
+   "src/lib/stores/grid-projects.ts"
+  ],
+  "venueKinds": [
+   "src/app/(app)/design/quick/engine.ts",
+   "src/lib/design/venue-templates/house-dims.ts",
+   "src/lib/design/venue-templates/index.ts",
+   "src/lib/venue-types.ts",
+   "src/lib/design/grid-intake.ts"
+  ],
+  "venueTemplates": [
+   "src/lib/design/venue-templates/*.json",
+   "src/lib/design/venue-templates/*.keys.ts",
+   "src/lib/design/venue-templates/stretch.ts",
+   "src/lib/design/venue-templates/templates.ts",
+   "src/lib/design/venue-templates/house-dims.ts",
+   "src/app/(app)/design/quick/plan-svg.tsx"
+  ],
+  "equipmentVocab": [
+   "src/lib/design/equipment-vocab.ts",
+   "src/lib/design/equipment-map.ts"
+  ],
+  "equations": [
+   "src/app/(app)/design/quick/engine.ts",
+   "src/lib/design/goods.ts",
+   "src/lib/design/venue-dims.ts",
+   "src/lib/design/cable-package.ts",
+   "src/lib/design/wire-labor.ts",
+   "src/lib/design/curtain-pricing.ts",
+   "src/lib/design/equipment-pricing.ts",
+   "src/lib/design/equipment-map.ts",
+   "src/lib/stores/pricing.ts",
+   "src/lib/stores/design-pricing.ts"
+  ],
+  "deviceTypes": [
+   "src/lib/design/device-types.ts",
+   "src/lib/design/grid-symbols.ts",
+   "src/lib/design/grid-symbol-display.ts"
+  ],
+  "wireTypes": [
+   "src/lib/catalog-connect.ts",
+   "src/lib/design/wire-starter.ts",
+   "src/lib/design/conduit-riser/wire-symbols.ts",
+   "src/lib/design/conduit-riser/fill.ts",
+   "src/lib/design/conduit-riser/model.ts",
+   "src/lib/design/grid-bom.ts"
+  ],
+  "sheetSizes": [
+   "src/lib/design/grid-drawing-set.ts"
+  ],
+  "designators": [
+   "src/lib/design/designators.ts",
+   "src/lib/design/device-types.ts",
+   "src/lib/settings.ts"
+  ],
+  "placementRules": [
+   "src/lib/design/grid-bom.ts",
+   "src/lib/design/grid-groups.ts",
+   "src/lib/design/grid-snap.ts",
+   "src/lib/design/grid-clipboard.ts",
+   "src/lib/design/grid-undo.ts",
+   "src/lib/design/grid-tools.ts",
+   "src/lib/design/grid-auto-layout.ts",
+   "src/lib/stores/grid-projects.ts"
+  ]
+ }
+}

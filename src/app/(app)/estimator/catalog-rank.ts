@@ -1,4 +1,4 @@
-import { isPerLengthUnit } from "@/lib/design/grid-bom";
+import { isPerLengthUnit } from "@/lib/quote-line-ids";
 import { isFabricPart } from "@/lib/fabric-part";
 import { partSearchHaystack, type SearchPartLike } from "@/lib/catalog-rename/sku";
 

@@ -4,13 +4,8 @@
  * and forecast maths were lifted verbatim from reports/page.tsx.
  */
 import type { Quote } from "@/lib/stores/quotes";
-import type { ProjectRecord } from "@/lib/stores/projects";
-import type { ConsultingEngagement } from "@/lib/stores/engagements";
 import type { RangeKey } from "./registry";
-import { isActive, isBacklog, isDone, projectTag, type ProjectTag } from "@/lib/pipelines";
-import { knownValue, unknownCount } from "@/lib/job-value";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
-import { isRewardCreditItem } from "@/lib/rewards/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { costFromSell } from "@/lib/markup";
 
@@ -93,33 +88,6 @@ export function salesMetrics(quotes: Quote[], a: number, b: number): SalesMetric
   };
 }
 
-/* ---- projects ---- */
-
-const byTarget = (a: ProjectRecord, b: ProjectRecord) =>
-  (a.targetDate ?? Number.MAX_SAFE_INTEGER) - (b.targetDate ?? Number.MAX_SAFE_INTEGER);
-
-export function openProjects(projects: ProjectRecord[]): ProjectRecord[] {
-  return projects.filter((p) => isActive(p)).sort(byTarget);
-}
-
-export function backlogProjects(projects: ProjectRecord[]): ProjectRecord[] {
-  return projects.filter((p) => isBacklog(p)).sort(byTarget);
-}
-
-/** "Project profit" v1 (decision 9): projected, value × k ÷ (1 + k) over the
- *  open book (`project.margin` holds a markup k, #367). A Daylite-imported project with an unknown value (Task 9)
- *  contributes 0 to both value and profit — it never appears in this book's
- *  dollar totals, only in `unknownCount` so a widget can flag it. */
-export function projectedProfit(projects: ProjectRecord[]): { value: number; profit: number; markup: number; unknownCount: number } {
-  const book = projects.filter((p) => !isDone(p));
-  const value = book.reduce((s, p) => s + knownValue(p), 0);
-  // costFromSell is guarded (a stored k ≤ −1 or junk counts at cost), so profit and markup stay finite.
-  const cost = book.reduce((s, p) => s + costFromSell(knownValue(p), p.margin || 0), 0);
-  const profit = value - cost;
-  const markup = cost > 0 && Number.isFinite(profit / cost) ? profit / cost : 0;
-  return { value, profit, markup, unknownCount: unknownCount(book) };
-}
-
 /* ---- equipment sold ---- */
 
 type SpecLike = {
@@ -158,7 +126,7 @@ export function equipmentSold(
       // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
       if (s.alternate) continue;
       for (const it of s.items || []) {
-        if (it.labor || it.option || isBonusItem(it) || isRewardCreditItem(it)) continue;
+        if (it.labor || it.option || isBonusItem(it)) continue;
         const sku = it.sku || "";
         const category = (sku && partCategory(sku)) || "Uncategorized";
         const qty = it.qty || 0;
@@ -180,97 +148,4 @@ export function equipmentSold(
   return [...cats.entries()]
     .map(([category, c]) => ({ category, value: c.value, qty: c.qty, items: [...c.items.values()].sort((x, y) => y.value - x.value) }))
     .sort((x, y) => y.value - x.value);
-}
-
-/* ---- installs book + billing forecast (forward, always 12 months) ---- */
-
-export type ForecastBucket = { start: number; billed: number; collected: number };
-
-export function installsForecast(
-  projects: ProjectRecord[],
-  engagements: ConsultingEngagement[],
-  now: number,
-  horizonMonths: number
-): {
-  book: ProjectRecord[];
-  totalValue: number;
-  blended: number;
-  cost: number;
-  buckets: ForecastBucket[];
-  bucketMs: number;
-  toBill: number;
-  collected: number;
-  byStage: Array<{ stage: string; tag: ProjectTag; count: number; value: number }>;
-  upcoming: ProjectRecord[];
-  timeline: ProjectRecord[];
-  windowMs: number;
-  /** Count of `book` records with an unknown value (Task 9) — they
-   *  contribute 0 to every dollar figure above. */
-  unknownValueCount: number;
-  /** Of the records landing inside the horizon (the `toBill` sum), how many
-   *  are UKN and so contribute 0 to it (#189). */
-  toBillUnknownCount: number;
-  /** Same, for the `collected` sum's own (net-30-shifted) window. */
-  collectedUnknownCount: number;
-} {
-  const H = horizonMonths;
-  const windowMs = H * 30 * DAY;
-  const horizonEnd = now + windowMs;
-  const book = projects.filter((p) => !isDone(p) && (p.targetDate == null || p.targetDate <= horizonEnd));
-  const totalValue = book.reduce((s, p) => s + knownValue(p), 0);
-  // #367: `blended` is now the book's markup, (value − cost) ÷ cost; p.margin holds a markup.
-  const cost = Math.round(book.reduce((a, p) => a + costFromSell(knownValue(p), p.margin || 0), 0));
-  const blended = cost > 0 && Number.isFinite((totalValue - cost) / cost) ? (totalValue - cost) / cost : 0;
-
-  // Full value billed at landing (targetDate), collected net-30 after.
-  // Consulting milestone fees (D90) land the same way — forecast-only.
-  const msPoints = engagements
-    .flatMap((e) => e.milestones)
-    .filter((m) => !m.completedAt && (m.amount || 0) > 0 && m.targetDate > 0 && m.targetDate <= horizonEnd);
-  const bC = 6;
-  const bucketMs = windowMs / bC;
-  const buckets: ForecastBucket[] = [];
-  for (let i = 0; i < bC; i++) {
-    const lo = now + i * bucketMs;
-    const hi = now + (i + 1) * bucketMs;
-    let billed = 0;
-    let collected = 0;
-    book.forEach((p) => {
-      const land = p.targetDate || 0;
-      if (land >= lo && land < hi) billed += knownValue(p);
-      const coll = land + 30 * DAY;
-      if (coll >= lo && coll < hi) collected += knownValue(p);
-    });
-    msPoints.forEach((m) => {
-      if (m.targetDate >= lo && m.targetDate < hi) billed += m.amount || 0;
-      const coll = m.targetDate + 30 * DAY;
-      if (coll >= lo && coll < hi) collected += m.amount || 0;
-    });
-    buckets.push({ start: lo, billed, collected });
-  }
-  const toBillBook = book.filter((p) => (p.targetDate || 0) >= now && (p.targetDate || 0) <= horizonEnd);
-  const toBill =
-    toBillBook.reduce((s, p) => s + knownValue(p), 0) +
-    msPoints.filter((m) => m.targetDate >= now).reduce((a, m) => a + (m.amount || 0), 0);
-  const collectedBook = book.filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd);
-  const collected =
-    collectedBook.reduce((s, p) => s + knownValue(p), 0) +
-    msPoints.filter((m) => m.targetDate + 30 * DAY >= now && m.targetDate + 30 * DAY <= horizonEnd).reduce((a, m) => a + (m.amount || 0), 0);
-
-  const stageMap = new Map<string, { value: number; count: number; tag: ProjectTag }>();
-  book.forEach((p) => {
-    const label = p.stageMeta?.label ?? p.stage;
-    const e = stageMap.get(label) || { value: 0, count: 0, tag: projectTag(p) };
-    e.value += knownValue(p);
-    e.count += 1;
-    stageMap.set(label, e);
-  });
-  const byStage = [...stageMap.entries()].map(([stage, e]) => ({ stage, tag: e.tag, count: e.count, value: e.value }));
-
-  const timeline = [...book].sort((a, b) => (a.targetDate || 0) - (b.targetDate || 0));
-  return {
-    book, totalValue, blended, cost, buckets, bucketMs, toBill, collected, byStage,
-    upcoming: timeline.slice(0, 6), timeline, windowMs, unknownValueCount: unknownCount(book),
-    toBillUnknownCount: unknownCount(toBillBook), collectedUnknownCount: unknownCount(collectedBook),
-  };
 }

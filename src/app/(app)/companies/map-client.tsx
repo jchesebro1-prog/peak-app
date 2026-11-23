@@ -429,18 +429,6 @@ function PanelContent({ summary, onFocusVenue }: { summary: CompanySummary; onFo
         <div style={{ fontSize: 12, color: "#9aa0ab" }}>No quotes yet.</div>
       )}
 
-      {summary.activeProjects.length > 0 && (
-        <>
-          <div style={sectionLabel}>Active projects</div>
-          {summary.activeProjects.map((p) => (
-            <Link key={p.id} href={p.href} className="cm-panel-row" style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "7px 0", borderTop: "1px solid #f3f4f7", textDecoration: "none", color: "inherit" }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
-              <span style={{ fontSize: 11, color: "#8c919c", flexShrink: 0 }}>{p.stageLabel}</span>
-            </Link>
-          ))}
-        </>
-      )}
-
       {summary.recentActivity.length > 0 && (
         <>
           <div style={sectionLabel}>Recent activity</div>

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getSettings, mergeSettingsObject, removeOffice, setDefaultQuoteOffice, setSettings, upsertOffice, type Office } from "@/lib/settings";
+import { getSettings, removeOffice, setDefaultQuoteOffice, setSettings, upsertOffice, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
   type GeoSearchHit,
@@ -18,14 +18,6 @@ import {
   type UserStatus,
 } from "@/lib/users";
 import { permsFor, ROLES } from "@/lib/team";
-import { ASSIST_FEATURES, cleanApiKey } from "@/lib/assist/config";
-import { clearAssistKey, getAssistEnv, saveAssistKey } from "@/lib/assist/key-store";
-import { pingAnthropicKey } from "@/lib/assist/anthropic";
-import type { AssistFeature } from "@/lib/assist/types";
-import { invalidateOrgContext } from "@/lib/inbox-org/pipeline";
-import { FREEMAIL_DOMAINS } from "@/lib/inbox-org/internal";
-import { removeSenderRule, setOwnDomainOverride } from "@/lib/stores/inbox-org";
-import { rateLimit } from "@/lib/rate-limit";
 import { saveEstimateOutputDefaults } from "@/lib/stores/estimate-output-defaults";
 import type { EstimateOutputDefaults } from "@/lib/estimate-output/fields";
 import {
@@ -37,16 +29,14 @@ import {
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
 import type { DocumentCategoryInput } from "@/lib/document-categories";
-import type { SurveyTagInput } from "@/lib/survey-tags";
-import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
+import type { QuotePipeline } from "@/lib/pipelines";
 import type { VenueTypeInput } from "@/lib/venue-types";
-import { saveDocumentCategoriesLocked, saveSurveyTagsLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
+import { saveDocumentCategoriesLocked, saveVenueTypesLocked } from "@/lib/settings-lists";
 import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
 import { withTransaction } from "@/db";
 import { foldTeamName, teamNameError } from "@/lib/team-names";
-import { handOverNameOnly, retireNameForNewcomer } from "@/lib/mailbox-names";
 import { normalizeWebsite } from "@/lib/booth/card-fields";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
@@ -91,11 +81,9 @@ export async function addUserAction(input: {
 }) {
   await requirePerm("manage_users");
   const name = (input.name || "").trim();
-  // #349 — never blank, never another teammate's name (mailboxes follow identity)
+  // #349 — never blank, never another teammate's name
   const nameError = teamNameError(name, await allUsers());
   if (nameError) return { ok: false as const, error: nameError };
-  // #349 review — a newcomer inherits no older name-only mail that carries this name
-  await retireNameForNewcomer(name);
   await addUser({
     name,
     email: (input.email || "").trim(),
@@ -144,12 +132,6 @@ export async function updateMemberAction(
     if (nameError) return { ok: false as const, error: nameError };
     if (current && next !== current.name) {
       clean.name = next;
-      const renameFrom = { id: current.id, name: current.name };
-      // #349 review — BEFORE the rename: the old name's name-only mail is pinned to
-      // this user (their name alone) or to nobody (a shared name), and anything
-      // already carrying the new name is retired — a rename never moves mail
-      await handOverNameOnly(renameFrom, users.map((u) => ({ id: u.id, name: u.name })));
-      await retireNameForNewcomer(next);
     }
   }
   if (patch.email !== undefined) clean.email = patch.email.trim();
@@ -273,56 +255,8 @@ export async function saveLogoAction(
   return { ok: true as const };
 }
 
-/**
- * Site-intake type catalog (survey-intake.ts DEFAULT_INTAKE_CATALOG
- * overrides). Only known categories are accepted; each list is trimmed,
- * de-blanked and capped so a bad payload can't bloat the settings row.
- */
-export async function saveIntakeCatalogAction(catalog: Record<string, string[]>) {
-  await requirePerm("manage_users");
-  const { DEFAULT_INTAKE_CATALOG } = await import("@/lib/stores/survey-intake");
-  const clean: Record<string, string[]> = {};
-  for (const key of Object.keys(DEFAULT_INTAKE_CATALOG)) {
-    const list = catalog?.[key];
-    if (!Array.isArray(list)) continue;
-    clean[key] = list
-      .map((t) => String(t ?? "").trim())
-      .filter(Boolean)
-      .slice(0, 60);
-  }
-  await setSettings({ intakeCatalog: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Site-visit reason picklist (D76 — DEFAULT_VISIT_REASONS overrides).
- *  Trimmed, de-blanked, capped; an empty list falls back to the defaults. */
-export async function saveVisitReasonsAction(reasons: string[]) {
-  await requirePerm("manage_users");
-  const clean = (Array.isArray(reasons) ? reasons : [])
-    .map((t) => String(t ?? "").trim())
-    .filter(Boolean)
-    .slice(0, 40);
-  await setSettings({ visitReasons: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Consulting phase menu (D90 — DEFAULT_CONSULTING_PHASES overrides).
- *  Trimmed, de-blanked, capped; an empty list falls back to the defaults. */
-export async function saveConsultingPhasesAction(phases: string[]) {
-  await requirePerm("manage_users");
-  const clean = (Array.isArray(phases) ? phases : [])
-    .map((t) => String(t ?? "").trim())
-    .filter(Boolean)
-    .slice(0, 20);
-  await setSettings({ consultingPhases: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Consulting assumptions library (#35 — DEFAULT_CONSULTING_ASSUMPTIONS
- *  overrides). Trimmed, de-blanked, capped; an empty list falls back to the
+/** The Estimator's assumptions library (#35 — DEFAULT_CONSULTING_ASSUMPTIONS
+ *  overrides; the action and the stored key keep their old names). Trimmed, de-blanked, capped; an empty list falls back to the
  *  defaults (mergedConsultingAssumptions). */
 export async function saveConsultingAssumptionsAction(assumptions: string[]) {
   await requirePerm("manage_users");
@@ -331,47 +265,6 @@ export async function saveConsultingAssumptionsAction(assumptions: string[]) {
     .filter(Boolean)
     .slice(0, 40);
   await setSettings({ consultingAssumptions: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Consulting phase weights (#145 D165/D166 — sizes each phase's
- *  proportional window in the scheduling engine; absent/invalid reads as 1
- *  via phaseWeightsFor). FULL REPLACEMENT keyed by phase NAME, posted whole
- *  by the Settings number-input row (one per phase in the current menu) —
- *  a name no longer in the phase menu is simply inert, never read back by
- *  phaseWeightsFor. Each weight is clamped to a small positive range so a
- *  stray value can't produce a degenerate schedule window. */
-export async function saveConsultingPhaseWeightsAction(weights: Record<string, number>) {
-  await requirePerm("manage_users");
-  const clean: Record<string, number> = {};
-  const entries = weights && typeof weights === "object" ? Object.entries(weights) : [];
-  for (const [name, raw] of entries.slice(0, 20)) {
-    const trimmed = String(name ?? "").trim();
-    if (!trimmed) continue;
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) continue;
-    clean[trimmed] = Math.min(1000, Math.round(n * 100) / 100);
-  }
-  await setSettings({ consultingPhaseWeights: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Consulting discipline vocabulary (#145 D165 — DEFAULT_CONSULTING_DISCIPLINES
- *  overrides, mergedConsultingDisciplines). Trimmed, lowercased (matches how
- *  TaskTemplateLine.discipline and the default four are stored) and
- *  de-duplicated; an empty list falls back to the defaults. */
-export async function saveConsultingDisciplinesAction(disciplines: string[]) {
-  await requirePerm("manage_users");
-  const clean = Array.from(
-    new Set(
-      (Array.isArray(disciplines) ? disciplines : [])
-        .map((t) => String(t ?? "").trim().toLowerCase())
-        .filter(Boolean)
-    )
-  ).slice(0, 20);
-  await setSettings({ consultingDisciplines: clean });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
@@ -578,20 +471,6 @@ export async function setDefaultQuoteOfficeAction(id: string) {
   return { ok: true as const };
 }
 
-/* ---------------- Mailboxes (Gmail — Phase 7) ----------------
-   Connecting a mailbox is a redirect handshake (GET /api/gmail/connect →
-   Google → /api/gmail/callback), so the UI links straight to that route.
-   Disconnecting just drops the stored tokens. Both admin-gated, like the rest
-   of Settings. */
-
-export async function disconnectMailboxAction(mailboxKey: string) {
-  await requirePerm("manage_users");
-  const { removeConnection } = await import("@/lib/gmail/connections");
-  await removeConnection(mailboxKey);
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
 /** Live address search (Nominatim, server-side per Geo usage policy). */
 export async function searchAddressAction(query: string): Promise<GeoSearchHit[]> {
   await requirePerm("manage_users");
@@ -710,171 +589,12 @@ export async function saveVenueTypesAction(
 
 /* ---- Recordings (Krisp recordings spec §1.3 / §5.1) ---- */
 
-/**
- * Pick the mailbox whose Google account owns the Drive archive (null =
- * unset — the nightly job waits). The key must be a currently connected
- * mailbox; the Drive scope itself is NOT required here (Settings shows
- * "needs Drive scope" + an Enable link), so an admin can pick the account
- * first and grant the scope second in either order. Changing the account
- * drops the cached folder ids — they belong to the previous Drive.
- */
-export async function setRecordingsArchiveMailboxAction(mailboxKey: string | null) {
-  await requirePerm("manage_users");
-  const clean = (mailboxKey || "").trim() || null;
-  const current = await getSettings();
-  if (clean) {
-    const { getConnectionInfo } = await import("@/lib/gmail/connections");
-    const info = await getConnectionInfo(clean);
-    if (!info) return { ok: false as const, error: "That mailbox isn't connected." };
-  }
-  const patch: Record<string, unknown> = { recordingsArchiveMailbox: clean };
-  if (clean !== current.recordingsArchiveMailbox) {
-    patch.recordingsArchiveFolderId = null;
-    patch.recordingsArchiveFolders = {};
-  }
-  await setSettings(patch);
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** #283 — pick the mailbox whose Google account reads Peak Product Photos.
- *  Must be connected; drive.readonly may be granted before or after. */
-export async function setCatalogPhotosMailboxAction(mailboxKey: string | null) {
-  await requirePerm("manage_users");
-  const { saveCatalogPhotosMailbox } = await import("@/lib/part-docs/drive-photo-sync");
-  const r = await saveCatalogPhotosMailbox(mailboxKey);
-  if (!r.ok) return { ok: false as const, error: r.error };
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Pilot gate (Settings → Beta): user ids allowed to see Record; [] = everyone. */
-export async function setRecordingsBetaUsersAction(userIds: string[]) {
-  await requirePerm("manage_users");
-  const known = new Set((await allUsers()).map((u) => u.id));
-  const clean = Array.from(
-    new Set((Array.isArray(userIds) ? userIds : []).filter((id) => typeof id === "string" && known.has(id)))
-  );
-  await setSettings({ recordingsBetaUsers: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** #334 Assist pilot (Settings → Beta): allow-list (empty = NOBODY), per-feature
- *  switches and the monthly spend cap. Each field is optional; omitted = untouched. */
-export async function setAssistSettingsAction(patch: {
-  users?: string[];
-  features?: Partial<Record<AssistFeature, boolean>>;
-  capUsd?: number;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requirePerm("manage_users");
-  const next: Record<string, unknown> = {};
-  if (Array.isArray(patch.users)) {
-    const known = new Set((await allUsers()).map((u) => u.id));
-    next.assistUsers = Array.from(new Set(patch.users.filter((id) => typeof id === "string" && known.has(id))));
-  }
-  // #342 — only the switches PRESENT in the patch are written, as a nested
-  // atomic merge: one click can no longer rewrite (and lose a concurrent click
-  // on) the other six. Absent keys keep their stored value, or
-  // assistSettingsOf's default when never stored.
-  const featurePartial: Record<string, boolean> = {};
-  if (patch.features && typeof patch.features === "object") {
-    for (const f of ASSIST_FEATURES) {
-      const v = patch.features[f];
-      if (typeof v === "boolean") featurePartial[f] = v;
-    }
-  }
-  if (patch.capUsd !== undefined) {
-    const n = Number(patch.capUsd);
-    if (!Number.isFinite(n) || n < 0 || n > 10_000) return { ok: false, error: "Cap must be between $0 and $10,000." };
-    next.assistMonthlyCapUsd = Math.round(n * 100) / 100;
-  }
-  if (Object.keys(next).length) await setSettings(next);
-  if (Object.keys(featurePartial).length) await mergeSettingsObject("assistFeatures", featurePartial);
-  // #335 — the pilot list / file + promise switches gate the inbox pipeline
-  invalidateOrgContext();
-  revalidatePath("/", "layout");
-  return { ok: true };
-}
-
-/** #335 Inbox organization (Assist pilot card, admin): delete a company-wide
- *  sender rule — or any rule (removeSenderRule re-checks). */
-export async function removeCompanySenderRuleAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const me = await requirePerm("manage_users");
-  const ruleId = typeof id === "string" ? id.trim().slice(0, 80) : "";
-  if (!ruleId) return { ok: false, error: "Rule not found." };
-  const removed = await removeSenderRule(ruleId, { userId: me.id, admin: true });
-  if (!removed) return { ok: false, error: "Rule not found." };
-  invalidateOrgContext();
-  revalidatePath("/", "layout");
-  return { ok: true };
-}
-
-/** #335 — Peak's own mail domain(s) override (comma / space separated; blank
- *  = derive from the team's addresses). Peak's own domain always stays. */
-export async function setOwnDomainOverrideAction(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requirePerm("manage_users");
-  const raw = typeof value === "string" ? value.trim() : "";
-  if (raw.length > 200) return { ok: false, error: "Keep it under 200 characters." };
-  const parts = raw.split(/[\s,;]+/).filter(Boolean);
-  const bad = parts.find((d) => !/^@?[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(d));
-  if (bad) return { ok: false, error: `"${bad.slice(0, 60)}" isn't a domain (like peaksystemsgroup.com).` };
-  const free = parts.find((d) => FREEMAIL_DOMAINS.has(d.toLowerCase().replace(/^@+/, "")));
-  if (free) return { ok: false, error: `${free.replace(/^@+/, "")} is a public mail provider — it can't be Peak's own domain (everyone there would count as a teammate).` };
-  await setOwnDomainOverride(parts.join(", "));
-  invalidateOrgContext();
-  revalidatePath("/", "layout");
-  return { ok: true };
-}
-
-/** D881 — store the Claude API key, encrypted. The key is never echoed back,
- *  not even in an error; the result carries only its last four characters. */
-export async function setAssistKeyAction(raw: string): Promise<{ ok: true; last4: string } | { ok: false; error: string }> {
-  const me = await requirePerm("manage_users");
-  const key = cleanApiKey(raw);
-  if (!key) return { ok: false, error: "That doesn't look like a Claude API key (it starts with sk-ant-)." };
-  try {
-    const { last4 } = await saveAssistKey(key, me.name);
-    // #335 — the org context carries the Assist env (the pilot gate)
-    invalidateOrgContext();
-    revalidatePath("/", "layout");
-    return { ok: true, last4 };
-  } catch (e) {
-    // e.name only — never e.message: a Drizzle error embeds the query params, which here include the ciphertext.
-    console.error("[assist] saving the Assist key failed", e instanceof Error ? e.name : "error");
-    return { ok: false, error: "Couldn't save the key (is AUTH_SECRET set?)." };
-  }
-}
-
-/** D881 — remove the stored key; the env var (if any) takes over. */
-export async function clearAssistKeyAction(): Promise<{ ok: true }> {
-  await requirePerm("manage_users");
-  await clearAssistKey();
-  invalidateOrgContext();
-  revalidatePath("/", "layout");
-  return { ok: true };
-}
-
-/** D881 — check the effective key with one free call (models.retrieve, 15 s,
- *  no retries). Writes no assist_runs row and spends nothing. */
-export async function testAssistKeyAction(): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  const me = await requirePerm("manage_users");
-  if ((process.env.ASSIST_DISABLED || "").trim() === "true") return { ok: false, error: "Assist is off (kill switch)." };
-  if (!rateLimit(`assist-key-test:${me.id}`, 20, 3_600_000).ok) return { ok: false, error: "Too many tests — try again in a bit." };
-  // noCache: a warm instance must not test a key another instance just replaced or removed.
-  const key = ((await getAssistEnv({ noCache: true })).ANTHROPIC_API_KEY || "").trim();
-  if (!key) return { ok: false, error: "No key set." };
-  const r = await pingAnthropicKey(key);
-  return r.ok ? { ok: true, message: "Key works — Claude API reachable." } : { ok: false, error: `Key test failed: ${r.error}.` };
-}
-
 /* ---- Pipelines (Settings → Pipelines) ---- */
 
 /** Full-replacement save of the project and/or quote pipelines, and/or the
  *  default quote pipeline. Thin wrapper — savePipelines() validates (pure
  *  validators) and refuses removing a stage still holding records. */
 export async function savePipelinesAction(input: {
-  project?: ProjectPipeline[];
   quote?: QuotePipeline[];
   defaultQuotePipelineId?: string;
 }) {
@@ -890,7 +610,7 @@ export async function savePipelinesAction(input: {
  *  wrapper over moveStageRecords(); see its doc comment for the project vs.
  *  quote rules. */
 export async function moveStageRecordsAction(
-  kind: "project" | "quote",
+  kind: "quote",
   pipelineId: string,
   fromStage: string,
   toStage: string
@@ -918,20 +638,6 @@ export async function saveDocumentCategoriesAction(
   return { ok: true };
 }
 
-/* ---- Venue Assessments internal tags (#344) ---- */
-
-/** Whole-list save of Settings → Field → Final thoughts tags, merged on the stored list under the settings lock
- *  (a failed read throws — it must never merge onto the starter list and silently drop custom tags). */
-export async function saveSurveyTagsAction(
-  input: SurveyTagInput[]
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requirePerm("manage_users");
-  const merged = await saveSurveyTagsLocked(input);
-  if (!merged.ok) return merged;
-  revalidatePath("/", "layout");
-  return { ok: true };
-}
-
 /* ---- Review limits (#242) ---- */
 
 /** Whole-map save of Settings → Admin → Review limits. Sanitized against the
@@ -948,7 +654,7 @@ export async function saveReviewLimitsAction(
   return { ok: true };
 }
 
-/** #301 — Settings → Sales & Rewards → Estimate output. Admin-only; the
+/** #301 — Settings → Sales → Estimate output. Admin-only; the
  *  stored blob is the cleaned input (lines trimmed, blanks dropped). */
 export async function saveEstimateOutputDefaultsAction(input: {
   notIncluded: string;
@@ -961,27 +667,3 @@ export async function saveEstimateOutputDefaultsAction(input: {
   return { ok: true, defaults };
 }
 
-/** Spec 2026-10-09 "Buffer" — the company default drive buffer. Every rep
- *  without their own buffer moves, so all reps re-sync on next view. */
-export async function saveDriveDefaultsAction(input: { driveBufferMin: unknown }) {
-  await requirePerm("manage_users");
-  const { saveScheduleDefaults, markDriveStale } = await import("@/lib/stores/schedule-prefs");
-  const { activeUsers } = await import("@/lib/users");
-  const saved = await saveScheduleDefaults({ driveBufferMin: input?.driveBufferMin });
-  if (!saved.ok) return { ok: false as const, error: saved.error };
-  await markDriveStale((await activeUsers()).map((u) => u.id));
-  revalidatePath("/", "layout");
-  return { ok: true as const, driveBufferMin: saved.driveBufferMin };
-}
-
-/** Spec 2026-10-09 site-visit scheduling — company work hours, same-area
- *  drive time, daily drive limit and Nearby-days look-ahead. Read live by the
- *  booking check; nothing to re-sync. */
-export async function saveSchedulingSettingsAction(input: unknown) {
-  await requirePerm("manage_users");
-  const { saveSchedulingSettings } = await import("@/lib/stores/schedule-prefs");
-  const r = await saveSchedulingSettings(input);
-  if (!r.ok) return { ok: false as const, error: r.error };
-  revalidatePath("/", "layout");
-  return { ok: true as const, settings: r.settings };
-}

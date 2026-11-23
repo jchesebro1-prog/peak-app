@@ -15,20 +15,6 @@ import {
   setStage,
   update,
 } from "@/lib/stores/leads";
-import {
-  activeVisitForLead,
-  closeVisit,
-  requestVisitForLead,
-  setVisitCustomer,
-  visitsForLead,
-} from "@/lib/stores/site-visits";
-import {
-  get as getSurvey,
-  remove as removeSurvey,
-  surveysForLead,
-  update as updateSurvey,
-} from "@/lib/stores/surveys";
-import { canConvertLead } from "@/lib/lead-thread";
 
 /**
  * Leads mutations — thin wrappers over LeadStore with the session user as
@@ -86,56 +72,16 @@ export async function logActivityAction(id: string, input: { type: string; note:
 export async function markLostAction(id: string, reason: string) {
   const me = await requireUser();
   await markLost(id, reason, me.name);
-  // #34 final-review fix: a still-unscheduled pool visit has nowhere to go
-  // once the lead is lost — close it out and note it on the lead.
-  const visit = await activeVisitForLead(id);
-  if (visit && (visit.stage === "requested" || visit.stage === "open" || visit.stage === "claimed")) {
-    await closeVisit(visit.id);
-    let note = "Site visit request closed — lead marked lost";
-    // #34 task-6 fix: the auto-created survey that rode along with this
-    // visit has nowhere to go either. If it's still untouched at
-    // "requested" and still points back at this lead, soft-delete it so a
-    // dead lead's survey stops nagging the "Survey requests to schedule"
-    // bell / venue-assessments list. A survey someone has already started
-    // working (stage moved past requested) is left alone.
-    if (visit.surveyId) {
-      const survey = await getSurvey(visit.surveyId);
-      if (survey && survey.stage === "requested" && survey.leadId === id) {
-        await removeSurvey(survey.id);
-        note += "; linked survey request removed";
-      }
-    }
-    await logActivity(id, { type: "system", note, by: me.name }, me.name);
-  }
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
-/** Convert → Customer + draft Quote; returns the quote id for the success UI.
- *  #34: the SERVER-SIDE survey gate lives here (the drawer's disabled button
- *  is not the gate). The linked survey resolves via surveysForLead (newest
- *  first) — the SAME path the drawer's gate preview uses, so gate and
- *  preview can never disagree. Deliberately NOT the active visit's surveyId:
- *  a "scheduled" visit whose end time has passed derives to "done" on read
- *  and drops out of activeVisitForLead, so the canonical flow (visit
- *  happened → survey completed → convert) has no active visit while the
- *  completed survey still exists (see deviations note / D120). Skipping
- *  requires an explicit opts.skipSurvey and logs the bypass on the lead.
- *  Tolerance: the gate reads the survey's CURRENT stage — backwards pill
- *  jumps before convert are respected by design. */
+/** Convert → Customer + draft Quote; returns the quote id for the success UI. */
 export async function convertLeadAction(
   id: string,
-  opts: { venueLabel: string; type: string; skipSurvey?: boolean; skipReason?: string }
+  opts: { venueLabel: string; type: string }
 ) {
   const me = await requireUser();
-
-  const linked = await surveysForLead(id); // newest first (getAll is updatedAt-desc)
-  const survey: { stage: string } | null = linked[0]
-    ? { stage: (linked[0].stage || "requested") as string }
-    : null;
-  const gate = canConvertLead(survey, !!opts.skipSurvey);
-  if (!gate.ok)
-    return { ok: false as const, reason: gate.reason, quoteId: "", customerId: "" };
 
   // convert() writes in three steps with no transaction between them (#74):
   // upsertCustomer() into the relational identity core, THEN the quote mint,
@@ -160,34 +106,6 @@ export async function convertLeadAction(
       quoteId: "",
       customerId: "",
     };
-  }
-  if (res && opts.skipSurvey) {
-    await logActivity(
-      id,
-      {
-        type: "system",
-        note:
-          "Converted without completed survey — " +
-          (opts.skipReason?.trim() || "no reason given"),
-        by: me.name,
-      },
-      me.name
-    );
-  }
-  // #34 final-review fix: thread continuity — the visits/surveys this lead
-  // spawned pre-date the customer record (customerId null); backfill it now
-  // so the customer's own visit/survey history picks them up.
-  if (res && res.customerId) {
-    const customerId = res.customerId;
-    const [visits, surveys] = await Promise.all([visitsForLead(id), surveysForLead(id)]);
-    await Promise.all([
-      ...visits
-        .filter((v) => v.customerId == null)
-        .map((v) => setVisitCustomer(v.id, customerId)),
-      ...surveys
-        .filter((s) => s.customerId == null)
-        .map((s) => updateSurvey(s.id, { customerId })),
-    ]);
   }
   revalidatePath("/", "layout");
   if (!res)
@@ -259,41 +177,6 @@ export async function setForecastAction(id: string, at: number | null) {
   await update(id, { forecastAt: at });
   revalidatePath("/", "layout");
   return { ok: true as const };
-}
-
-/** #34: "Request site visit" from the lead drawer. Dedupe + visit + auto-
-    linked Survey live in the store orchestration (requestVisitForLead);
-    this wraps it with the session user and the lead activity entry. */
-export async function requestSiteVisitAction(
-  id: string,
-  input: { reason: string; timing: string; assignee: string }
-) {
-  const me = await requireUser();
-  const l = await get(id);
-  if (!l) return { ok: false as const, reason: "not-found" as const, visitId: "" };
-  const res = await requestVisitForLead(
-    {
-      id: l.id,
-      org: l.org,
-      contact: l.contact,
-      email: l.email,
-      phone: l.phone,
-      address: l.address || "",
-      city: l.city,
-      state: l.state,
-      customerId: l.customerId ?? null,
-    },
-    input,
-    me.name
-  );
-  if (!res.ok) return { ok: false as const, reason: "exists" as const, visitId: res.visitId };
-  await logActivity(
-    id,
-    { type: "system", note: "Requested site visit — " + input.reason, by: me.name },
-    me.name
-  );
-  revalidatePath("/", "layout");
-  return { ok: true as const, visitId: res.visitId, surveyId: res.surveyId };
 }
 
 /**

@@ -1,5 +1,3 @@
-import { after } from "next/server";
-import { Suspense } from "react";
 import { requireUser } from "@/lib/session";
 import { getUser } from "@/lib/users";
 import { getSettings } from "@/lib/settings";
@@ -7,20 +5,13 @@ import { can, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import { makeDashboardData } from "@/lib/dashboard/data";
 import { homeAlerts, myQuoteStats, resolvePipe, sheetHrefFor } from "@/lib/dashboard/home-metrics";
-import StartHereCard from "@/components/triage/start-here-card";
-import BriefCard from "@/components/brief/brief-card";
-import { assistSettingsOf } from "@/lib/assist/config";
 import HomeTabs from "./home-tabs";
 import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
-import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
-import { syncMeetingsIfStale } from "@/lib/meetings/sync";
-import { toFileCount } from "./inbox/meetings/load";
-import { meetingsReadOr } from "@/lib/meetings/safe-read";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
-/** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
+/** Home actions that schedule a quote PDF render in `after()` run inside this budget. */
 export const maxDuration = 120;
 
 /**
@@ -77,36 +68,15 @@ export default async function HomePage({
   const sp = await searchParams;
   const me = user.name;
   const data = makeDashboardData(user);
-  void reconcileRecordingsIfStale().catch(() => {});
-  // #323 Krisp meetings, > 10 min stale — after the response (after(), like #222's PDF render), never blocking Home
-  after(() => syncMeetingsIfStale(user.id).catch(() => {}));
-  after(async () => {
-    const { syncDriveIfStale } = await import("@/lib/drive-sync/sync");
-    await syncDriveIfStale(user.id).catch((err) => console.error("[drive-sync] stale re-sync failed:", err));
-  });
   const now = Date.now();
-  // AI daily brief (spec §2) — pre-made replies / task suggestions / quote
-  // nudges, after the response, within this page's 120 s; returns at once
-  // unless the user is in the Assist pilot with reply, tasks or brief on.
-  after(async () => {
-    const { runDraftQueue, HOME_DRAFT_DEADLINE_MS } = await import("@/lib/brief/drafts");
-    await runDraftQueue({ ownerId: user.id, deadlineMs: now + HOME_DRAFT_DEADLINE_MS }).catch((err) => console.error("[brief] draft queue failed:", err));
-  });
-  const [userRecord, appSettings, quotesAll, designsAll, meetingsToFile] = await Promise.all([
-    getUser(user.id), getSettings(), data.quotes(), data.designs(),
-    meetingsReadOr(toFileCount(user.id), 0, "home count"), // #323 — one SQL count of the viewer's unfiled, non-noise meetings
+  const [userRecord, appSettings, quotesAll] = await Promise.all([
+    getUser(user.id), getSettings(), data.quotes(),
   ]);
-
-  // AI daily brief (spec §4) — mounted only for an Assist pilot user with
-  // Daily brief on (a settings read, no I/O); the card runs the full Assist
-  // gate (the stored key) itself, behind its Suspense.
-  const assistSettings = assistSettingsOf(appSettings);
-  const briefOn = assistSettings.users.includes(user.id) && !!assistSettings.features.brief;
 
   const pipe = resolvePipe(first(sp.pipe));
   const sheetHref = sheetHrefFor(pipe);
   const s = myQuoteStats(quotesAll, me);
-  const { urgentCount, openReviewCount } = homeAlerts(quotesAll, designsAll, me, now, sheetHref, can("approve", user.roles));
+  const { urgentCount, openReviewCount } = homeAlerts(quotesAll, me, now, sheetHref, can("approve", user.roles));
 
   /* ---- greeting (unchanged) ---- */
   const office = appSettings.offices.find((o) => o.quoteDefault) || appSettings.offices[0];
@@ -135,15 +105,7 @@ export default async function HomePage({
   return (
     <HomeTabs active="dashboard" className="pkh-content">
       <style dangerouslySetInnerHTML={{ __html: HOME_CSS }} />
-      <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} meetingsToFile={meetingsToFile} />
-      {briefOn && (
-        <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Preparing your brief…</div>}>
-          <BriefCard user={user} settings={assistSettings} />
-        </Suspense>
-      )}
-      <Suspense fallback={<div className="pk-card" style={{ marginBottom: 22, padding: "14px 17px", fontSize: 12.5, color: "#8c919c" }}>Building your Start here list…</div>}>
-        <StartHereCard user={user} />
-      </Suspense>
+      <HomeGreeting greeting={greeting} firstName={firstName(me)} standfirst={standfirst} openReviewCount={openReviewCount} lastLogin={lastLogin} timezone={timezone} />
       <WidgetHost user={user} surface="home" sp={sp} data={data} />
       {sheetQuote && <HomeStageSheet quote={sheetQuote} closeHref={closeHref} />}
     </HomeTabs>

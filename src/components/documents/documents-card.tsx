@@ -1,7 +1,6 @@
 import { blobEnabled } from "@/lib/blob";
 import { requireUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { getAllProjects } from "@/lib/stores/projects";
 import { documentCategories, documentsForCustomer } from "@/lib/stores/documents";
 import { activeDocumentCategories } from "@/lib/document-categories";
 import { documentRows } from "@/lib/document-rules";
@@ -40,18 +39,16 @@ export async function DocumentsCard({
       </div>
     );
   }
-  const [cust, projects, categories, docs] = await Promise.all([
+  const [cust, categories, docs] = await Promise.all([
     getCustomer(customerId),
-    getAllProjects(),
     documentCategories(),
     documentsForCustomer(customerId, projectId ? { projectId } : siteId ? { siteId } : {}),
   ]);
   if (!cust) return null;
   // `locations[].id` is the docLocId — the id a document's siteId carries.
   const venues = (cust.locations || []).flatMap((l) => (l.id ? [{ id: l.id, label: l.label || l.locationName || "Venue" }] : []));
-  const custProjects = projects
-    .filter((p) => p.customerId === customerId)
-    .map((p) => ({ id: p.id, label: p.name || p.id }));
+  // Projects were removed from the app: no project picker; a file filed on one earlier keeps its id.
+  const custProjects: { id: string; label: string }[] = [];
   return (
     <DocumentsCardClient
       customerId={customerId}

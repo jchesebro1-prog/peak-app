@@ -365,7 +365,6 @@ export default function SectionCard(p: SectionCardProps) {
   const sellSet = hasSellOverride(sec);
   const sellWarning = systemSellWarning(sec);
   const sysMarkup = Math.round(systemMarkup(sec) * 100);
-  // #282 phase 2: the Rewards credit line shows in the totals sidebar, not here.
   const visible = sec.items.filter(isSystemLine);
   const metaParts: string[] = [];
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
@@ -564,14 +563,13 @@ export default function SectionCard(p: SectionCardProps) {
                 Customer: {(sec.presentation || "itemized") === "narrative" ? "Narrative" : "Itemized"} ↗
               </a>
               )}
-              {/* #301: which site-visit discipline this system answers — matches the
-                  survey's Client goals. Blank = inferred from the name (never stored). */}
+              {/* #301: which discipline this system answers. Blank = inferred from the name (never stored). */}
               {sec.kind !== "labor" && !p.boxSale && (
                 <select
                   value={sec.discipline || ""}
                   onChange={(e) => p.onSetDiscipline(e.target.value as ScopeDiscipline | "")}
                   aria-label="Discipline"
-                  title="The site-visit discipline this system answers"
+                  title="The discipline this system answers"
                   style={{ border: "1px solid #e4e7ec", borderRadius: 6, padding: "4px 6px", fontSize: 11, color: "#5b616e", background: "#fff" }}
                 >
                   <option value="">{autoDisciplineLabel(sec.name)}</option>
@@ -1221,7 +1219,7 @@ export default function SectionCard(p: SectionCardProps) {
                         style={{ width: LINE_CHECK_SIZE, height: LINE_CHECK_SIZE, margin: "2px 0 0", flexShrink: 0, accentColor: "var(--accent)" }}
                       />
                     )}
-                    {/* #357: a line that can't move (the Rewards credit) keeps the checkbox's room, so its description lines up. */}
+                    {/* #357: a line that can't move (a bonus line) keeps the checkbox's room, so its description lines up. */}
                     {p.onToggleLineSelected && !isMovableLine(it) && <span aria-hidden="true" data-line-check-pad="" style={{ width: LINE_CHECK_SIZE, flexShrink: 0 }} />}
                     <div style={{ minWidth: 0, flex: 1 }}>
                     <div

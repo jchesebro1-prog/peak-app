@@ -1,7 +1,6 @@
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { blobEnabled } from "@/lib/blob";
 import { sentDocumentStamp } from "@/lib/quote-share/view";
-import { gridProjectForQuote, type GridProject } from "@/lib/stores/grid-projects";
 import type { Quote } from "@/lib/stores/quotes";
 import { datasheetGapCount, type DatasheetSelection } from "./package-docs-server";
 import { keyProductsNeedingText, packageGapChips, scopesWithoutGoals } from "./package-gaps";
@@ -10,7 +9,6 @@ import { normalizePackageSelection } from "./package-selection";
 import { cleanBidderName, cleanClientResponses, responseRows, type ResponseRow } from "./responses";
 import { getCompany } from "@/lib/identity/companies";
 import { listBidders } from "@/lib/stores/bids";
-import { quoteQualifiesForGrid } from "@/lib/design/estimate-grid-link";
 import { resolvePeakHeader } from "@/lib/letterhead";
 import { loadPeakHeaderDefault } from "@/lib/letterhead-server";
 import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
@@ -22,19 +20,12 @@ import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
  * as "Rev N". Server-only. `deps` exists for the spec harness.
  */
 
-/** `grid` — the linked Grid design (Task 9: "Generate from Grid"; #314: its id for "Open Grid design →" and
- *  whether it is the estimate-owned, drawings-only kind), or null when none is linked. `gridEligible` (#314):
- *  this quote may start a Grid design (quoteQualifiesForGrid). `canCreate` is the action's to fill (the
- *  "Design in the Grid" button needs create); loadPackagePanel itself always reports false. */
 export type PackagePanel = {
   canSend: boolean;
   uploads: boolean;
   files: PackageFileRow[];
   responses: ResponseRow[];
   gaps: string[];
-  grid: { label: string; projectId: string; estimateOwned: boolean } | null;
-  gridEligible: boolean;
-  canCreate: boolean;
   /** Grid notes #9 — whether the package documents carry the Peak header
    *  (the estimate's own choice ?? the company default), and that default. */
   peakHeader: boolean;
@@ -45,7 +36,6 @@ type PanelDeps = {
   /** #333: with the live quote's selection — a left-out datasheet is never a gap. */
   datasheetGaps: (spec: unknown, sel: DatasheetSelection | null) => Promise<number>;
   uploads: () => boolean;
-  findGrid: (quoteId: string) => Promise<{ project: GridProject; optionId: string } | null>;
   peakHeaderDefault: () => Promise<boolean>;
   /** #348 2b-ii — partyId → the bidder company's (clean) name, for responses that came through a bidder's v3 link. */
   bidderNames: (quoteId: string) => Promise<Map<string, string>>;
@@ -61,7 +51,7 @@ async function bidderNamesFor(quoteId: string): Promise<Map<string, string>> {
   return out;
 }
 
-const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled, findGrid: gridProjectForQuote, peakHeaderDefault: loadPeakHeaderDefault, bidderNames: bidderNamesFor };
+const liveDeps: PanelDeps = { datasheetGaps: datasheetGapCount, uploads: blobEnabled, peakHeaderDefault: loadPeakHeaderDefault, bidderNames: bidderNamesFor };
 
 function liveSections(q: Quote): SpecSection[] {
   const s = q.spec as { sections?: unknown } | null | undefined;
@@ -77,20 +67,6 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
     noDatasheet = await d.datasheetGaps(q.spec, q.packageSelection ?? null);
   } catch (e) {
     console.warn("[package] datasheet gap count failed", e instanceof Error ? e.message : e);
-  }
-  let grid: PackagePanel["grid"] = null;
-  try {
-    const hit = await d.findGrid(q.id);
-    if (hit) {
-      const opt = (hit.project.options || []).find((o) => o.id === hit.optionId);
-      grid = {
-        label: `${hit.project.name}${(hit.project.options || []).length > 1 && opt ? ` — ${opt.name}` : ""}`,
-        projectId: hit.project.id,
-        estimateOwned: opt?.estimateOwned === true,
-      };
-    }
-  } catch (e) {
-    console.warn("[package] grid lookup failed", e instanceof Error ? e.message : e);
   }
   let peakHeaderDefault = true;
   try {
@@ -125,9 +101,6 @@ export async function loadPackagePanel(q: Quote, canSend: boolean, deps: Partial
       keyProductsNeedText: keyProductsNeedingText(sections),
       scopesNoGoals: scopesWithoutGoals(sections),
     }),
-    grid,
-    gridEligible: quoteQualifiesForGrid(q),
-    canCreate: false,
     peakHeader: resolvePeakHeader(q.packagePeakHeader, peakHeaderDefault),
     peakHeaderDefault,
   };

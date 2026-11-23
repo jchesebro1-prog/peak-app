@@ -28,10 +28,6 @@ export const POP_BLOCKED_EVENT = "peak-popout-blocked";
 /** How long the blocked notice stays up. */
 export const POP_BLOCKED_MS = 6000;
 
-/** The single-thread URL (the Inbox lands a bare ?thread= in its own mailbox). */
-export function threadPopUrl(id: string): string {
-  return `/inbox?thread=${encodeURIComponent(id)}`;
-}
 
 /** The customer record URL. */
 export function customerPopUrl(id: string): string {

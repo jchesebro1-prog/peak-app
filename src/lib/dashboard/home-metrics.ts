@@ -1,7 +1,6 @@
 import type { AlertRow } from "@/app/(app)/home-needs-attention";
 import { money } from "@/lib/format";
 import { firstName } from "@/lib/team";
-import type { DesignRecord } from "@/lib/stores/designs";
 import type { Quote, QuoteStatus } from "@/lib/stores/quotes";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { quoteAwaitsApprovalBy } from "@/lib/quote-approval-rules";
@@ -62,7 +61,6 @@ function shortTitle(n?: string | null): string {
 
 export function homeAlerts(
   quotesAll: Quote[],
-  designsAll: DesignRecord[],
   me: string,
   now: number,
   sheetHref: (id: string) => string,
@@ -140,24 +138,8 @@ export function homeAlerts(
       });
     }
   });
-  designsAll.forEach((d) => {
-    const r = d.review;
-    if (r?.state === "in_review" && r.reviewer === me && d.owner !== me) {
-      reviewAlerts.push({
-        key: `rd-${d.id}`,
-        title: shortTitle(d.name) + " — design to review",
-        detail: "Design from " + firstName(r.submittedBy || ""),
-        tag: "review",
-        dot: "#3155a8",
-        tagColor: "#3155a8",
-        tagBg: "#e9eefb",
-        href: "/reviews",
-      });
-    }
-  });
   const openReviewCount =
-    quotesAll.filter((q) => quoteAwaitsApprovalBy(q, me, canApprove)).length +
-    designsAll.filter((d) => d.review?.state === "in_review" && d.review?.reviewer === me && d.owner !== me).length;
+    quotesAll.filter((q) => quoteAwaitsApprovalBy(q, me, canApprove)).length;
 
   return {
     alerts: reviewAlerts.concat(pipelineAlerts).slice(0, 5),

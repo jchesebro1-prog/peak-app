@@ -2,36 +2,20 @@
  * #21 customer Activity feed — PURE per-source row builders. Structural arg
  * types, ZERO store imports (every store module value-imports doc-store,
  * which must never reach this spec-tested / potentially-client-safe layer).
- * The ONE allowed import is VISIT_STAGE_META from @/lib/lead-thread — that
- * module is dependency-free by construction (plan 03) — and `@/lib/estimate-number`
- * (#223), which is pure by construction.
+ * The one import is `@/lib/estimate-number` (#223), pure by construction.
  *
- * Vocab mirrors (drift-guarded by exact-literal specs, see the #21 section
- * of the harness): QUOTE_VERB mirrors quotes.STAGE_LABEL's stage set;
- * SURVEY_STAGE_LABEL mirrors surveys.STAGES labels. Project stage labels are
- * admin-editable (Settings → Pipelines) and resolved via stageLabelFor,
- * which also renders legacy stageHistory keys — the Pipelines the server
- * loader loaded once are passed IN here.
+ * QUOTE_VERB mirrors quotes.STAGE_LABEL's stage set (drift-guarded by an
+ * exact-literal spec in the harness).
  */
-import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { displayQuoteNumber } from "@/lib/estimate-number";
-import { stageLabelFor, type Pipelines } from "@/lib/pipelines";
 // Type-only — erased at build time, so the zero-store-import / client-bundle
 // rule still holds at runtime (no store code is ever pulled in here).
 import type { QuoteStatus } from "@/lib/stores/quotes";
-import type { SurveyStage } from "@/lib/stores/surveys";
 
 export type FeedKind =
   | "note"
   | "quote"
-  | "comm"
-  | "visit"
-  | "flame"
-  | "repair"
-  | "inspection"
-  | "survey"
-  | "project-stage"
-  | "project-note";
+  ;
 
 export type FeedRow = {
   /** Unique across the whole feed — "<kind>:<recordId>:<n>" shapes. */
@@ -56,14 +40,6 @@ export type FeedRow = {
 export const FEED_META: Record<FeedKind, { letter: string; ink: string; soft: string }> = {
   note: { letter: "N", ink: "#8a6d1f", soft: "#fbf3dd" },
   quote: { letter: "Q", ink: "#3155a8", soft: "#e9eefb" },
-  comm: { letter: "C", ink: "#7b3f8a", soft: "#f3eaf5" },
-  visit: { letter: "V", ink: "#1f7a52", soft: "#eaf6ef" },
-  flame: { letter: "F", ink: "#b4543a", soft: "#f8ece7" },
-  repair: { letter: "R", ink: "#b4543a", soft: "#f8ece7" },
-  inspection: { letter: "I", ink: "#b4543a", soft: "#f8ece7" },
-  survey: { letter: "S", ink: "#3155a8", soft: "#e9eefb" },
-  "project-stage": { letter: "P", ink: "#3155a8", soft: "#e9eefb" },
-  "project-note": { letter: "P", ink: "#8a6d1f", soft: "#fbf3dd" },
 };
 
 function row(
@@ -118,176 +94,6 @@ export function quoteFeedRows(q: {
         q.portalAcceptance.by
       )
     );
-  return rows;
-}
-
-export function commFeedRows(thread: {
-  id: string;
-  subject: string;
-  status: string;
-  /** Thread-level Deleted-folder flag — distinct from the row tombstone
-   *  (which listDocs already excludes). */
-  deleted?: boolean;
-  messages: Array<{ id: string; at: number; direction: "in" | "out"; channel: string; author: string }>;
-}): FeedRow[] {
-  if (thread.status === "draft" || thread.deleted) return [];
-  const href = "/inbox?thread=" + encodeURIComponent(thread.id);
-  return (thread.messages || []).map((m) =>
-    row(
-      "comm",
-      `comm:${thread.id}:${m.id}`,
-      m.at,
-      thread.subject || "Conversation",
-      `${m.direction === "in" ? "Received" : "Sent"} · ${m.channel}`,
-      href,
-      m.author || ""
-    )
-  );
-}
-
-/**
- * #323 — one row per linked, visible Krisp meeting: "Met with Tom Ellis — Osakis PAC scope review", in the
- * comm family (the comms "meeting" channel's verb, comms.ts CHANNEL_META.meeting), opening the meeting reader.
- * Names are the attendees' display names, outside attendees (no team login) first; no summary text is copied.
- * `href` is the reader deep link the loader builds (format.ts meetingReaderHref).
- */
-export function meetingFeedRows(m: {
-  id: string;
-  title: string;
-  startedAt: number | null;
-  durationLabel: string;
-  href: string;
-  attendees: Array<{ display: string; internal: boolean }>;
-}): FeedRow[] {
-  if (m.startedAt == null) return [];
-  const names = [...m.attendees.filter((a) => !a.internal), ...m.attendees.filter((a) => a.internal)]
-    .map((a) => a.display.trim())
-    .filter(Boolean)
-    .filter((n, i, all) => all.indexOf(n) === i)
-    .slice(0, 2);
-  const title = m.title || "Untitled meeting";
-  return [
-    row(
-      "comm",
-      `meeting:${m.id}`,
-      m.startedAt,
-      names.length ? `Met with ${names.join(", ")} — ${title}` : `Meeting — ${title}`,
-      `Meeting · ${m.durationLabel}`,
-      m.href,
-      ""
-    ),
-  ];
-}
-
-export function visitFeedRows(v: {
-  id: string;
-  reason: string;
-  stage: string;
-  startAt: number | null;
-  createdAt: number;
-  assignedTo: string;
-}): FeedRow[] {
-  const meta = VISIT_STAGE_META[v.stage as keyof typeof VISIT_STAGE_META];
-  return [
-    row(
-      "visit",
-      `visit:${v.id}`,
-      v.startAt ?? v.createdAt,
-      `Site visit — ${v.reason}`,
-      meta ? meta.label : v.stage,
-      "/venue-assessments",
-      v.assignedTo || ""
-    ),
-  ];
-}
-
-const JOB_NOUN = { flame: "Flame test", repair: "Repair", inspection: "Inspection" } as const;
-const JOB_OPEN_VERB = { flame: "approved", repair: "approved", inspection: "requested" } as const;
-const JOB_HREF = { flame: "/flame-tests", repair: "/repairs", inspection: "/inspections" } as const;
-
-/**
- * Flame / repair / inspection point stamps. openedAt is approvedAt (flame,
- * repair — epoch-ms, always set) or requestedAt (inspection — epoch-ms
- * DEFAULTING TO 0 on legacy records, hence the falsy skip). completedAt is
- * epoch-ms for flame/repair; for inspections the loader precomputes it via
- * the store's completedAtOf (ISO surveyDate/reportDate → ms) — the pure
- * module never parses dates. The "scheduled" transition has NO ms stamp
- * anywhere (scheduledDate is a bare ISO day) — deliberately skipped.
- */
-export function jobFeedRows(
-  kind: "flame" | "repair" | "inspection",
-  job: {
-    id: string;
-    venue: string;
-    openedAt: number | null;
-    openedBy: string;
-    completedAt: number | null;
-    completedBy: string;
-  }
-): FeedRow[] {
-  const rows: FeedRow[] = [];
-  if (job.openedAt)
-    rows.push(
-      row(kind, `${kind}:${job.id}:open`, job.openedAt, `${JOB_NOUN[kind]} ${job.id} ${JOB_OPEN_VERB[kind]}`, job.venue, JOB_HREF[kind], job.openedBy || "")
-    );
-  if (job.completedAt != null)
-    rows.push(
-      row(kind, `${kind}:${job.id}:done`, job.completedAt, `${JOB_NOUN[kind]} ${job.id} completed`, job.venue, JOB_HREF[kind], job.completedBy || "")
-    );
-  return rows;
-}
-
-/** Mirrors surveys.STAGES labels (same drift guard as QUOTE_VERB). */
-const SURVEY_STAGE_LABEL: Record<SurveyStage, string> = {
-  requested: "Requested",
-  scheduled: "Scheduled",
-  onsite: "On-site",
-  completed: "Completed",
-};
-
-/** One row per survey at updatedAt — surveys carry no completedAt. */
-export function surveyFeedRows(s: { id: string; stage: string; venue: string; updatedAt: number }): FeedRow[] {
-  return [
-    row(
-      "survey",
-      `survey:${s.id}`,
-      s.updatedAt,
-      `Survey ${s.id} — ${SURVEY_STAGE_LABEL[s.stage as SurveyStage] ?? s.stage}`,
-      s.venue || "",
-      `/venue-assessments?id=${encodeURIComponent(s.id)}`,
-      ""
-    ),
-  ];
-}
-
-/**
- * Project stage history (D83 — normalized to [] on read; anchored with an
- * opening from:null entry on post-D83 records, legitimately empty on legacy
- * ones) + embedded ProjectNotes. REMEMBER: notes[] is NEWEST-FIRST (addNote
- * unshifts) — order is NOT assumed here; the loader sorts the merged feed.
- * Each history entry's `to` is labeled via stageLabelFor against the record's
- * own pipeline — current stage ids resolve to their live label, pre-pipeline
- * legacy keys (e.g. "training", "procurement") still render their frozen
- * historical label (LEGACY_STAGE_LABELS), never the raw key.
- */
-export function projectFeedRows(
-  p: {
-    id: string;
-    name: string;
-    kind?: string | null;
-    pipelineId?: string | null;
-    stageHistory: Array<{ at: number; to: string; by: string }>;
-    notes: Array<{ id: string; at: number; by: string; text: string; deleted?: boolean }>;
-  },
-  pipes: Pipelines
-): FeedRow[] {
-  const href = "/projects?id=" + encodeURIComponent(p.id);
-  const rows = (p.stageHistory || []).map((h, i) =>
-    row("project-stage", `project:${p.id}:stage:${i}`, h.at, `Project ${p.id} → ${stageLabelFor(pipes, p, h.to)}`, p.name, href, h.by || "")
-  );
-  for (const n of p.notes || [])
-    if (!n.deleted)
-      rows.push(row("project-note", `project:${p.id}:note:${n.id}`, n.at, n.text.slice(0, 80), p.name, href, n.by || ""));
   return rows;
 }
 

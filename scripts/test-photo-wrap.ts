@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib";
 import sharp from "sharp";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { spreadPhotoAnchors, photoFigureStyle, photoImgStyle, photoTagStyle, PHOTO_TAG_BG, docPhotoFigureStyle, docPhotoImgStyle } from "../src/lib/estimate-output/photo-spread";
 import { cleanTag, photoTagText, keyProductModelsFor, PHOTO_TAG_MAX } from "../src/lib/estimate-output/photo-models";
 import { lineOwnModel } from "../src/lib/catalog-rename/sku";
@@ -33,7 +33,7 @@ import { appendixFits, generateQuotePdf } from "../src/lib/quote-pdf/generate";
 import { pdfRetryPlan, pdfView, settlePdf, stalePdf } from "../src/lib/quote-pdf/state";
 import { markQuotePdfStale } from "../src/lib/quote-pdf/schedule";
 import { pdfBanner } from "../src/components/quote-pdf/pdf-banner";
-import { ESTIMATE_EMAIL_ATTACH_MAX } from "../src/lib/estimate-email/compose";
+import { ESTIMATE_EMAIL_ATTACH_MAX } from "../src/lib/quote-pdf/file-names";
 import { pdfStorage } from "../src/lib/quote-pdf/storage";
 import { buildQuote, get as getQuote, updateQuotePdf } from "../src/lib/stores/quotes";
 import { quotePathSegment } from "../src/lib/estimate-output/package-files";
@@ -216,7 +216,7 @@ function packageDocPhotoChecks(ok: Ok) {
     ({ type: "productBlock", attrs: { sectionId: "s2", lineKey, sku, photo }, content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
   const IMG = (lineKey: string, sku: string, align = "left") => ({ type: "productImage", attrs: { sectionId: "s2", lineKey, sku, align, width: 34 } });
   const doc = { type: "doc", version: 1, content: [PB("5", "SKU-5", "Five words."), { type: "paragraph", content: [{ type: "text", text: "After five." }] }, IMG("6", "SKU-6")] } as never;
-  const ctx = { sections, t: { grand: 1, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: PHOTOS, models: { "SKU-5": "Jupiter 4" } };
+  const ctx = { sections, t: { grand: 1, tax: 0 } as never, quoteId: "Q-1", photos: PHOTOS, models: { "SKU-5": "Jupiter 4" } };
   const r = resolvePackageDoc(doc, ctx);
   const prod = r.blocks[0] as { t: string; model?: string }, img = r.blocks[2] as { t: string; model?: string };
   ok(prod.t === "product" && prod.model === "Jupiter 4" && img.t === "image" && img.model === "PN-6", "photo wrap (pkg doc): resolved product blocks and images carry their tag text");
@@ -262,7 +262,7 @@ function packageDocFixRound1Checks(ok: Ok) {
   );
   const a5 = { sectionId: "s2", lineKey: "5", sku: "SKU-5" };
   const sdoc = { type: "doc", version: 1, content: [{ type: "productImage", attrs: { ...a5, align: "right", width: 34 } }] } as never;
-  const sctx = { sections: stale, t: { grand: 1, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: PHOTOS };
+  const sctx = { sections: stale, t: { grand: 1, tax: 0 } as never, quoteId: "Q-1", photos: PHOTOS };
   const noModels = resolvePackageDoc(sdoc, sctx).blocks[0] as { t: string; model?: string };
   const withModels = resolvePackageDoc(sdoc, { ...sctx, models: { "SKU-5": "Jupiter 4" } }).blocks[0] as { t: string; model?: string };
   ok(noModels.t === "image" && !("model" in noModels) && withModels.model === "Jupiter 4" && photoModelOf(a5, sctx) === "",
@@ -452,13 +452,7 @@ function rerenderChecks(ok: Ok) {
   // Final review I1: the Grid drawing set can use 105 s of the request's 120 s — the PDF never renders in that request.
   const grid = pa.slice(pa.indexOf("export async function generateGridDrawingsAction("));
   const gridBody = grid.slice(0, grid.indexOf("\n}\n") + 3);
-  ok(gridBody.length > 100 && !gridBody.includes("rerenderIfAppendixMoved(") && !gridBody.includes("scheduleQuotePdf(") && gridBody.includes("markStaleIfAppendixMoved(") &&
-     gridBody.includes("appendixMoved: true") && /if \(!q \|\| pdfAppendixKey\(q\) === beforeKey\) return \{ moved: false \};\s*return \{ moved: true, pdf: \(await markQuotePdfStale\(q\.id\)\)/.test(pa),
-    "rerender (Grid): Generate from Grid only marks the PDF out of date when the drawings moved, and says so (appendixMoved) — no after() render inherits what the drawing set left of the budget");
   const gen = panel.slice(panel.indexOf("const generate = () =>"), panel.indexOf("const saveBeforeGrid"));
-  ok(/if \(r\.ok && r\.appendixMoved\) \{\s*const next = await retryQuotePdfAction\(quoteId\)\.catch\(\(\) => null\);\s*if \(next\) onPdf\?\.\(next\);/.test(gen) &&
-     gen.indexOf("generateGridDrawingsAction(quoteId)") < gen.indexOf("retryQuotePdfAction(quoteId)") && panel.includes('import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";'),
-    "rerender (Grid): the panel then starts the render in a new request through the PDF's own Retry, and shows its state");
   const stale = stalePdf({ status: "ready", at: 10, savedAt: 10, blobPath: "q/x.pdf" }, 2_000, 2_000);
   const plan = pdfRetryPlan({ pdf: stale, contentChangedAt: 10 }, 2_001);
   ok(pdfView(stale, 2_001)?.outOfDate === true && pdfView(stale, 2_001)?.status === "failed" && "savedAt" in plan && plan.savedAt === 2_000,

@@ -50,14 +50,8 @@ const ROOT = path.resolve(__dirname, "..");
 const ROUTES = [
   "/",
   "/quotes",
-  "/projects",
-  "/rewards", // #282
-  "/settings/rewards", // #282
   "/estimator",
   "/design/lineset",
-  /* No "/design/grid": the standalone Grid index was removed when The Grid
-   * became a layout mode of Designs (D-grid-merge). Its editor route is still
-   * covered below as a dynamic route. */
   "/import",
   // #137 — the three people/venue importers + every CSV the hub serves.
   "/import?type=customers",
@@ -71,7 +65,6 @@ const ROUTES = [
   "/import/export?type=venues",
   "/import/export?type=venues&kind=template",
   // Daylite history import (Task 12) — two-file preview + chunked confirm.
-  "/import/daylite",
   "/catalog",
   "/catalog/documents", // #207 — the Datasheets to-do list
   "/catalog/documents?show=missing-datasheet",
@@ -81,10 +74,6 @@ const ROUTES = [
   "/catalog/documents/photos/export", // photo sheet — the .xlsx download
   "/catalog/rack-data", // #296 — rack data sheet: download, upload, preview, import
   "/catalog/rack-data/export", // #296 — the rack data CSV download
-  "/catalog/riser-data", // #328 A2 — riser data sheet: download, upload, preview, apply (admin)
-  "/catalog/riser-data/export", // #328 A2 — the riser data .xlsx download
-  "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
-  "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/catalog/manufacturers", // Manufacturer section Part 1
   "/catalog/manufacturers/rosebrand", // Manufacturer section Part 2 — one manufacturer's page
   "/catalog/model-numbers", // #304 — crosswalk upload → preview → apply (admin)
@@ -93,9 +82,6 @@ const ROUTES = [
   "/estimating-rules/pipe-types", // #373 — the pipe configurator's parts map (admin)
   "/estimating-rules/lineset-types", // #373 — the lineset configurator's parts map (admin)
   "/estimating-rules/curtain-mounts", // #292 — curtain-mount hardware (admin)
-  "/inspections",
-  "/flame-tests",
-  "/repairs",
   // Extra top-level routes found under src/app/(app) — cheap to add, same coverage rationale.
   "/customers",
   "/companies",
@@ -106,10 +92,6 @@ const ROUTES = [
   "/leads/shows", // booth capture: trade shows + contact cards
   "/leads/booth", // booth capture: staff Booth mode
   "/opportunities",
-  "/schedule",
-  "/schedule?view=timeline", // #145 D172 — consulting rows grouped above installs
-  "/schedule?view=people", // #145 D172 — the By person portfolio view
-  "/calendar",
   "/reports",
   "/reports/sourcing", // Batch 6 #66 — most-quoted products / projected sourcing
   "/reviews",
@@ -118,46 +100,17 @@ const ROUTES = [
   "/settings?section=company", // settings cleanup — one route per left-menu group
   "/settings?section=sales",
   "/settings?section=field",
-  "/settings?section=consulting",
-  "/settings?section=integrations",
   "/settings?section=team",
   "/settings?section=data",
-  "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
-  "/design/grid/settings/equipment-map", // #211 Equipment map tab (admin; read-only on load)
-  "/design/specs/new", // #205 spec builder (T5) — the New spec form
-  "/design/specs/library", // Spec records (Task 10) — the records view (default)
-  "/design/specs/library?view=sections", // Specs module (#205) — sections / articles / coverage, moved under ?view=sections
-  "/design/specs/library/records/new", // Spec records (Task 10) — the new-record editor
-  "/design/specs/templates", // Specs module (#205) — the template list
-  "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
-  "/inbox",
-  "/inbox?view=unmatched",
-  "/inbox?view=meetings",
-  "/inbox?view=organize", // #335 Inbox organization
-  "/inbox?view=organize&tab=noise",
-  "/inbox?view=organize&tab=filed",
-  "/queue",
-  "/triage", // Morning triage — the full ranked list (lazily builds the slot on the scratch db)
-  "/templates",
-  "/consulting",
-  "/venue-assessments",
-  "/assessments", // #337 assessments engine
-  "/assessments/new",
-  "/assessments/findings", // #337 Task 9: the findings register
-  "/assessments/pick-lists", // #337 Task 11: the pick-list admin (manage_users)
-  "/field-work",
   "/design-studio/lineset",
   "/design-studio/motors",
   "/design-studio/steel",
   "/design-studio/weights",
-  "/design/designs",
-  "/design/engagements",
   "/design/fixtures", // #136 redirect stub → /knowledge/fixtures (the harness follows it)
   "/design/assemblies",
   "/design/assemblies?tab=subassemblies", // #210 — the retired tab link redirects to the one list
   "/design/subassemblies", // #130/#210 — redirect to /design/assemblies; must stay 3xx
   "/design/motors",
-  "/design/quick",
   "/design/steel", // #136 redirect stub → /knowledge/steel
   /* #136 Knowledge & Information tab — landing page + the two moved tools. */
   "/knowledge",
@@ -165,88 +118,11 @@ const ROUTES = [
   "/knowledge/fixtures",
   "/account",
   "/people",
-  /* Modules that had NO coverage at all until now — /rentals shipped whole
-   * without a single smoked route, and the service lines' letter/report/quote
-   * builders are the customer-facing deliverables. */
   "/design",
-  "/rentals",
-  "/rentals/board",
   "/quotes/new",
-  // #288 — the staff Portal quotes queue: default (Needs action), and a
-  // filtered + searched view focused on a quote id that isn't there.
-  "/quotes/portal",
-  "/quotes/portal?status=all&type=flame_test&q=x&focus=Q-0",
-  "/flame-tests/scheduling",
-  "/flame-tests/report/options",
-  "/inspections/scheduling",
-  "/inspections/report/options",
-  "/repairs/scheduling",
-  "/repairs/results",
-  "/repairs/report/options",
   /* Legacy redirect stubs: these assert the hop still resolves, same as the
    * /customers/lakefront entry below. */
   "/design-studio",
-  "/consulting/quote",
-  "/flame-tests/today",
-  // #245 portal catalog: signed out (the team session is not a portal grant)
-  // renders the signed-out card; a team preview renders the full browse page
-  // (search + facets + tiles); the retired /portal/estimate redirects here.
-  "/portal/catalog",
-  "/portal/catalog?preview=lakefront",
-  "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
-  // #252 — a ?dept= filter, signed out; an unknown id is simply ignored.
-  "/portal/catalog?dept=rigging",
-  // #252 fix round 1 — the same, as a team preview: Other, and an id that
-  // resolves to nothing (both are ignored gracefully, no error).
-  "/portal/catalog?preview=lakefront&dept=other",
-  "/portal/catalog?preview=lakefront&dept=bogus",
-  // #289 — Packages & Assemblies: signed out, and as a team preview.
-  "/portal/catalog?dept=packages",
-  "/portal/catalog?preview=lakefront&dept=packages",
-  // #245 Task 11: the part sidebar renders server-side from ?part= — a real
-  // SKU, and an unknown key ("This item isn't available.").
-  "/portal/catalog?preview=lakefront&q=velour&part=RB-EN-22",
-  "/portal/catalog?preview=lakefront&part=no-such-part",
-  "/portal/estimate",
-  "/portal/estimate?preview=lakefront",
-  // #245 Task 12: the cart page — signed out, and a team preview (read-only);
-  // /portal with a Generate banner flag (the quote id isn't this customer's,
-  // so the banner names no number).
-  "/portal/catalog/quote",
-  "/portal/catalog/quote?preview=lakefront",
-  "/portal?preview=lakefront&generated=firm&q=Q-0",
-  // #288: My quotes — signed out, and a team preview (read-only) with the
-  // Generate banner flag (moved here from /portal) and a filter.
-  "/portal/my-quotes",
-  "/portal/my-quotes?preview=lakefront&generated=firm&q=Q-0",
-  "/portal/my-quotes?preview=lakefront&show=accepted",
-  // #323 — Meeting notes: signed out, and a team preview (shared summaries only).
-  "/portal/meetings",
-  "/portal/meetings?preview=lakefront",
-  // #282 phase 4 — the portal dashboard's team preview (the Rewards card
-  // renders only while the program is on; the smoke DB leaves it off).
-  "/portal?preview=lakefront",
-  // #248 Task 3 — the service intake: signed out (no team-preview session
-  // here, so it renders the signed-out card, same as /portal/catalog above).
-  "/portal/service",
-  "/portal/service?type=inspection&level=2",
-  // #248 final review (minor 7): signed-out still 200s with the entry-point
-  // query params a real "Quote it" link / "Quote again" row carries — the
-  // page returns the signed-out card before any of them are read.
-  "/portal/service?type=flame&venue=x",
-  "/portal/service?from=x",
-  // #293 slice 3 — the online estimate page. No seeded quote has a sent
-  // revision, so these cover the 200 cards (signed out; not available, in a
-  // team preview) and compile the page; the document itself is harness-
-  // rendered (#293 slice 3 blocks). Q-0 is an unknown id.
-  "/portal/quotes/Q-2041",
-  "/portal/quotes/Q-2041?preview=lakefront",
-  "/portal/quotes/Q-2041?preview=lakefront&view=bom",
-  "/portal/quotes/Q-0?preview=lakefront",
-  // #348 slice 6 Task 4 — a bidder company's previews (no seeded bids): Home compiles the Bids-card branch (no card
-  // without a bid) and the online page runs its bidder branch on another company's quote → the unavailable card.
-  "/portal?preview=northridge",
-  "/portal/quotes/Q-2041?preview=northridge",
   // #293 slice 3 — the signed share page: a well-formed token that passes the
   // shape check and reaches the DB read + HMAC verify (and fails it), and a
   // malformed one refused before any read — both the one 200 "isn't active" card.
@@ -293,13 +169,6 @@ const CONTENT_CHECKS: Array<{ route: string; reject: string; expect: string; lab
  * cannot distinguish a rendered editor from a miss.
  */
 const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: true }> = [
-  { route: "/projects/P-3001" },
-  { route: "/api/projects/P-3001/handoff" },
-  { route: "/inspections/RI-2042" },
-  { route: "/venue-assessments/FS-1055" },
-  // #119 Recordings (D152): the recorder page for a seeded survey and the beta/no-Krisp gates.
-  { route: "/recordings/new?parent=survey:FS-1055" },
-  { route: "/recordings/new?parent=inspection:RI-2042" },
   { route: "/companies/lakefront" },
   { route: "/customers/lakefront" }, // the legacy path — this entry tests that the redirect to /companies/[id] still resolves
   { route: "/venues/st-lakefront-1" }, // identity convert: st-${docId}-${n}
@@ -309,8 +178,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/vendors/rose-brand?tab=contacts" },
   { route: "/vendors/rose-brand?tab=prices" },
   { route: "/vendors/rose-brand?tab=activity" },
-  { route: "/inbox?customer=rose-brand" },
-  { route: "/inbox?customer=rose-brand&log=1" },
   { route: "/estimator?id=Q-2041" },
   { route: "/estimator?id=Q-2041&step=package" },
   // #333 Build package tabs: BOM quote, Client package, and an unknown ptab (reads as Narrative).
@@ -329,66 +196,27 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&thread=C-1032" },
   { route: "/estimator?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+estimate" },
   { route: "/estimator?customer=lakefront&category=Acoustics&replaces=Q-2041" },
-  { route: "/flame-tests/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+flame" },
-  { route: "/repairs/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&replaces=Q-2041" },
-  { route: "/inspections/quote?customer=lakefront&venue=lf2&contact=Nobody&name=Smoke+inspection" },
-  { route: "/design/engagements/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+consulting" },
-  { route: "/rentals/quote?customer=lakefront&contact=Tom+Reyes&name=Smoke+rental&replaces=Q-2041" },
-  { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // #207: the part editor with its Documents section (a seeded fabric SKU).
   { route: "/catalog?edit=RB-MV-MN" },
   // Specs module (#205): /design/specs is the saved-spec list (Phase B T5 —
   // it used to redirect to the library); an empty list renders its empty
   // state, so it needs no reject.
-  { route: "/design/specs" },
   // New spec from a quote: the seeded draft Q-2041 resolves as the source.
-  { route: "/design/specs/new?quote=Q-2041", reject: "was not found" },
-  { route: "/design/specs/templates/fixtures" }, // the starter formula's slug
-  { route: "/design/specs/templates/curtain-Leg" }, // the starter curtain template
   // CE-1001 is not seeded directly: it is lazily minted by
   // syncEngagementsFromQuotes() from the seeded won consulting quote Q-2045.
   // The [id] page's own loader (loadConsultingData(), in
   // design/engagements/data.ts) awaits that sync before reading engagements,
   // so this route mints CE-1001 on its own — there is no ordering dependency
   // on the static /design/engagements entry above.
-  { route: "/design/engagements/CE-1001" },
-  { route: "/design/engagements/CE-1001?tab=activity" },
-  { route: "/design/engagements/CE-1001?tab=schedule" },
   // #323 — the Oversight tab mounts the Meetings card beside the Recordings card.
-  { route: "/design/engagements/CE-1001?tab=oversight" },
   // #323 — the lead drawer's detail mode mounts the Meetings card slot.
   { route: "/leads?lead=L-1061" },
-  /* Service-line documents (#78's uncovered half). Each is the artifact a
-   * customer actually receives, and each compiles a different report/letter
-   * module that nothing else in this list pulls in. */
-  { route: "/flame-tests/report?job=FT-3001&variant=certificate" },
-  { route: "/flame-tests/report?job=FT-3001&variant=letter" },
-  { route: "/flame-tests/report?job=FT-3001&variant=summary" },
-  { route: "/flame-tests/results?job=FT-3001" },
-  { route: "/flame-tests/letter?id=FT-3001" },
-  { route: "/repairs/report?job=RP-4001" },
-  { route: "/repairs/results?job=RP-4001" },
-  { route: "/inspections/RI-2042/report" },
   /* The Grid's derived drawings (D112 riser, device schedule). */
-  { route: "/design/grid/GRD-5001/riser", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/conduit-riser", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/schedule", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/lineset", reject: "no longer exists" },
-  { route: "/api/grid/GRD-5001/package-manifest" },
   { route: "/api/v1/displays/catalog" },
   { route: "/api/v1/displays/manufacturers" },
   { route: "/api/v1/displays/specs" },
-  { route: "/design/grid/GRD-5001?option=opt-base", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001?option=opt-does-not-exist", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/riser?option=opt-base", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&detail=dt-main", reject: "no longer exists" },
   /* #328 C3: the A/V conduit riser — the same page with ?system=av. */
-  { route: "/design/grid/GRD-5001/conduit-riser?option=opt-base&system=av", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/schedule?option=opt-does-not-exist", reject: "no longer exists" },
   /* The drawing set (#209) at both sheet sizes, and an unknown option. */
-  { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/set?size=d", reject: "no longer exists" },
-  { route: "/design/grid/GRD-5001/set?option=opt-does-not-exist&size=b", reject: "no longer exists" },
   // #292 — curtain cut sheets (both styles; an unknown id renders "Quote not found." with a 200).
   { route: "/estimator/cut-sheets?id=Q-2041" },
   { route: "/estimator/cut-sheets?id=Q-2041&style=client" },
@@ -407,24 +235,11 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   // #296 — no rack is seeded, so the staff submittal preview is checked on its
   // not-found path: the module compiles and an unknown id is a clean 404, not a 500.
   { route: "/design/assemblies/rack/SA-NOPE", expectNotFound: true },
-  // #337 — an unknown assessment is a clean 404 from the editor page, never a 500.
-  { route: "/assessments/AS-NOPE", expectNotFound: true },
-  // #337 Task 10 — the assessment report: an unknown id is a clean 404 (page and PDF); the signed print routes
-  // without a token (or with a well-formed bad one) are clean 404s before any read.
-  { route: "/assessments/AS-NOPE/report", expectNotFound: true },
-  { route: "/api/assessments/AS-NOPE/report-pdf", expectNotFound: true },
-  { route: "/api/assessments/findings-pdf?scope=site:st-nope", expectNotFound: true },
-  { route: "/print/assessment/AS-NOPE", expectNotFound: true },
-  { route: "/print/assessment/AS-1001?t=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", expectNotFound: true },
-  { route: "/print/assessment-findings/site%3Ast-nope", expectNotFound: true },
   // #296 — the submittal download: an unknown rack is a clean 404 (CSV and zip paths), never a 500.
   { route: "/api/racks/SA-NOPE/submittal?part=csv", expectNotFound: true },
   { route: "/api/racks/SA-NOPE/submittal", expectNotFound: true },
   // #321 — the lighting control riser DXF: the seeded design has no conduit run
   // (a clean 404 after the loader path compiles); an unknown design is a 404 too.
-  { route: "/api/grid/GRD-5001/conduit-riser/dxf", expectNotFound: true },
-  { route: "/api/grid/GRD-NOPE/conduit-riser/dxf?option=opt-base&size=d&page=1", expectNotFound: true },
-  { route: "/api/grid/GRD-5001/conduit-riser/dxf?option=opt-base&size=d&page=1&system=av", expectNotFound: true },
   // #301 slice B — the share photo route with a v2 token that fails the verify: a clean 404.
   { route: "/share/quote/Q-2041/1.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/photo/PD-1", expectNotFound: true },
   // #301 slice C — the package datasheet route with a v2 token that fails the verify: a clean 404.
@@ -445,9 +260,6 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string; expectNotFound?: t
   { route: "/print/quote/Q-2041?view=bom", expectNotFound: true },
   { route: "/print/quote/Q-2041?view=bom&part=main", expectNotFound: true },
   // #301 slice C — the signed Grid set print and its two asset routes without a token: clean 404s before any read.
-  { route: "/print/grid-set/GRD-5001~opt-base", expectNotFound: true },
-  { route: "/print/grid-set/GRD-5001~opt-base/asset/sheet/gs-1", expectNotFound: true },
-  { route: "/print/grid-set/GRD-5001~opt-base/asset/doc/PD-1", expectNotFound: true },
 ];
 
 let fail = 0;

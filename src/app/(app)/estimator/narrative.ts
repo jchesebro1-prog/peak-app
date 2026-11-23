@@ -1,6 +1,6 @@
 import type { KeyProduct, SpecItem, SpecSection } from "./types";
 import { systemPrintsInBody } from "./quote-document-view";
-import { isPlaceholderSku } from "@/lib/specs/record-keys";
+import { isPlaceholderSku } from "@/lib/quote-line-ids";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { lineOwnModel, type ModelPartLike } from "@/lib/catalog-rename/sku";
 /**
@@ -145,11 +145,11 @@ const anchorsOn = (item: SpecItem, sku: string): boolean => {
 };
 
 /** A line that can be featured: a real sku, and not labor / overhead /
- *  travel / the Rewards credit / an option (options print under Optional
+ *  travel / an option (options print under Optional
  *  additions — featuring one would describe an item not in the total). */
 export function isKeyProductEligible(it: SpecItem): boolean {
   if (!it || !skuOf(it)) return false;
-  return !isBonusItem(it) && !it.labor && !it.laborOverhead && !it.laborTravel && !it.rewardCredit && !it.option;
+  return !isBonusItem(it) && !it.labor && !it.laborOverhead && !it.laborTravel && !it.option;
 }
 
 export type KeyProductResolution =

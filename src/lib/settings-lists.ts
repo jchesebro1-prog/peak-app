@@ -5,7 +5,6 @@ import {
   resolveDocumentCategories,
   type DocumentCategory,
 } from "@/lib/document-categories";
-import { mergeSurveyTags, resolveSurveyTags, type SurveyTag } from "@/lib/survey-tags";
 
 /**
  * #343 — the two Settings list editors whose save MERGES the posted list with
@@ -75,19 +74,6 @@ export async function saveDocumentCategoriesLocked(
     const res = mergeDocumentCategories(resolveDocumentCategories(settingsFrom(cur).documentCategories), input);
     out.res = res;
     return res.ok ? { documentCategories: res.categories } : null;
-  });
-  return out.res!;
-}
-
-/** #344 — Settings → Field → Final thoughts tags, merged on the stored list under the lock (a failed read throws). */
-export async function saveSurveyTagsLocked(
-  input: unknown
-): Promise<{ ok: true; tags: SurveyTag[] } | { ok: false; error: string }> {
-  const out: { res?: ReturnType<typeof mergeSurveyTags> } = {};
-  await updateSettings((cur) => {
-    const res = mergeSurveyTags(resolveSurveyTags(settingsFrom(cur).surveyInternalTags), input);
-    out.res = res;
-    return res.ok ? { surveyInternalTags: res.tags } : null;
   });
   return out.res!;
 }

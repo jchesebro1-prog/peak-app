@@ -16,7 +16,7 @@
  * open clients.
  */
 
-const CACHE_NAME = "quartzite-shell-v2";
+const CACHE_NAME = "quartzite-shell-v3"; // v3: the four-stage shrink removed many screens — drop every cached copy of them
 
 // Small, individually-added precache so one 404 can't abort install.
 const SHELL = ["/offline.html", "/manifest.webmanifest", "/icon.svg"];

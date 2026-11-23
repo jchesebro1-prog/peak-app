@@ -6,7 +6,7 @@ import { NOT_INCLUDED_MAX, WEBSITE_MAX, type EstimateOutputDefaults } from "@/li
 import { saveEstimateOutputDefaultsAction } from "./actions";
 
 /**
- * #301 — Settings → Sales & Rewards → Estimate output (R17): the Not included
+ * #301 — Settings → Sales → Estimate output (R17): the Not included
  * list a new estimate starts from (Reset to default lives in the Estimate
  * preview sidebar's Cover & package block) and the
  * website printed in the cover PDF's footer. The parent re-keys the card on

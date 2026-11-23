@@ -3,7 +3,7 @@
 import { like, sql } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ok } from "./test-inbox-org";
+import type { Ok } from "./ok-type";
 import { getDb, withSavepoint, withTransaction } from "../src/db";
 import { companies, contacts as contactsTable } from "../src/db/schema";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "../src/db/doc-tables";
@@ -12,8 +12,6 @@ import { saveCompany } from "../src/lib/identity/companies";
 import { saveContact } from "../src/lib/identity/contacts";
 import { createFixture, dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
 import { buildQuote } from "../src/lib/stores/quotes";
-import { createProjectFromQuote } from "../src/lib/stores/projects";
-import { autoTaskId } from "../src/lib/stores/tasks";
 import { convert } from "../src/lib/stores/leads";
 import { buildOpportunities, type OppLeadInput, type OppQuoteInput } from "../src/lib/opportunities";
 import { addParty, copyParties, listFor, listForCompany, liveRecordsForCompany, listForRecords, partyId, removeParty, setPartyBid, setPartyContact } from "../src/lib/stores/parties";
@@ -56,9 +54,7 @@ export async function partyChecks(ok: Ok) {
 
   ok(!carriesTo("lead", "quote", { role: "gc" }) && !carriesTo("lead", "quote", { role: "ec" }), "parties: lead→quote skips GC/EC");
   ok(["owner", "architect", "consultant", "vendor", "other"].every((r) => carriesTo("lead", "quote", { role: r as never })), "parties: lead→quote carries the rest");
-  ok(PARTY_ROLES.every((r) => carriesTo("quote", "project", { role: r })), "parties: quote→project carries every role");
   const bs = (result: "pending" | "awarded" | "lost" | "withdrew" | "no_bid") => ({ result, submitVia: "email" as const });
-  ok(carriesTo("quote", "project", { role: "gc", bid: bs("awarded") }) && carriesTo("quote", "project", { role: "ec", bid: bs("pending") }) && carriesTo("quote", "project", { role: "gc", bid: null }), "parties: quote→project carries awarded, pending and non-bidder rows");
   ok((["lost", "withdrew", "no_bid"] as const).every((r) => !carriesTo("quote", "project", { role: "gc", bid: bs(r) })), "parties: quote→project leaves losing bidders (lost / withdrew / no bid) on the estimate");
   ok(!carriesTo("project", "quote", { role: "owner" }), "parties: no other direction carries");
   ok(["owner", "architect", "consultant", "vendor", "other", "gc", "ec"].every((r) => carriesTo("quote", "quote", { role: r as never, bid: null })), "parties: quote→quote carries every role without a bid state");
@@ -169,7 +165,6 @@ export async function partyDbChecks(ok: Ok) {
     ok((await copyParties({ type: "lead", id: lead }, { type: "quote", id: quote }, "u-test")) === 0, "parties db: copy is idempotent");
     const toProj = await copyParties({ type: "quote", id: quote }, { type: "project", id: project }, "u-test");
     for (const p of await listFor("project", project)) registerFixture("record_parties", p.id);
-    ok(toProj === 3, "parties db: quote→project copies every row");
 
     const quote2 = fixtureId(348, "quote2");
     const o2 = await addParty({ recordType: "quote", recordId: quote2, companyId: co2, role: "owner" }, "u-test");
@@ -183,7 +178,6 @@ export async function partyDbChecks(ok: Ok) {
     ok(into2 === 2 && onQuote2.map((p) => p.role).join() === "owner,architect,other", "parties db: non-owner rows still copied past the owner conflict");
 
     const forCo1 = await listForCompany(co1);
-    ok(forCo1.filter((p) => p.recordId === lead).length === 2 && forCo1.some((p) => p.recordType === "project"), "parties db: listForCompany spans records");
     const many = await listForRecords("lead", [lead, fixtureId(348, "empty")]);
     ok(many.get(lead)?.length === 4 && (many.get(fixtureId(348, "empty")) ?? []).length === 0, "parties db: listForRecords groups by record");
 
@@ -198,15 +192,6 @@ export async function partyDbChecks(ok: Ok) {
     await createFixture("quotes", { ...buildQuote(wonQ, { name: "Party won", customer: "Party Co One", customerId: co1, value: 1000 }, "system", null, Date.now()), status: "won" } as never);
     const ownerOnWon = await addParty({ recordType: "quote", recordId: wonQ, companyId: co1, role: "owner" }, "u-test");
     if (ownerOnWon.ok) registerFixture("record_parties", ownerOnWon.party.id);
-    const proj = await createProjectFromQuote(wonQ);
-    ok(!!proj, "parties db: fixture won quote spawns a project");
-    if (proj) {
-      registerFixture("projects", proj.id);
-      registerFixture("tasks", autoTaskId(`item16:sold:${proj.id}`)); // the kickoff auto-task the spawn creates
-      const onProj = await listFor("project", proj.id);
-      for (const p of onProj) registerFixture("record_parties", p.id);
-      ok(onProj.length === 1 && onProj[0].role === "owner" && onProj[0].companyId === co1, "parties db: project inherits the estimate's parties");
-    }
 
     // lead → quote through leads.convert: owner carries, GC does not
     const convLead = fixtureId(348, "convlead");
@@ -234,7 +219,6 @@ export async function partyDbChecks(ok: Ok) {
     const live1 = await liveRecordsForCompany(co1);
     ok(!live1.some((g) => g.recordId === ghost), "parties db: liveRecordsForCompany skips a party on a missing record");
     ok(live1.some((g) => g.recordType === "lead" && g.recordId === convLead && g.parties.length === 1), "parties db: liveRecordsForCompany keeps a live lead");
-    ok(live1.some((g) => g.recordType === "quote" && g.recordId === wonQ) && live1.some((g) => g.recordType === "project" && g.recordId === proj?.id), "parties db: liveRecordsForCompany keeps a live quote and a live project");
     ok(!live1.some((g) => g.recordId === lead || g.recordId === quote), "parties db: party-only ids (no record behind them) are not live");
 
     // two roles on ONE live record: one group (records are counted, not rows), carrying the loaded record
@@ -269,7 +253,7 @@ export async function partyDbChecks(ok: Ok) {
     // the Move action's `new` path: lead from the stored source quote, copy inside a savepoint, existing target untouched
     const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
     // #348 slice 6: the stored source is read once (Move's split, and Scope only for Move / Copy → New); the split uses it only with splitFrom.
-    ok(/const sourceId = opts\.splitFrom\?\.quoteId \|\| opts\.scopeOnlyFrom \|\| null;/.test(actionsSrc) && /sourceQuote = await get\(sourceId\)/.test(actionsSrc) &&
+    ok(/const sourceId = opts\.splitFrom\?\.quoteId \|\| opts\.copiedFrom \|\| null;/.test(actionsSrc) && /sourceQuote = await get\(sourceId\)/.test(actionsSrc) &&
        /const splitSource: Quote \| null = opts\.splitFrom \? sourceQuote : null;/.test(actionsSrc) && /const splitLeadId = splitSource \? await leadIdForCreate\(splitSource\.leadId\) : null;/.test(actionsSrc) && /\.\.\.\(splitLeadId \? \{ leadId: splitLeadId \} : \{\}\),\s*name: opts\.newName/.test(actionsSrc), "parties: Move → New reads the lead from the stored source quote and passes it to create");
     ok(/withSavepoint\(async \(\) => \{\s*await copyParties\(\{ type: "quote", id: splitSource\.id \}, \{ type: "quote", id: created\.id \}/.test(actionsSrc), "parties: Move → New copies the source's parties inside a savepoint");
     ok(/target\.kind === "new" && typeof sourceQuoteId === "string"/.test(actionsSrc) && actionsSrc.split("splitFrom:").length === 2, "parties: only the Move action's New path asks for the split (Copy and Move → existing carry nothing)");

@@ -1,21 +1,18 @@
 /**
  * "Addresses to verify" (spec "Where flags show"): Settings → Data's
- * unlocated-venues list grown into a live worklist across venues, upcoming
- * site visits and open leads, status-filterable. A live query — it survives
- * reloads and shrinks as addresses are fixed from anywhere. Visits linked to
- * a venue are represented by the venue row.
+ * unlocated-venues list grown into a live worklist across venues and open
+ * leads, status-filterable. A live query — it survives reloads and shrinks as
+ * addresses are fixed from anywhere. (Site visits left with the Venue
+ * Assessments removal; the `visit` kind stays in the types with a zero count.)
  */
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { companies, sites } from "@/db/schema";
-import { chicagoDayKey, chicagoDayStart } from "@/lib/drive-plan/day";
 import { open as openLeads } from "@/lib/stores/leads";
-import { allVisits } from "@/lib/stores/site-visits";
 import { addressKey } from "./keys";
 import { placeStatesWithRows } from "./place-book";
 import { formatVenueAddress } from "./state";
-import { matchVisitSite } from "./targets";
 import type { VerifyKind, VerifyList, VerifyRow, VerifyStatusFilter } from "./types";
 import { ensureVenueGeoStatus } from "./venue-geo";
 
@@ -25,14 +22,12 @@ export type { VerifyKind, VerifyList, VerifyRow, VerifyStatusFilter };
 const KIND_ORDER: Record<VerifyKind, number> = { visit: 0, lead: 1, venue: 2 };
 const present = (col: AnyPgColumn) => sql`coalesce(trim(${col}), '') <> ''`;
 const blank = (col: AnyPgColumn) => sql`coalesce(trim(${col}), '') = ''`;
-const fmtDay = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Chicago" });
 
 export async function listAddressesToVerify(
   opts: { kind?: VerifyKind | "all"; status?: VerifyStatusFilter; q?: string; offset?: number; limit?: number; now?: number } = {}
 ): Promise<VerifyList> {
   await ensureVenueGeoStatus();
   const db = await getDb();
-  const now = opts.now ?? Date.now();
   const limit = Math.max(1, Math.min(200, Math.floor(Number(opts.limit) || 50)));
   const offset = Math.max(0, Math.floor(Number(opts.offset) || 0));
   const q = String(opts.q ?? "").trim().toLowerCase().slice(0, 100);
@@ -72,40 +67,13 @@ export async function listAddressesToVerify(
     .from(sites)
     .where(and(eq(sites.deleted, false), blank(sites.address), blank(sites.city)));
 
-  const todayStart = chicagoDayStart(chicagoDayKey(now));
-  const visits = (await allVisits()).filter(
-    (v) => v.stage !== "done" && (v.startAt == null || v.startAt >= todayStart) && !!addressKey(v.address)
-  );
-  const companyIds = [...new Set(visits.filter((v) => v.locationId && v.customerId).map((v) => v.customerId as string))];
-  const siteRows = companyIds.length
-    ? await db
-        .select({ id: sites.id, companyId: sites.companyId, legacyLocId: sites.legacyLocId })
-        .from(sites)
-        .where(and(inArray(sites.companyId, companyIds), eq(sites.deleted, false)))
-    : [];
-  const freeVisits = visits.filter((v) => !matchVisitSite(v, siteRows));
   const leads = (await openLeads()).filter((l) => (l.address || "").trim());
   const leadText = (l: { address: string; city: string; state: string }) =>
     [l.address, l.city, l.state].map((s) => (s || "").trim()).filter(Boolean).join(", ");
-  const texts = [...freeVisits.map((v) => v.address), ...leads.map(leadText)];
+  const texts = leads.map(leadText);
   // One place-book read: the states and the "ever looked up?" rows together.
   const { states, rows: known } = await placeStatesWithRows(texts, "cache");
 
-  for (const v of freeVisits) {
-    const st = states.get(addressKey(v.address));
-    if (!st || st.status === "verified" || !st.fix) continue;
-    rows.push({
-      id: "visit:" + v.id,
-      kind: "visit",
-      status: st.status,
-      title: `${v.customer || v.id} — ${v.reason}`,
-      sub: v.startAt != null ? "Visit " + fmtDay(v.startAt) : "Visit (not scheduled)",
-      address: v.address,
-      href: v.customerId ? "/companies/" + encodeURIComponent(v.customerId) : "/venue-assessments",
-      fix: st.fix,
-      checked: known.has(addressKey(v.address)),
-    });
-  }
   for (const l of leads) {
     const text = leadText(l);
     const st = states.get(addressKey(text));

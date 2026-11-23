@@ -275,17 +275,10 @@ export default function PackageView({ model: m, slots = {} }: { model: PackageVi
         m.scopes.map((s) => <Scope key={s.id} s={s} bom={bom} extra={extra} showQty={m.showQty !== false} />)
       )}
       <section className="pkg-card">
-        {m.totals.creditLabel && m.totals.creditAmount && (
-          <div className="pkg-row">
-            <span>{m.totals.creditLabel}</span>
-            <span>{m.totals.creditAmount}</span>
-          </div>
-        )}
         <div className="pkg-row pkg-total">
           <span>{m.totals.totalLabel}</span>
           <span>{m.totals.total}</span>
         </div>
-        {m.totals.rewardsLine && <div className="pkg-muted">{m.totals.rewardsLine}</div>}
         {m.totals.standingLines.map((l, i) => (
           <div key={i} className="pkg-muted">
             {l}

@@ -85,17 +85,10 @@ export default function CoverDocument(p: CoverDocumentProps) {
               {p.summary && <p style={{ margin: "12pt 0", whiteSpace: "pre-line" }}>{p.summary}</p>}
 
               <div className="cov-totals" style={{ borderTop: "1px solid #111", paddingTop: "6pt", marginTop: "6pt" }}>
-                {p.totals.creditLabel && (
-                  <div style={row}>
-                    <span>{p.totals.creditLabel}</span>
-                    <span>{p.totals.creditAmount}</span>
-                  </div>
-                )}
                 <div style={{ ...row, fontWeight: 700, fontSize: "12pt" }}>
                   <span>{p.totals.totalLabel}</span>
                   <span>{p.totals.total}</span>
                 </div>
-                {p.totals.rewardsLine && <div style={{ textAlign: "right", fontSize: "9pt", color: "#333" }}>{p.totals.rewardsLine}</div>}
                 {p.totals.standingLines.map((l, i) => (
                   <div key={`${i}-${l}`} style={{ textAlign: "right", fontSize: "9pt", color: "#333" }}>
                     {l}

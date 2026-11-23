@@ -7,8 +7,6 @@ import { useCommentsFocusRefresh } from "../comment-pins";
 import NarrativeColumn from "../narrative-column";
 import { CoverPackagePanel } from "../cover-package-panel";
 import { QuotePeopleFields } from "../quote-people-fields";
-import { PackageStaffPanel } from "../package-staff-panel";
-import { GRID_LINK_COPY } from "@/lib/design/estimate-grid-link";
 import { ACCENT_INK, ACCENT_SOFT } from "../est-ui";
 import { saveProductParagraphAction } from "../narrative-actions";
 import { seedPackageDoc } from "@/lib/package-doc/seed";
@@ -43,7 +41,7 @@ const START_BTN: CSSProperties = { ...BAR_BTN, color: "#fff", background: "var(-
 /**
  * #305 — Build package's authoring body; #333 (spec §4.2) — the Narrative tab.
  * Systems nav or document tools (left), the narrative column or the TipTap
- * package document (centre), and the people / cover / Design in the Grid
+ * package document (centre), and the people / cover
  * aside. What the client gets (Show on PDF, presentation, drawings, the
  * datasheet book) moved to the Client package tab. The shell keeps this tab
  * MOUNTED while hidden (`display: none`), so the editor keeps its undo history
@@ -73,13 +71,11 @@ export function PackageNarrativeTab({ s, active, presentationHref, onOpenPresent
     notIncludedDefault,
     onCoverSummary,
     onNotIncluded,
-    pdfDirty,
     contentUnsaved,
     packageDoc,
     packageDocFlushRef,
     packageDocOverDraft,
     quoteId,
-    saveNow,
     sections,
     setActiveId,
     setIntros,
@@ -87,7 +83,6 @@ export function PackageNarrativeTab({ s, active, presentationHref, onOpenPresent
     setPackageDocOver,
     t,
     updateSection,
-    setPdf,
   } = s;
   useCommentsFocusRefresh(s);
   const pinned = useMemo(
@@ -340,16 +335,6 @@ export function PackageNarrativeTab({ s, active, presentationHref, onOpenPresent
           onNotIncluded={onNotIncluded}
           notIncludedDefault={notIncludedDefault}
         />
-        {loadedId ? (
-          <PackageStaffPanel quoteId={loadedId} section="grid" beforeGrid={pdfDirty ? saveNow : undefined} onPdf={setPdf} />
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-            {/* #314 — disabled until the quote is saved: the Grid design links to a saved estimate. */}
-            <button type="button" disabled title={GRID_LINK_COPY.saveFirst} style={{ ...BAR_BTN, cursor: "not-allowed", opacity: 0.55 }}>
-              {GRID_LINK_COPY.design}
-            </button>
-          </div>
-        )}
       </aside>
     </div>
   );
