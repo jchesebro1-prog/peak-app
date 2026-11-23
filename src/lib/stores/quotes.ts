@@ -14,8 +14,6 @@ import {
 import { quotesSeed } from "@/db/seeds/quotes";
 import { withoutEstimateFields } from "@/lib/estimate-number";
 import { isBoxSaleQuoteType, isBoxSaleSource } from "@/lib/estimate-box-sale/rules";
-import { grossQuoteValue, quoteRewardCredit, withRewardCredit } from "@/lib/credit-line";
-import { serviceCreditSubdocKey } from "@/lib/credit-line";
 import type { SpecSection } from "@/app/(app)/estimator/types";
 import { numberNewDoc } from "@/lib/stores/estimate-numbers";
 import { canSetPoReceived } from "@/lib/opportunities";
@@ -578,8 +576,7 @@ export type QuoteRevision = {
   note: string;
   /** Resolved figures as they stood when the snapshot was cut. */
   name: string;
-  /** #282 phase 3: the customer the snapshot was priced for — a recalled
-   *  Rewards credit belongs to that customer only. Absent on older revisions. */
+  /** The customer the snapshot was priced for. Absent on older revisions. */
   customerId?: string | null;
   value: number;
   margin: number;
@@ -1564,8 +1561,6 @@ export async function restoreQuoteRevision(
   if (q.status === "lost") return { ok: false, reason: "lost" };
   const target = (q.revisions || []).find((r) => r.rev === rev);
   if (!target) return { ok: false, reason: "no-such-rev" };
-  // A stored credit on the snapshot goes back only up to what the quote carries now.
-  const credit = restoredCreditFor(q, target);
   // #304: the snapshot keeps the SKUs it was cut with; the spec it puts back
   // is LIVE, so a part renamed since moves to its live SKU (and model). The
   // revision itself is never written — the rewrite copies what it changes.
@@ -1576,9 +1571,7 @@ export async function restoreQuoteRevision(
     // 1. preserve where we are now, 2. apply the old payload, 3. record the recall.
     pushRevision(doc, actor, "manual", `Auto-saved before recalling v${rev}`);
     doc.name = target.name;
-    // #282 phase 3: net of the re-clamped credit (the snapshot's value was net
-    // of ITS credit — `credit.gross` is its pre-credit price).
-    doc.value = Math.round(Math.max(0, credit.gross - credit.credit));
+    doc.value = restoredValue(target);
     doc.margin = target.margin;
     doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
     doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
@@ -1589,7 +1582,6 @@ export async function restoreQuoteRevision(
     doc.inspection = target.inspection ?? null;
     doc.consulting = target.consulting ?? null;
     doc.rental = target.rental ?? null;
-    withRestoredCredit(doc, credit.credit);
     // #143: MERGE rather than replace. The recalled spec's vendor lines need
     // their records back, but the snapshot taken one line above (the state we
     // are leaving) still references the records the CURRENT spec used — and
@@ -1603,42 +1595,10 @@ export async function restoreQuoteRevision(
   return { ok: true, quote: updated };
 }
 
-/**
- * The stored credit a recalled revision may put back, and its pre-credit
- * price: never more than the quote carries now (nothing applies new credit)
- * or the restored price itself.
- */
-function restoredCreditFor(q: Quote, target: QuoteRevision): { credit: number; gross: number } {
-  const snap = { ...target, quoteType: target.quoteType ?? q.quoteType };
-  const gross = grossQuoteValue(snap);
-  return { credit: Math.max(0, Math.min(quoteRewardCredit(snap), quoteRewardCredit(q), gross)), gross };
-}
-
-/**
- * #282 phase 3: put exactly `credit` of Rewards credit on a just-recalled
- * quote — the Estimator's one credit line on the last system, or the service
- * subdoc's `rewardCredit` (removed at 0). Copies what it rewrites: the
- * recalled payload is shared with the revision it came from.
- */
-function withRestoredCredit(doc: Quote, credit: number): void {
-  const key = serviceCreditSubdocKey(doc.quoteType);
-  if (key) {
-    const sub = doc[key];
-    if (!sub || typeof sub !== "object") return;
-    const next = { ...(sub as Record<string, unknown>) };
-    if (credit > 0) next.rewardCredit = credit;
-    else delete next.rewardCredit;
-    doc[key] = next;
-    return;
-  }
-  const spec = doc.spec as { sections?: unknown } | null | undefined;
-  if (!spec || typeof spec !== "object" || !Array.isArray(spec.sections)) return;
-  const sections = spec.sections as SpecSection[];
-  const maxId = sections.reduce(
-    (m, sec) => Math.max(m, ...((sec?.items || []) as { id?: unknown }[]).map((it) => (typeof it?.id === "number" ? it.id : 0))),
-    0
-  );
-  doc.spec = { ...spec, sections: withRewardCredit(sections, credit, maxId + 1) };
+/** The whole-dollar value a recalled / reopened revision puts back on the quote (never below $0). */
+function restoredValue(target: QuoteRevision): number {
+  const v = typeof target.value === "number" && Number.isFinite(target.value) ? target.value : 0;
+  return Math.round(Math.max(0, v));
 }
 
 /* ---------- Batch 5 #59 — reopening a won estimate at the version that won ---------- */
@@ -1648,14 +1608,12 @@ type LiveRenames = Awaited<ReturnType<typeof liveRenameRefs>>;
 const renameRewriter = (renames: LiveRenames) => (s: unknown) => (s && renames.m.size ? rewriteQuoteSpec(s, renames.m, renames.models) ?? s : s);
 
 /** What a reopen puts back, worked out once before the approval gate. */
-export type ReopenPlan = { target: QuoteRevision; credit: number; gross: number; rewrite: (s: unknown) => unknown };
+export type ReopenPlan = { target: QuoteRevision; rewrite: (s: unknown) => unknown };
 
 /**
  * The restore a move from Won to `status` would make, or null (not a reopen,
  * not a tracked estimate, a historical import, no won version, or nothing
- * changed since the win). The credit goes through restoredCreditFor →
- * settleCredit while `q` is still won — the locked amount — so the ledger
- * reconcile sees a plain revise.
+ * changed since the win).
  */
 export async function reopenPlanFor(q: Quote, status: QuoteStatus, opts: Pick<SetStatusOpts, "bypassApprovalGate"> = {}): Promise<ReopenPlan | null> {
   if (opts.bypassApprovalGate === "historical-import") return null;
@@ -1663,15 +1621,14 @@ export async function reopenPlanFor(q: Quote, status: QuoteStatus, opts: Pick<Se
   const rewrite = renameRewriter(await liveRenameRefs());
   const target = reopenTarget(q, status, rewrite);
   if (!target) return null;
-  const c = restoredCreditFor(q, target);
-  return { target, credit: c.credit, gross: c.gross, rewrite };
+  return { target, rewrite };
 }
 
 /** Put the plan's version on `doc` (the priced fields a revision recall puts back; the header stays). */
 function applyReopen(doc: Quote, plan: ReopenPlan): void {
   const target = plan.target;
   doc.name = target.name;
-  doc.value = Math.round(Math.max(0, plan.gross - plan.credit));
+  doc.value = restoredValue(target);
   doc.margin = target.margin;
   doc.pricingTier = target.pricingTier ?? doc.pricingTier ?? null;
   doc.tierMargin = target.tierMargin ?? doc.tierMargin ?? null;
@@ -1681,7 +1638,6 @@ function applyReopen(doc: Quote, plan: ReopenPlan): void {
   doc.inspection = target.inspection ?? null;
   doc.consulting = target.consulting ?? null;
   doc.rental = target.rental ?? null;
-  withRestoredCredit(doc, plan.credit);
   doc.vendorQuotes = mergeVendorQuotes(doc.vendorQuotes, target.vendorQuotes);
 }
 
@@ -2427,11 +2383,7 @@ export async function setQuotePeople(
 
 /**
  * Soft delete (prototype filtered the array; server keeps a tombstone for sync).
- * #282 phase 3: a deleted quote no longer stands as a sale — its Rewards
- * ledger runs the same plan as leaving Won (the open earn reverses, the
- * redeemed credit comes back). There is no undelete; a quote brought back by
- * an upsert re-posts on its next real status transition. Like setStatus, a
- * ledger failure is logged and never blocks the delete.
+ * There is no undelete.
  */
 export async function remove(id: string, by?: string | null): Promise<void> {
   const q = await getDoc<Quote>("quotes", id);
