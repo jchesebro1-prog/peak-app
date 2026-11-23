@@ -15,7 +15,6 @@ import { BOOK_FILE_NAME, BOOK_REASON, bookByteBudget, bookDate, bookPartOf, plan
 import { BOOK_SKIPPED_REASON, buildDatasheetBook, loadCanonicalMfr, type BookDoc } from "@/lib/part-docs/datasheet-book-server";
 import type { BookCover } from "@/lib/part-docs/datasheet-book-cover";
 import { quoteBookCover } from "@/lib/part-docs/datasheet-book-cover-server";
-import { isRewardCreditItem } from "@/lib/credit-line";
 import { addCutSheets, cutSheetDeadline, NO_PRINT_ORIGIN, type CutSheetsAdded, type PrintWhere } from "@/lib/curtain-cut-sheets/package-sheets";
 import type { FixtureRecord } from "@/lib/fixture-assemblies";
 import { internalSkuCheck } from "@/lib/quote-line-ids";
@@ -145,7 +144,7 @@ export function quoteBom(
       // still carry individual labor lines (mobilizations, shop &
       // engineering, allowance, performance bonus) — they're not equipment
       // and don't belong in the BOM/client package either.
-      if (section.kind === "labor" || item.labor || isBonusItem(item) || isRewardCreditItem(item) || item.qty == null || item.qty <= 0) continue;
+      if (section.kind === "labor" || item.labor || isBonusItem(item) || item.qty == null || item.qty <= 0) continue;
       const members = expandLine(item, rackOf, isInternal);
       if (members) {
         for (const m of members) {

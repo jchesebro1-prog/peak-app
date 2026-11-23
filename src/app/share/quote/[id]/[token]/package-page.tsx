@@ -2,7 +2,6 @@ import letterhead from "@/app/(app)/estimator/peak-letterhead.jpg";
 import PackageView from "@/components/estimate-output/package-view";
 import { OnlineEstimateCard } from "@/components/online-estimate/online-estimate";
 import { loadPackageExtras } from "@/lib/estimate-output/package-extras";
-import { creditNoteText } from "@/lib/estimate-output/responses";
 import { loadPackageViewProps } from "@/lib/estimate-output/package-loader";
 import { resolveSharedPackage } from "@/lib/quote-share/links";
 import { bidderCanAct, canAct } from "@/lib/quote-share/package-view";
@@ -41,8 +40,6 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
     token,
     // #348 2b-ii: a v3 link may act only while its bid is pending or awarded; a missing result counts as closed.
     canAct: canAct(hit.state) && (hit.bidder ? !!hit.bidder.result && bidderCanAct(hit.bidder.result) : true),
-    // D1087: the owner's Rewards credit note is not shown on a bidder's page or an awarded-addressed one (the owner's loyalty standing is private).
-    creditNote: hit.bidder || hit.rev.docFields?.awardedPartyId ? null : creditNoteText(model.totals.creditAmount),
   });
   const slots = cut ? { ...built, cutSheets: <OnlineCutSheets loaded={cut} letterheadSrc={letterhead.src} /> } : built;
   return (

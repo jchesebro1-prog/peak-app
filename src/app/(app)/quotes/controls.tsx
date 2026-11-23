@@ -139,8 +139,7 @@ export type QuoteRevisionVM = {
  * `canRestore` is false on won quotes: the project spawned from a won quote
  * copies value/margin once at conversion and never re-reads, so recalling a
  * revision would desync them with no repair path. It is false on lost quotes
- * too (#282): a lost quote is out of the Rewards program, and a recall could
- * put a credit back on it.
+ * too: a closed quote's numbers stay as they closed.
  */
 export function QuoteRevisions({
   id,
@@ -151,7 +150,7 @@ export function QuoteRevisions({
   back,
 }: {
   id: string;
-  /** #282 phase 3: the list URL a Recall returns to with a credit notice. */
+  /** The list URL a Recall returns to. */
   back?: string;
   /** #223 — the estimate number the drawer names the quote by; `id` stays the key. */
   number?: string;

@@ -9,8 +9,7 @@ import { submitScopeSelection } from "./actions";
  * #301 slice C (spec §7, R1) — "Choose your scopes": a checkbox per scope
  * (every In-total scope checked; Estimator Phase 2b: alternate systems in
  * their own "Alternates" list, unchecked — a ticked one adds to the total),
- * the live "Selected scopes" total (pre-credit) with the
- * Rewards credit note, name / title / email / note, Submit selection. It
+ * the live "Selected scopes" total, name / title / email / note, Submit selection. It
  * renders only after hydration (adaptation 13): without JS there is no form
  * to post a name into a URL. Receives only scope ids, names and prices.
  */
@@ -20,7 +19,7 @@ const input: CSSProperties = { width: "100%", boxSizing: "border-box", font: "in
 const hidden: CSSProperties = { position: "absolute", left: -10000, width: 1, height: 1, overflow: "hidden" };
 const btn: CSSProperties = { font: "inherit", fontWeight: 700, fontSize: 14, color: "#fff", background: "var(--accent)", border: "none", borderRadius: 8, padding: "10px 18px", cursor: "pointer" };
 
-export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; token: string; scopes: ResponseScope[]; creditNote: string | null }) {
+export function ScopeSelection({ id, token, scopes }: { id: string; token: string; scopes: ResponseScope[] }) {
   const hydrated = useSyncExternalStore(subscribeNothing, () => true, () => false);
   const altHeadId = useId();
   const [picked, setPicked] = useState<string[]>(() => defaultSelectedScopeIds(scopes));
@@ -86,7 +85,6 @@ export function ScopeSelection({ id, token, scopes, creditNote }: { id: string; 
         <span>{CLIENT_ACTION_COPY.selectedTotal}</span>
         <span>{fmt(total)}</span>
       </div>
-      {creditNote && <div className="pkg-muted">{creditNote}</div>}
       <input aria-label={CLIENT_ACTION_COPY.name} placeholder={CLIENT_ACTION_COPY.name} required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} style={input} />
       {/* Jeff 2026-10-15 #15: accepting is signed — name and title required (the server re-checks); PO # optional. */}
       <input aria-label={CLIENT_ACTION_COPY.title} placeholder={CLIENT_ACTION_COPY.title} required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} style={input} />

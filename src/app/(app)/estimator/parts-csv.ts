@@ -1,4 +1,3 @@
-import { isRewardCreditItem } from "@/lib/credit-line";
 import { lineModel, partModel } from "@/lib/catalog-rename/sku";
 import { computeMob, hasSellOverride, isSystemLine, lineExtSellOf, systemFreight, systemItemsRev, systemSellAdjustment, systemSellTotal } from "./pricing";
 import { laborGroupRecord } from "./labor-group";
@@ -173,7 +172,7 @@ function expand(
     const k = Number.isFinite(k0) ? k0 : 1;
     const start = out.length;
     for (const item of section.items) {
-      if (item.labor || item.laborOverhead || item.laborTravel || item.option || isBonusItem(item) || isRewardCreditItem(item)) continue;
+      if (item.labor || item.laborOverhead || item.laborTravel || item.option || isBonusItem(item)) continue;
       if (!Number.isFinite(item.qty) || item.qty <= 0) continue;
       const lineSell = lineSellOf(item);
       const note = item.internalNote?.trim() || "";
@@ -469,12 +468,12 @@ const HOUR_UNITS = new Set(["hr", "hrs", "hour", "hours", "mh", "manhour", "manh
 const LABOR_SOURCE = "Labor";
 
 /** A section's labor lines for the Review spreadsheet (#374): what `expand` skips as labor, minus
- *  options, bonus lines, Rewards credits and bad quantities. */
+ *  options, bonus lines and bad quantities. */
 function reviewLaborItems(section: SpecSection): SpecItem[] {
   if (section.alternate) return [];
   return section.items.filter((item) => {
     const isLabor = !!(item.labor || item.laborOverhead || item.laborTravel || section.kind === "labor");
-    if (!isLabor || item.option || isBonusItem(item) || isRewardCreditItem(item)) return false;
+    if (!isLabor || item.option || isBonusItem(item)) return false;
     return Number.isFinite(item.qty) && item.qty > 0;
   });
 }

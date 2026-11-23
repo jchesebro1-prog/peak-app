@@ -6,7 +6,6 @@
 import type { Quote } from "@/lib/stores/quotes";
 import type { RangeKey } from "./registry";
 import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
-import { isRewardCreditItem } from "@/lib/credit-line";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
 import { costFromSell } from "@/lib/markup";
 
@@ -127,7 +126,7 @@ export function equipmentSold(
       // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
       if (s.alternate) continue;
       for (const it of s.items || []) {
-        if (it.labor || it.option || isBonusItem(it) || isRewardCreditItem(it)) continue;
+        if (it.labor || it.option || isBonusItem(it)) continue;
         const sku = it.sku || "";
         const category = (sku && partCategory(sku)) || "Uncategorized";
         const qty = it.qty || 0;

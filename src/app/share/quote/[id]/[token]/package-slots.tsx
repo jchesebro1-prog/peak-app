@@ -11,7 +11,7 @@ import { QuestionForm } from "./question-form";
  * extras. A server module (no "use client"). An empty part leaves its
  * mount point out, so the section never renders.
  */
-export function buildPackageSlots(x: PackageExtras, ctx: { id: string; token: string; canAct: boolean; creditNote: string | null }): PackageSlots {
+export function buildPackageSlots(x: PackageExtras, ctx: { id: string; token: string; canAct: boolean }): PackageSlots {
   const keyProductExtra: Record<string, ReactNode> = {};
   for (const [sku, link] of Object.entries(x.datasheets)) keyProductExtra[sku] = <DatasheetLink link={link} />;
   return {
@@ -24,7 +24,7 @@ export function buildPackageSlots(x: PackageExtras, ctx: { id: string; token: st
             <>
               <div className="pkg-card">
                 <h2>{CLIENT_ACTION_COPY.chooseTitle}</h2>
-                <ScopeSelection id={ctx.id} token={ctx.token} scopes={x.actions.scopes} creditNote={ctx.creditNote} />
+                <ScopeSelection id={ctx.id} token={ctx.token} scopes={x.actions.scopes} />
               </div>
               <div className="pkg-card" style={{ marginTop: 14 }}>
                 <h2>{CLIENT_ACTION_COPY.askTitle}</h2>

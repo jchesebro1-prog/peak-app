@@ -28,7 +28,6 @@ export async function lineMoveChecks(ok: Ok) {
   // movable
   ok(isMovableLine(line(1)), "line-move: a plain line is movable");
   ok(!isMovableLine(line(2, { bonus: "package" })), "line-move: a bonus line is not movable");
-  ok(!isMovableLine(line(3, { rewardCredit: true })), "line-move: the Rewards credit is not movable");
 
   // simple move, prices untouched, appended in order, lineOrder renumbered
   {
@@ -43,12 +42,12 @@ export async function lineMoveChecks(ok: Ok) {
     ok(find(sections, "A")!.items[0].lineOrder === 0, "line-move: source lineOrder renumbered");
   }
 
-  // bonus + credit never move even if selected
+  // a bonus line never moves even if selected
   {
-    const a = sec("A", [line(1), line(2, { bonus: "estimator" }), line(3, { rewardCredit: true })]);
+    const a = sec("A", [line(1), line(2, { bonus: "estimator" }), line(3)]);
     const b = sec("B", []);
-    const { sections, plan } = applyLineMove([a, b], R("A", 1, 2, 3), { kind: "system", sectionId: "B" });
-    ok(refs(plan.lines) === "A:1" && ids(find(sections, "A")).join() === "2,3", "line-move: bonus and credit lines stay put");
+    const { sections, plan } = applyLineMove([a, b], R("A", 1, 2), { kind: "system", sectionId: "B" });
+    ok(refs(plan.lines) === "A:1" && ids(find(sections, "A")).join() === "2,3", "line-move: a bonus line stays put");
   }
 
   // already in the target → noop; target holding every selected line
@@ -418,7 +417,7 @@ export function lineMoveUiChecks(ok: Ok) {
   ok(bar.includes("lines.every((r) => r.sectionId === secId)"), "line-move UI: the Move menu's \"already there\" check compares the system, not a bare id");
   ok(/p\.onToggleLineSelected && !isMovableLine\(it\) && <span aria-hidden="true" data-line-check-pad=""/.test(card) &&
      /\.\.\.\(p\.onToggleLineSelected \? \{ paddingLeft: LINE_CHECK_PAD \} : null\)/.test(card),
-    "line-move UI: rows without a checkbox (bonus, Rewards credit) keep the checkbox's room so descriptions line up");
+    "line-move UI: rows without a checkbox (bonus lines) keep the checkbox's room so descriptions line up");
   ok(src("src/app/(app)/estimator/estimator-styles.ts").includes(".est-action-btn:hover:not(:disabled)"), "line-move UI: a disabled ⇄ doesn't shade on hover");
   const hook = src("src/app/(app)/estimator/use-estimator-state.ts");
   ok(hook.includes("applyLineMove(sections, selected, resolved, { mintItemId: nextId })") && hook.includes("extractLinesAsSection(sections, plan, { mintItemId: nextId })") &&

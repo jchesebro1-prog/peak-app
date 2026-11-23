@@ -365,7 +365,6 @@ export default function SectionCard(p: SectionCardProps) {
   const sellSet = hasSellOverride(sec);
   const sellWarning = systemSellWarning(sec);
   const sysMarkup = Math.round(systemMarkup(sec) * 100);
-  // #282 phase 2: the Rewards credit line shows in the totals sidebar, not here.
   const visible = sec.items.filter(isSystemLine);
   const metaParts: string[] = [];
   metaParts.push(visible.length + " item" + (visible.length === 1 ? "" : "s"));
@@ -1220,7 +1219,7 @@ export default function SectionCard(p: SectionCardProps) {
                         style={{ width: LINE_CHECK_SIZE, height: LINE_CHECK_SIZE, margin: "2px 0 0", flexShrink: 0, accentColor: "var(--accent)" }}
                       />
                     )}
-                    {/* #357: a line that can't move (the Rewards credit) keeps the checkbox's room, so its description lines up. */}
+                    {/* #357: a line that can't move (a bonus line) keeps the checkbox's room, so its description lines up. */}
                     {p.onToggleLineSelected && !isMovableLine(it) && <span aria-hidden="true" data-line-check-pad="" style={{ width: LINE_CHECK_SIZE, flexShrink: 0 }} />}
                     <div style={{ minWidth: 0, flex: 1 }}>
                     <div

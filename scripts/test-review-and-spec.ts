@@ -17093,7 +17093,7 @@ import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from
   const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
   const saveBody = ea.slice(ea.indexOf("export async function saveQuoteAction("), ea.indexOf("export async function searchQuotesAction("));
   ok(
-    // #282 phase 2: priced over the posted sections after the system-sell sanitize + Rewards-credit clamp.
+    // Priced over the posted sections after the system-sell sanitize and the negative-line refusal.
     saveBody.includes("reconcileEstimatorValue(postedSections, { value: payload.value, markup: payload.markup })") &&
       saveBody.includes("value: priced.value,") && saveBody.includes("margin: priced.markup,") && !/^\s+value: payload\.value,$/m.test(saveBody),
     "#242 final: saveQuoteAction stores the server-recomputed value, never the posted one"
@@ -18396,7 +18396,7 @@ import type { SpecItem as T254Item, SpecSection as T254Sec, LaborDraft as T254La
     "#254 wiring: applyTierStamp re-prices the latest sections, and no re-priced line means no new banner");
   ok(/const undoTierReprice = [\s\S]{0,260}setSectionsState\(tierReprice\.before\);\s*setTierReprice\(null\)/.test(t254Client) && /onClick=\{undoTierReprice\}[\s\S]{0,400}Undo/.test(t254Client),
     "#254 Undo: restores the exact sections from before the re-price and clears the banner");
-  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,300}?setSectionsState\(\(prev\) => \{\s*const next = unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(t254Client)
+  ok(/const setSections: Dispatch<SetStateAction<SpecSection\[\]>> = \(v\) => \{\s*setTierReprice\(null\);[\s\S]{0,300}?setSectionsState\(\(prev\) => \{\s*const next = unmarkEdited\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(t254Client)
     && (t254Client.match(/setSectionsState\(/g) || []).length === 7,
     "#254 next edit clears the banner: every edit goes through setSections; only the wrapper, freight auto, the re-price, Undo, the #bonus effect and the #366 discounts effect and the Undo restore write the raw state (7)");
   ok(/setSectionsState\(\(ss\) => applyAutoFreight\(ss[\s\S]{0,40}\);\s*setTierReprice\(\(n\) => \(n \? \{ \.\.\.n, before: applyAutoFreight\(n\.before/.test(t254Client),
@@ -19867,8 +19867,8 @@ import type { SpecItem as S267Item, SpecSection as S267Section } from "@/app/(ap
   // Wiring.
   const read267 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const acts267 = read267("src/app/(app)/estimator/actions.ts");
-  // #282 phase 2: postedSections = the sell-sanitized sections after the Rewards-credit clamp.
-  ok(acts267.includes("payload.sections.map(sanitizeSystemSell)") && acts267.includes("settleRewardCredit(sellSanitized,") && acts267.includes("reconcileEstimatorValue(postedSections,") && acts267.includes("clearPricedPor(postedSections)"), "#267: saveQuoteAction sanitizes every posted section before pricing and storing it");
+  // postedSections = the sell-sanitized sections, once the negative-line rule has let them through.
+  ok(acts267.includes("payload.sections.map(sanitizeSystemSell)") && acts267.includes("const negative = negativeLineProblem(sellSanitized);") && acts267.includes("const postedSections = sellSanitized;") && acts267.includes("reconcileEstimatorValue(postedSections,") && acts267.includes("clearPricedPor(postedSections)"), "#267: saveQuoteAction sanitizes every posted section before pricing and storing it");
   ok(acts267.includes("{ ...sanitizeSystemSell(section), id: \"sys\" + Date.now() }") && acts267.includes("copySectionForTarget(sanitizeSystemSell(section),"), "#267: Move and Copy sanitize the posted section too");
   const cli267 = estimatorSource();
   ok(cli267.includes("!initial.portal && (!initial.loadedId || initial.status === \"draft\")") && cli267.includes("withPriceRound(initial.sections)"), "#267: the Estimator stamps priceRound on load for drafts and unsaved estimates only");
@@ -21237,25 +21237,11 @@ import { readFileSync as r282Read } from "node:fs";
 }
 import {
   NEGATIVE_LINE_ERROR as r282bNegErr,
-  isRewardCreditItem as r282bIsCredit,
-  quoteRewardCredit as r282bQuoteCredit,
-  rewardCreditLine as r282bLine,
-  rewardCreditOf as r282bCreditOf,
-  sanitizeRewardCredit as r282bSanitize,
-  withRewardCredit as r282bWith,
-  withoutRewardCredit as r282bWithout,
-} from "@/lib/credit-line";
-import {
-  customerLines as r282bCustomerLines,
+  negativeLineProblem as r282bNegative,
   reconcileEstimatorValue as r282bReconcile,
-  systemFreight as r282bFreight,
-  systemItemsRev as r282bItemsRev,
-  systemSellTotal as r282bSellTotal,
   totals as r282bTotals,
 } from "@/app/(app)/estimator/pricing";
-import { copySectionForTarget as r282bCopy } from "@/app/(app)/estimator/copy-system";
-import { partsListRows as r282bPartsRows } from "@/app/(app)/estimator/parts-csv";
-import { repriceForTier as r282bReprice } from "@/app/(app)/estimator/tier-reprice";
+import { hydrateDoc as r282bHydrate } from "@/lib/markup/doc-basis";
 import type { SpecSection as R282bSection } from "@/app/(app)/estimator/types";
 import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
 
@@ -21264,67 +21250,52 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
   // ---- earn / reverse / re-win, state-based ----
   const base = { quoteId: "Q", companyId: "co", at: 5, by: "T" };
 
-  // ---- starting credit ----
   const hist = [{ amount: 50000, at: 1 }, { amount: 200000, at: 5 }];
 
-  // ---- the credit line ----
+  // ---- Rewards credit removed (2026-11-23): totals, the negative-line refusal, the read-time filter ----
   const item = (id: number, price: number, qty = 1, cost = price * 0.6) => ({ id, sku: `S${id}`, desc: `Item ${id}`, qty, unit: "ea", cost, price });
   const sec = (id: string, items: ReturnType<typeof item>[], extra: Partial<R282bSection> = {}): R282bSection =>
     ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items, ...extra }) as R282bSection;
   const two = [sec("a", [item(1, 600)]), sec("b", [item(2, 400)])];
-  const withC = r282bWith(two, 200, 99);
-  ok(withC[1].items.some(r282bIsCredit) && !withC[0].items.some(r282bIsCredit), "#282 P2 line: the credit line goes on the LAST system");
-  const cl = withC[1].items.find(r282bIsCredit)!;
-  ok(r282bCreditOf(withC) === 200 && r282bQuoteCredit({ spec: { sections: withC } }) === 200 && r282bQuoteCredit({ spec: { lines: [] } }) === 0,
-    "#282 P2 line: rewardCreditOf / quoteRewardCredit read it back (0 for a non-Estimator spec)");
-  ok(r282bCreditOf(r282bWith(withC, 50, 100)) === 50 && r282bWith(withC, 50, 100)[1].items.filter(r282bIsCredit).length === 1,
-    "#282 P2 line: re-applying replaces the one credit line");
-  ok(r282bCreditOf(r282bWith(withC, 0, 100)) === 0 && r282bCreditOf(r282bWithout(withC)) === 0, "#282 P2 line: 0 / withoutRewardCredit removes it");
+  const stray = { id: 99, sku: "", desc: "Credit", qty: 1, unit: "ea", cost: 0, price: -200, rewardCredit: true };
 
-  // totals: net grand, never below $0; margin + system price ignore it.
+  // totals: the grand total is the systems + freight + tax, nothing else.
   const t0 = r282bTotals(two, 0);
-  const t1 = r282bTotals(withC, 0);
-  ok(t1.grand === 800 && t1.credit === 200 && t1.rev === t0.rev && t1.markup === t0.markup && t1.mat === t0.mat,
-    `#282 P2 totals: credit comes off the grand total only — rev, materials and margin are unchanged (grand ${t1.grand})`);
-  const big = r282bTotals(r282bWith(two, 5000, 99), 0);
-  ok(big.grand === 0 && big.credit === 1000, "#282 P2 totals: a credit above the quote's total never takes it below $0");
-  const tax = r282bTotals(withC, 10);
-  ok(tax.tax === 100 && tax.grand === 900, "#282 P2 totals: the credit applies after tax");
-  ok(r282bItemsRev(withC[1]) === 400 && r282bFreight(sec("f", [item(3, 1000, 1, 500)], { freightPct: 10 })) === 50 &&
-    r282bFreight(r282bWith([sec("f", [item(3, 1000, 1, 500)], { freightPct: 10 })], 300, 9)[0]) === 50,
-    "#282 P2 totals: a system's items sell and freight base ignore the credit line");
-  const rounded = r282bWith([sec("r", [item(4, 1010)], { priceRound: 25 })], 100, 9);
-  ok(r282bSellTotal(rounded[0]) === 1025 && r282bTotals(rounded, 0).grand === 925, "#282 P2 totals: $25 rounding happens first, the credit after it");
-  const typed = r282bWith([sec("o", [item(5, 1000)], { sellOverride: 1500 })], 100, 9);
-  ok(r282bSellTotal(typed[0]) === 1500 && r282bTotals(typed, 0).grand === 1400, "#282 P2 totals: a #267 typed system sell is untouched by the credit");
-  const rows = r282bCustomerLines(withC[1]);
-  ok(rows.length === 1 && rows.every((r) => r.item && !r282bIsCredit(r.item)), "#282 P2 document: the system's customer rows never include the credit line");
+  ok(t0.grand === 1000 && t0.rev === 1000 && !("credit" in t0), "credit removed — totals: grand = rev + freight + tax; no credit figure on the totals");
+  const tax = r282bTotals(two, 10);
+  ok(tax.tax === 100 && tax.grand === 1100, "credit removed — totals: tax adds to the grand total");
 
-  // server rules
-  const neg = r282bSanitize([sec("n", [item(6, -50)])], 1000);
-  ok(!neg.ok && neg.error === r282bNegErr, "#282 P2 server: a negative price on a non-credit line refuses the save");
-  const negQ = r282bSanitize([sec("n", [item(6, 50, -2)])], 1000);
-  ok(!negQ.ok, "#282 P2 server: a negative qty on a non-credit line refuses too");
-  const cl1 = r282bSanitize(r282bWith(two, 700, 99), 300);
-  const cl2 = r282bSanitize(r282bWith(two, 700, 99), 0);
-  ok(cl2.ok && cl2.credit === 0 && r282bCreditOf(cl2.sections) === 0, "#282 P2 server: nothing available → the line is dropped");
-  const spread = [sec("a", [item(1, 600), r282bLine(40, 50)]), sec("b", [item(2, 400), r282bLine(60, 51)])];
-  const cl3 = r282bSanitize(spread, 1000);
-  ok(cl3.ok && cl3.credit === 100 && cl3.sections[0].items.filter(r282bIsCredit).length === 0 && cl3.sections[1].items.filter(r282bIsCredit).length === 1,
-    "#282 P2 server: several credit lines collapse into one on the last system");
-  const rec = r282bReconcile(withC, { value: 999, markup: 0.5 });
-  ok(rec.adjusted && rec.value === 800, "#282 P2 server: reconcileEstimatorValue stores the net total");
+  // server rule: a negative price or quantity refuses the save, on ANY line.
+  ok(r282bNegative([sec("n", [item(6, -50)])]) === r282bNegErr && r282bNegErr === "A line can't have a negative price or quantity.",
+    "negative line: a negative price refuses the save");
+  ok(r282bNegative([sec("a", [item(1, 600)]), sec("n", [item(6, 50, -2)])]) === r282bNegErr, "negative line: a negative qty refuses too (any system)");
+  ok(r282bNegative([sec("n", [item(1, 600), stray as never])]) === r282bNegErr, "negative line: a line flagged rewardCredit is no exception any more");
+  ok(r282bNegative(two) === null && r282bNegative([sec("z", [item(7, 0, 0)])]) === null && r282bNegative(undefined) === null && r282bNegative([null, { items: "x" }, { items: [null] }]) === null,
+    "negative line: clean sections, zero price / qty and non-list or junk shapes pass");
   const recNeg = r282bReconcile([sec("n", [item(6, 500), item(7, -300)])], { value: 200, markup: 0 });
-  ok(recNeg.value === 500, "#282 P2 server: reconcileEstimatorValue floors a stray negative price on a non-credit line at $0");
+  ok(recNeg.value === 500, "negative line: reconcileEstimatorValue floors a stray negative price at $0 (belt and braces)");
+  const recFlag = r282bReconcile([sec("n", [item(6, 500), stray as never])], { value: 300, markup: 0 });
+  ok(recFlag.adjusted && recFlag.value === 500, "negative line: reconcileEstimatorValue floors a flagged line the same way (no credit exception)");
 
-  // copy / parts list / tier re-price ignore it
-  const copied = r282bCopy(withC[1], { newSectionId: "c", catalog: new Map(), fixtures: new Map(), sourceTierMargin: mk(0.3), targetTierMargin: mk(0.3) });
-  ok(!copied.section.items.some(r282bIsCredit) && copied.section.items.length === 1, "#282 P2 copy: Copy system drops the credit line");
-  const parts = r282bPartsRows(withC, [], {});
-  ok(parts.length === 2 && !parts.some((p) => /Rewards credit/.test(p.desc)), "#282 P2 parts list: the credit line never lands in the parts CSV");
-  const rp = r282bReprice(withC, mk(0.3), mk(0.2));
-  const rpCredit = rp.sections[1].items.find(r282bIsCredit)!;
-  ok(rpCredit.price === -200, "#282 P2 tier re-price: the credit line is never re-priced");
+  // read-time filter: a stored credit line never leaves the doc store on a quote's live spec.
+  const storedQuote = () => ({
+    id: "Q-CR", pricingBasis: "markup", value: 800,
+    spec: { sections: [{ id: "a", items: [item(1, 600)] }, { id: "b", items: [item(2, 400), { ...stray }] }], mobs: [] },
+    revisions: [{ rev: 1, value: 800, spec: { sections: [{ id: "b", items: [item(2, 400), { ...stray }] }] } }],
+  });
+  const hyd = r282bHydrate("quotes", storedQuote());
+  ok(hyd.spec.sections[1].items.length === 1 && hyd.spec.sections[1].items[0].id === 2 && hyd.spec.sections[0].items.length === 1,
+    "credit filter: hydrateDoc drops a stored rewardCredit line from the live spec and keeps every other line");
+  ok(hyd.revisions[0].spec.sections[0].items.length === 2 && hyd.value === 800, "credit filter: frozen revisions and the stored value are left exactly as stored");
+  ok(r282bTotals(hyd.spec.sections as never, 0).grand === 1000 && r282bNegative(hyd.spec.sections) === null,
+    "credit filter: the hydrated quote prices with no negative line");
+  const unstamped = { ...storedQuote(), pricingBasis: undefined as string | undefined };
+  ok(r282bHydrate("quotes", unstamped).spec.sections[1].items.length === 1, "credit filter: an unstamped (pre-#367) quote is filtered too");
+  const notFlagged = { id: "Q-N", pricingBasis: "markup", spec: { sections: [{ id: "a", items: [{ ...stray, rewardCredit: "true" }, { ...stray, rewardCredit: false }, item(3, 5)] }] } };
+  ok(r282bHydrate("quotes", notFlagged).spec.sections[0].items.length === 3 && r282bHydrate("leads", storedQuote()).spec.sections[1].items.length === 2,
+    "credit filter: only a line flagged exactly `rewardCredit: true` goes, and only on a quote");
+  ok(r282bHydrate("quotes", { id: "Q-E", pricingBasis: "markup", spec: null }).spec === null && r282bHydrate("quotes", { id: "Q-S", pricingBasis: "markup", spec: { sections: [null, { items: "x" }] } }).id === "Q-S",
+    "credit filter: a quote with no spec or junk sections reads without error");
 
   // wiring
   const docSrc = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
@@ -21338,15 +21309,7 @@ import { SYNCABLE_COLLECTIONS as r282bSyncable } from "@/db/doc-tables";
   const journal = JSON.parse(r282Read("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string }[] };
   ok(journal.entries.some((x) => x.tag === "0034_reward_ledger"), "#282 P2 wiring: the journal lists 0034_reward_ledger");
   const qSrc = r282Read("src/lib/stores/quotes.ts", "utf8");
-  const clientSrc = estimatorSource();
-  ok(/if \(id !== customerId\) setSections\(\(ss\) => \(rewardCreditOf\(ss\) > 0 \? withoutRewardCredit\(ss\) : ss\)\)/.test(clientSrc),
-    "#282 P2 wiring: changing the quote's customer drops the credit line");
 }
-import {
-  grossQuoteValue as r282cGross,
-  quoteRewardCredit as r282cQuoteCredit,
-  withRewardCredit as r282cWith,
-} from "@/lib/credit-line";
 import { createElement as r282cEl } from "react";
 import { renderToStaticMarkup as r282cRender } from "react-dom/server";
 import { readFileSync as r282cRead } from "node:fs";
@@ -21355,16 +21318,6 @@ import { readFileSync as r282cRead } from "node:fs";
 
   // ---- server rule (settleServiceCredit) ----
   const base = { posted: 500, total: 2500, available: 300.75, customerId: "co", source: "flametest", mayApply: true, prior: null };
-
-  // ---- the one accessor ----
-  ok(r282cQuoteCredit({ quoteType: "flame_test", flameTest: { rewardCredit: 120 } }) === 120 &&
-     r282cQuoteCredit({ quoteType: "inspection", inspection: { rewardCredit: 75 } }) === 75 &&
-     r282cQuoteCredit({ quoteType: "repair", repair: { rewardCredit: 40 } }) === 40,
-    "#282 P3 accessor: quoteRewardCredit reads the service subdoc's rewardCredit for all three types");
-  const estSections = r282cWith([{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "X", desc: "X", qty: 1, unit: "ea", cost: 10, price: 900 }] }] as never, 60, 2);
-  ok(r282cQuoteCredit({ spec: { sections: estSections } }) === 60, "#282 P3 accessor: the Estimator's credit line still reads through the same function");
-  ok(r282cGross({ value: 880, quoteType: "repair", repair: { rewardCredit: 120 } }) === 1000 && r282cGross({ value: 880 }) === 880,
-    "#282 P3 accessor: grossQuoteValue = net value + the credit applied");
 
   // ---- wiring: the three save actions, builders and pages ----
   for (const [dir, src] of [["flame-tests", /source: sourceForSave\(existingForMarker\?\.source, "flametest"\),\n    mayApply/], ["inspections", /source: sourceForSave\(existingForMarker\?\.source, "inspection"\),\n    mayApply/], [/source: "repair",\n    mayApply/]] as const) {
@@ -21440,7 +21393,7 @@ import { staleApprovalLine as a284StaleLine, approvedReviewLine as a284ApprovedL
   const twoA = quote([item(), item({ id: 2, sku: "C-3" })], 400);
   const twoB = quote([item({ id: 2, sku: "C-3" }), item()], 400);
   ok(a284Fp(twoA).linesKey === a284Fp(twoB).linesKey, "#284 fp: line order does not matter");
-  ok(a284Fp({ quoteType: "flame_test", value: 1000, spec: null }).sell === 1000, "#284 fp: a service quote fingerprints on its sell alone");
+  ok(a284Fp({ value: 1000, spec: null }).sell === 1000, "#284 fp: a service quote fingerprints on its sell alone");
   const approved = (q: Record<string, unknown>, snap: { sell: number; linesKey: string } | null, method = "in_app") =>
     ({ ...q, review: { state: "approved", method, decidedBy: "Jeff Chesebro", reviewer: "Jeff Chesebro", note: "", approvedAgainst: snap } });
   ok(a284Matches(approved(base, fp)), "#284 fp: an unchanged quote matches its snapshot");
@@ -21779,9 +21732,6 @@ function readdirRecursive284(dir: string): string[] {
   const hist = [{ amount: 12345, at: 1 }];
   const item = (id: number, price: number) => ({ id, sku: `S${id}`, desc: `Item ${id}`, qty: 1, unit: "ea", cost: price * 0.6, price });
   const one = [{ id: "a", name: "a", kind: "materials", mfr: "", freightPct: 0, items: [item(1, 1000)] } as R282bSection];
-  const legacy = r282bSanitize(r282bWith(one, 250.5, 9), 1000);
-  const capped = r282bSanitize(r282bWith(one, 700, 9), 300.9);
-  const exact = r282bSanitize(r282bWith(one, 200, 9), 1000);
   const estAct = r282Read("src/app/(app)/estimator/actions.ts", "utf8");
   const qd = r282Read("src/app/(app)/estimator/quote-document.tsx", "utf8");
 }
@@ -26212,7 +26162,6 @@ import {
 import { DEFAULT_PDF_OPTIONS as n293DefPdf, PDF_TOGGLE_KEYS as n293ToggleKeys, normalizePdfOptions as n293NormPdf } from "@/lib/quote-pdf/pdf-options";
 import { copySectionForTarget as n293Copy } from "@/app/(app)/estimator/copy-system";
 import { repriceForTier as n293Reprice } from "@/app/(app)/estimator/tier-reprice";
-import { withRewardCredit as n293WithCredit } from "@/lib/credit-line";
 import { sanitizeSystemSell as n293SanSell } from "@/app/(app)/estimator/pricing";
 import {
   applyIntroOp as n293Apply, newIntroId as n293NewId, sanitizeIntro as n293SanIntro, sanitizeIntroList as n293SanList,
@@ -26233,8 +26182,8 @@ import type { KeyProduct as N293Kp, SpecItem as N293Item, SpecSection as N293Sec
   ok(n293Eligible(it(1)) && n293Eligible(it(2, { custom: true })) && n293Eligible(it(3, { allowance: true })) && n293Eligible(it(4, { vendorQuoteId: "VQ-1" })) && n293Eligible(it(5, { curtain: true })),
     "#293 eligible: plain catalog, custom, allowance-with-sku, vendor and curtain lines can be key products");
   ok(!n293Eligible(it(1, { labor: true })) && !n293Eligible(it(1, { laborOverhead: "shop" })) && !n293Eligible(it(1, { laborTravel: "mileage" })) &&
-     !n293Eligible(it(1, { rewardCredit: true })) && !n293Eligible(it(1, { option: true })) && !n293Eligible(it(1, { sku: "   " })),
-    "#293 eligible: labor, overhead, travel, Rewards credit, option and blank-sku lines are not");
+     !n293Eligible(it(1, { option: true })) && !n293Eligible(it(1, { sku: "   " })),
+    "#293 eligible: labor, overhead, travel, option and blank-sku lines are not");
 
   // Resolve.
   const rs = n293Resolve(sec([it(1), it(2), it(3, { option: true })], { keyProducts: [kp("1", "SKU-1"), kp("9", "X"), kp("2", "OTHER"), kp("3", "SKU-3")] }));
@@ -26345,7 +26294,6 @@ import type { KeyProduct as N293Kp, SpecItem as N293Item, SpecSection as N293Sec
   ok(eq(n293SanSell(carried).keyProducts, carried.keyProducts), "#293 carry: sanitizeSystemSell keeps keyProducts");
   ok(eq(n293Copy(carried, { newSectionId: "s9", catalog: new Map(), fixtures: new Map(), sourceTierMargin: null, targetTierMargin: null }).section.keyProducts, carried.keyProducts),
     "#293 carry: Copy to another estimate (copySectionForTarget) keeps keyProducts and ids");
-  ok(eq(n293WithCredit([carried], 50, 99)[0].keyProducts, carried.keyProducts), "#293 carry: withRewardCredit keeps keyProducts");
   ok(eq(n293Reprice([carried], mk(0.25), mk(0.2)).sections[0].keyProducts, carried.keyProducts), "#293 carry: tier re-price keeps keyProducts");
 
   // Itemized appendix option.
@@ -26405,7 +26353,7 @@ import type { PartDocument as N293Doc } from "@/lib/part-docs/types";
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const acts = rd("src/app/(app)/estimator/actions.ts");
   ok(acts.includes("payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts)"), "#293 save: saveQuoteAction sanitizes every posted section's keyProducts beside sanitizeSystemSell");
-  ok(acts.includes('withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })])'), "#293 move: a moved system's keyProducts are sanitized");
+  ok(acts.includes('const movedRaw = withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() });'), "#293 move: a moved system's keyProducts are sanitized");
   const copyFn = acts.slice(acts.indexOf("export async function copySystemToEstimateAction("));
   ok(/section = withSanitizedKeyProducts\(section\);/.test(copyFn.slice(0, 1200)), "#293 copy: a copied system's keyProducts are sanitized before copySectionForTarget");
   const na = rd("src/app/(app)/estimator/narrative-actions.ts");
@@ -27098,7 +27046,6 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
   const lighting = sec("sysA", "Main Lighting", [
     it(1, "ETC-S4"),
     it(2, "CUSTOM-X", { custom: true }),
-    it(3, "", { rewardCredit: true, qty: 1, price: -50 }),
     it(5, "VQ-1", { vendorQuoteId: "vq1", desc: "Vendor rig" }),
   ], {
     narrative: "  Our lighting.  ", presentation: "narrative", room: "Stage left",
@@ -27136,7 +27083,7 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
   ok(s.customer === "Lakefront HS" && s.estNumber === "EST-1005" && s.quoteName === "Quote QS" && s.intro === "Our lighting." && s.presentation === "narrative",
     "#293s library: customer from the directory name, estimate number, trimmed intro, presentation");
   ok(s.lineCount === 3 && eq(s.skus, ["ETC-S4", "CUSTOM-X", "VQ-1"]),
-    "#293s library: the Rewards credit line is excluded from counts and skus");
+    "#293s library: line count and skus");
   ok(eq(s.keyProducts.map((k) => k.sku), ["ETC-S4", "VQ-1"]) && s.keyProducts[0].heading === "Desc ETC-S4",
     "#293s library: only resolved key products are indexed, with their printed heading");
   ok(!all.some((e) => e.sectionId === "sysL" || e.sectionId === "sysE"), "#293s library: labor and empty systems are skipped");
@@ -27181,7 +27128,7 @@ import type { SpecItem as N293sItem, SpecSection as N293sSec } from "@/app/(app)
   // ---- the Load pick ----
   const pick = n293sForLoad(QS, "sysA")!;
   ok(!!pick && eq(pick.section.items.map((x) => x.id), [1, 2, 5]) && pick.vendorLines === 1 && pick.source.tierMargin === 0.3,
-    "#293s load: the Rewards credit is left out; vendor-quote lines come along (counted — Jeff 2026-10-15 #21); the snapshot's tier is the source tier");
+    "#293s load: vendor-quote lines come along (counted — Jeff 2026-10-15 #21); the snapshot's tier is the source tier");
   ok(eq(pick.section.keyProducts, [{ lineKey: "1", sku: "ETC-S4", text: "S4 para", photo: true }, { lineKey: "5", sku: "VQ-1", text: "Vendor para", photo: true }]) && !("room" in pick.section) && pick.section.narrative === "  Our lighting.  ",
     "#293s load: blocks on missing lines go, room (job-specific) goes, the narrative carries");
   ok(n293sForLoad(QS, "sysL") === null && n293sForLoad(QS, "nope") === null && n293sForLoad(QD, "d") === null && n293sForLoad(QS, "sysLive") === null,
@@ -27874,7 +27821,7 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
 
   // Task 3 review (hardening, Task 4 commit 1): the never-rendered salt, widened — component cost,
   // sellOverride, labor groups, a vendor attachment, approvedAgainst, emails, shop/bonus/travel labor
-  // names, Rewards-credit internals, and an EARLIER sent revision plus a later manual one and a live
+  // names, and an EARLIER sent revision plus a later manual one and a live
   // edit, each with its own salted spec. The document is the latest sent revision as the pages build
   // it (quoteAsOfRevision → quoteDocumentDataFor), rendered layout="web" as Narrative and as BOM.
   {
@@ -27898,7 +27845,6 @@ import { quoteDocumentDataFor as n293tDocData } from "@/lib/quote-pdf/quote-docu
         items: [
           { id: 2, sku: "VQ", desc: "Vendor", qty: 1, unit: "ea", cost: 27182.81, price: 40000, vendorQuoteId: "VQ-S", internalNote: `INTERNAL2-${salt}` },
           { id: 3, sku: "P3", desc: "Plain part", qty: 1, unit: "ea", cost: 11000.11, price: 20000 },
-          { id: 8, sku: "", desc: `REWARDDESC-${salt}`, qty: 1, unit: "ea", cost: 0, price: -300, rewardCredit: true },
         ] },
     ] });
     const df = (note: string, owner: string) => ({ customer: "Walk-in", locationId: null, contactName: null, quoteNote: note, assumptions: "", installTimeframe: "",
@@ -29131,7 +29077,6 @@ import { manufacturerAnalytics, rollupMetrics as maRollup, attributedLines as ma
   ok(resX.won.cost === 70 && resX.quoted.cost === 0 && resX.quotes === 0, "mfr analytics: a quote created before the window but won inside it counts in Won, not Quoted");
   const qe = mk("QE", "sent", now - 2 * DAY, [], [
     { sku: "S1", qty: 1, cost: 1000, price: 1500, por: true },
-    { sku: "", qty: 1, cost: 0, price: -50, rewardCredit: true },
     { sku: "S1", qty: 1, cost: 1000, price: 1500, laborOverhead: "shop" },
     { sku: "S1", qty: 1, cost: 1000, price: 1500, laborTravel: "hotel" },
     { sku: "S1", qty: 0, cost: 1000, price: 1500 },
@@ -29140,7 +29085,7 @@ import { manufacturerAnalytics, rollupMetrics as maRollup, attributedLines as ma
   ]);
   (qe as unknown as { spec: { sections: unknown[] } }).spec.sections.push({ id: "l", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [{ sku: "S1", qty: 1, cost: 999, price: 1 }] });
   const lines = maLines(qe, parts, canon);
-  ok(lines.length === 2 && lines.reduce((a, l) => a + l.cost, 0) === 65, "mfr analytics: por, rewards credit, labor overhead/travel, a labor section and zero-qty lines are excluded");
+  ok(lines.length === 2 && lines.reduce((a, l) => a + l.cost, 0) === 65, "mfr analytics: por, labor overhead/travel, a labor section and zero-qty lines are excluded");
   const resE = manufacturerAnalytics([qe], parts, canon, now).byKey.get("neutrik")!;
   ok(resE.topParts[0].sku === "" && resE.topParts[0].desc === "Custom cable" && resE.topParts[0].cost === 60, "mfr analytics: a line with no sku is keyed by its description in top parts");
   const qc = mk("QC", "sent", now - 2 * DAY, [], [{ sku: "fa-2", qty: 1, cost: 0, price: 0, manufacturer: "Neutrik", components: [{ sku: "NOPE", label: "Plug", role: "other", qty: 2, unit: "ea", cost: 5, price: 9 }] }]);
@@ -29676,7 +29621,6 @@ import {
   outputScopes as e301sScopes, addOptions as e301sOptions, coverTotals as e301sTotals, notIncludedItems as e301sNotItems,
   notIncludedLine as e301sNotLine, coverSummaryText as e301sSummary, scopePriceLabel as e301sPriceLabel,
 } from "@/lib/estimate-output/scopes";
-import { withRewardCredit as e301sCredit } from "@/lib/credit-line";
 import { round2 as e301sRound } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as E301sSec } from "@/app/(app)/estimator/types";
 {
@@ -29709,17 +29653,14 @@ import type { SpecSection as E301sSec } from "@/app/(app)/estimator/types";
   // ---- totals invariant (R1) ----
   const sum = (secs: E301sSec[]) => {
     const props = p293Props({ sections: secs });
-    return { props, total: e301sRound(e301sScopes(props).reduce((a, s) => a + s.price, 0) - (props.t.credit || 0)) };
+    return { props, total: e301sRound(e301sScopes(props).reduce((a, s) => a + s.price, 0)) };
   };
   const plain = sum(p293Sections());
   ok(plain.total === e301sRound(plain.props.t.grand), `#301 totals: Σ scope prices = the grand total (freight inside each scope) (${plain.total} vs ${plain.props.t.grand})`);
   const rounded = p293Sections().map((s, i) => (i === 0 ? { ...s, priceRound: 25 } : i === 1 ? { ...s, sellOverride: 777.77 } : s)) as E301sSec[];
   const r2 = sum(rounded);
   ok(r2.total === e301sRound(r2.props.t.grand), "#301 totals: the invariant holds with a typed sell and $25 rounding");
-  const credited = e301sCredit(p293Sections(), 40, 999) as E301sSec[];
-  const r3 = sum(credited);
-  ok((r3.props.t.credit || 0) === 40 && r3.total === e301sRound(r3.props.t.grand), "#301 totals: Σ scope prices − the Rewards credit = the grand total (R1)");
-  const tl = e301sTotals(r3.props);
+  const tl = e301sTotals(plain.props);
   const por = p293Sections().map((s, i) => (i === 0 ? { ...s, items: s.items.map((it, j) => (j === 0 ? { ...it, por: true } : it)) } : s)) as E301sSec[];
   ok(e301sTotals({ ...p293Props({ sections: por }), isPortalCatalog: true }).totalLabel === "Total (excludes items pending price)" &&
      e301sTotals(p293Props({ sections: por })).totalLabel === "Total", "#301 totals: the POR wording only on a portal-catalog quote, as QuoteDocument prints it");
@@ -30236,7 +30177,6 @@ import { packageBomRows as e301bbRows, packageBomSkus as e301bbSkus, LABOR_BOM_D
 import { packageFrozenFields as e301bmFrozen, packagePhotoSections as e301bmPhotoSecs, packageViewModel as e301bmModel } from "@/lib/estimate-output/package-model";
 import { outputScopes as e301bbScopes } from "@/lib/estimate-output/scopes";
 import { narrativeBlocks as e301bbBlocks } from "@/app/(app)/estimator/narrative";
-import { withRewardCredit as e301bbCredit } from "@/lib/credit-line";
 import { fmt as e301bbFmt } from "@/app/(app)/estimator/pricing";
 import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
 {
@@ -30266,8 +30206,6 @@ import type { SpecSection as E301bbSec } from "@/app/(app)/estimator/types";
   const lab = e301bbRows({ id: "l", name: "Install", kind: "labor", mfr: "", freightPct: 0, items: [L(9, { labor: true })] } as unknown as E301bbSec, cat);
   ok(lab.length === 1 && lab[0].description === e301bbLabor && lab[0].qty === null && e301bbLabor === "Installation, commissioning & project management",
     "#301 BOM: a labor system is one row, the document's own wording (R2/R6)");
-  const credited = e301bbCredit([mat], 10, 999) as E301bbSec[];
-  ok(e301bbRows(credited[0], cat, vqs).length === rows.length, "#301 BOM: the Rewards credit line never appears");
   ok(e301bbSkus([mat, { ...mat, id: "m2" } as E301bbSec, { id: "z", name: "Zero", kind: "materials", mfr: "", freightPct: 0, items: [] } as unknown as E301bbSec]).join(",") === "SKU-1,SKU-2" &&
      e301bbSku({ sku: " SKU-9 " } as never) === "SKU-9" && e301bbSku({ sku: "AI" } as never) === "",
     "#301 BOM: the catalog lookup list — printed systems only, deduped, never allowance / vendor / placeholder skus");
@@ -30628,12 +30566,12 @@ import {
 /* ======================================================================
    #301 slice C — responses + gaps (pure): D-m records, D-n caps and the
    section filter, R16 assignees (+ active), the task/note text, the
-   Chicago due time, staff rows, the R1 credit note, and the gap chips.
+   Chicago due time, staff rows, and the gap chips.
    ====================================================================== */
 import {
   sanitizeClientResponse as e301crSan, responseScopes as e301crScopes, cleanClientResponses as e301crClean, appendResponseTo as e301crAppend,
   responseTaskTitle as e301crTitle, responseNoteText as e301crNote, responseAssignees as e301crAssignees, leadEstimator as e301crLead,
-  confirmationText as e301crThanks, responseRows as e301crRows, creditNoteText as e301crCredit,
+  confirmationText as e301crThanks, responseRows as e301crRows,
   newResponseId as e301crNewId, isClientResponseId as e301crIsId, CLIENT_ACTION_COPY as e301crCopy, MAX_CLIENT_RESPONSES as e301crMax,
   type ClientResponse as E301crResp,
 } from "@/lib/estimate-output/responses";
@@ -30679,9 +30617,9 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(e301crTitle(a, "EST-1042", 2) === "Client accepted EST-1042 Rev 2 — Lighting, Rigging ($48,250.00)" &&
      e301crTitle({ ...a, kind: "question" }, "EST-1042", 2) === "Client question — EST-1042",
     "#301 responses: the task titles (D-m)");
-  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00 before any Rewards credit.\nAccepted by Pat Doe, Facilities\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." && // #15: the signer line
+  ok(e301crNote(a, "EST-1042", 2) === "Client selected scopes on EST-1042 Rev 2 (client link): Lighting, Rigging — $48,250.00.\nAccepted by Pat Doe, Facilities\nFrom: Pat Doe · Facilities · pat@school.org\nMessage: Please start in June." && // #15: the signer line
      e301crNote({ ...a, kind: "question", title: undefined, email: "", message: "Is rigging inspected?" }, "EST-1042", 2) === "Client question on EST-1042 Rev 2 (client link).\nFrom: Pat Doe\nMessage: Is rigging inspected?",
-    "#301 responses: the note / activity text names the scopes, the pre-credit total, who, and the message");
+    "#301 responses: the note / activity text names the scopes, the total, who, and the message");
   // ---- R16 assignees ----
   const U = (id: string, name: string, roles: string[], status = "active") => ({ id, name, roles, status });
   const users = [U("u1", "Jeff Chesebro", ["Admin"]), U("u2", "Sam Lee", ["Estimator"]), U("u3", "Ana Ruiz", ["Manager"]), U("u4", "Old Hand", ["Admin"], "archived"), U("u5", "Twin", ["Estimator"]), U("u6", "twin", ["Estimator"])];
@@ -30694,8 +30632,6 @@ import type { SpecSection as E301crSec } from "@/app/(app)/estimator/types";
   ok(rows.length === 2 && rows[0].kindLabel === "Question" && rows[0].total === "" && rows[1].kindLabel === "Selected scopes" && rows[1].total === "$100.00" &&
      rows[1].revLabel === "Rev 2" && rows[1].when === "Oct 5, 2:14 PM",
     "#301 responses: staff rows newest first, printed Rev N, Chicago time");
-  ok(e301crCredit("−$1,250.00") === "A Rewards credit of $1,250.00 applies to your order." && e301crCredit(null) === null,
-    "#301 responses: R1 — the credit note under the live total");
   // ---- gaps ----
   const kpSecs = [
     { id: "a", name: "Lighting", kind: "materials", clientGoals: "", keyProducts: [{ lineKey: "1", sku: "A", text: "", photo: true }, { lineKey: "2", sku: "B", text: "Para.", photo: true }],
@@ -31234,8 +31170,8 @@ async function e301cFilesAsyncChecks(): Promise<void> {
   ok(sel.includes('<input type="checkbox" aria-label={s.name}') && ["name", "title", "email", "note"].every((k) => sel.includes(`aria-label={CLIENT_ACTION_COPY.${k}} placeholder={CLIENT_ACTION_COPY.${k}}`)) &&
      ["name", "email", "message"].every((k) => qf.includes(`aria-label={CLIENT_ACTION_COPY.${k}} placeholder={CLIENT_ACTION_COPY.${k}}`)),
     "#301 a11y: each scope checkbox is named by its scope; every text field's aria-label equals its placeholder");
-  ok(sel.includes("CLIENT_ACTION_COPY.selectedTotal") && sel.includes("creditNote") && sel.includes("selectedTotal(scopes.filter("),
-    "#301 actions: the live \"Selected scopes\" total (pre-credit) and the Rewards credit note (R1)");
+  ok(sel.includes("CLIENT_ACTION_COPY.selectedTotal") && !sel.includes("creditNote") && sel.includes("selectedTotal(scopes.filter("),
+    "#301 actions: the live \"Selected scopes\" total, with no credit note");
   const slots = rd("src/app/share/quote/[id]/[token]/package-slots.tsx");
   ok(slots.includes("x.actions && ctx.canAct") && rd("src/app/share/quote/[id]/[token]/package-page.tsx").includes("canAct: canAct(hit.state)"),
     "#301 actions: the forms show only when the page can act (latest sent revision of a sent quote)");
@@ -32340,9 +32276,6 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   const gaps = e304Ready({ ...base, sections: [sec({ items: [] }), sec({ id: "s2", items: [line({ price: 0 }), line({ id: 2, price: 0 }), line({ id: 3 })] })] });
   ok(gaps.build.state === "gaps" && gaps.build.count === 3 && gaps.build.label === "1 empty system · 2 unpriced lines", "#305 readiness: empty systems + unpriced lines are counted and named");
 
-  const credit = e304Ready({ ...base, sections: [sec({ items: [line({ rewardCredit: true, price: -50 })] })] });
-  ok(credit.build.state === "gaps" && credit.build.label === "1 empty system", "#305 readiness: a Rewards credit line neither prices nor fills a system");
-
   ok(e304Ready({ ...base, saved: false, sections: [sec()] }).package.state === "idle" && e304Ready({ ...base, saved: false, sections: [sec()] }).package.label === "Save first",
     "#305 readiness: an unsaved quote's Package is idle");
   const narr = e304Ready({ ...base, sections: [sec({ presentation: "narrative", narrative: "" })] });
@@ -32589,8 +32522,8 @@ import * as p2a from "@/lib/estimate-groups/groups";
   // #366: each spec write now ends with the (only-when-any) projectDiscounts spread.
   ok(/spec: \{ sections: normalizeSystemOrder\(savedSections, groups\), mobs: payload\.mobs, groups, \.\.\.\(docSave\.document \? \{ document: docSave\.document \} : \{\}\), \.\.\.\(Object\.keys\(discounts\)\.length \? \{ projectDiscounts: discounts \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: saveQuoteAction writes spec { sections (normalised), mobs, groups }");
   // #357: the stripped system is re-id'd against the target first (reIdIncomingSection), then appended.
-  ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\.\.\.withoutRewardCredit\(\[incoming\]\)\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\), \.\.\.\(Object\.keys\(targetDiscounts\)\.length \? \{ projectDiscounts: targetDiscounts \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
-  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, withoutRewardCredit\(\[stripBonusLines\(withoutGroupMeta\(placed\)\)\]\), await loadBonusRates\(\)\)/.test(actionsSrc) && /const newSpecSections = applyProjectDiscounts\(newSections, carriedDiscounts\);/.test(actionsSrc) && /spec: \{ sections: newSpecSections, mobs: \[\], /.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
+  ok(/const incoming = reIdIncomingSection\(stripBonusLines\(withoutGroupMeta\(placed\)\), /.test(actionsSrc) && /\[\.\.\.\(existingSpec\?\.sections \|\| \[\]\), incoming\], existingGroups\);/.test(actionsSrc) && /groups: existingGroups, \.\.\.\(existingDoc \? \{ document: existingDoc \} : \{\}\), \.\.\.\(Object\.keys\(targetDiscounts\)\.length \? \{ projectDiscounts: targetDiscounts \} : \{\}\) \}/.test(actionsSrc), "#P2a persistence: move-to-existing keeps the target's groups and strips the moved system's group meta");
+  ok(/canonicalBonusSections\(\{ source: "estimator", status: "draft" \}, \[stripBonusLines\(withoutGroupMeta\(placed\)\)\], await loadBonusRates\(\)\)/.test(actionsSrc) && /const newSpecSections = applyProjectDiscounts\(newSections, carriedDiscounts\);/.test(actionsSrc) && /spec: \{ sections: newSpecSections, mobs: \[\], /.test(actionsSrc), "#P2a persistence: move-to-new strips group meta from the placed system");
   ok(/groups = sanitizeGroups\(spec\?\.groups\)/.test(pageSrc) && /normalizeSystemOrder\(spec\.sections as SpecSection\[\], groups\)/.test(pageSrc) && /^\s+groups,$/m.test(pageSrc) && /groups: \[\],/.test(pageSrc), "#P2a persistence: page.tsx reads spec.groups through sanitizeGroups into initial.groups (new quotes: [])");
   ok(/withoutGroupMeta\(copied\)/.test(copySrc), "#P2a persistence: copy-system strips group meta from the copy");
   ok(/withKeyProducts\(withoutGroupMeta\(base\), kps\)/.test(libSrc), "#P2a persistence: system-library load strips group meta");
@@ -32620,14 +32553,11 @@ import * as p2a from "@/lib/estimate-groups/groups";
   };
   ok(hook.includes("const [groups, setGroups] = useState<SystemGroup[]>(initial.groups ?? [])"), "#P2a hook: groups state seeds from initial.groups");
   ok(hook.includes("const blocks = useMemo(() => groupBlocks(sections, groups, { includeEmpty: true }), [sections, groups])"), "#P2a hook: blocks = groupBlocks(sections, groups, { includeEmpty: true })");
-  ok(/setSectionsState\(\(prev\) => \{\s*const next = unmarkUserEdits\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 7,
+  ok(/setSectionsState\(\(prev\) => \{\s*const next = unmarkEdited\(prev, typeof v === "function" \? v\(prev\) : v\);/.test(hook) && (estimatorSource().match(/setSectionsState\(/g) || []).length === 7,
     "#P2a hook: the setSections wrapper un-marks edited built systems in one functional write (7 raw writes: 4 + the #bonus effect + the #366 discounts effect + the Undo restore)");
-  const um = between("function unmarkUserEdits(", "const COLLAPSED_KEY_PREFIX");
-  ok(um.includes("unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next))") && um.includes("withoutBuilt(s)"),
-    "#P2a hook: un-marking ignores the Rewards credit line (a re-pin after a reorder is not an edit)");
   const reorder = between("const reorderSections = ", "const addGroupAction = ");
-  ok(reorder.includes("if (list === sections) return;") && reorder.includes("setSections(withRewardCredit(list, rewardCreditOf(sections), nextId()))"),
-    "#P2a hook: every reorder re-pins the Rewards credit like deleteSystem; a no-op writes nothing");
+  ok(reorder.includes("if (list === sections) return;") && reorder.includes("setSections(list);"),
+    "#P2a hook: every reorder writes through reorderSections; a no-op writes nothing");
   const ops = between("const addGroupAction = ", "const isBuilt = ");
   ok(ops.includes("addGroup(groups, name, id)") && ops.includes("renameGroup(groups, id, name)") && ops.includes("moveGroupBy(groups, id, delta)") && ops.includes("removeGroup(sections, groups, id)")
     && ops.includes("reorderSections(normalizeSystemOrder(sections, next))") && ops.includes("reorderSections(res.sections)")
@@ -32819,7 +32749,7 @@ import { qd293Props as p2adProps, qd293Sections as p2adSections, renderQuoteDocu
   ok(online.includes('<QuoteDocument {...shown} layout="web" />') && online.includes("bomViewProps(docProps)"), "#P2a document: the online view renders the same QuoteDocument (groups ride in docProps; the BOM view spreads them)");
 }
 
-/* #P2a hardening — final review: normalise before the credit settle and in the PDF loader, sanitise built/groupId. */
+/* #P2a hardening — final review: normalise before pricing and in the PDF loader, sanitise built/groupId. */
 import * as p2h from "@/lib/estimate-groups/groups";
 import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-data";
 {
@@ -32845,14 +32775,12 @@ import { quoteDocumentDataFor as p2hData } from "@/lib/quote-pdf/quote-document-
   // source pins
   const acts = rd("src/app/(app)/estimator/actions.ts");
   const norm = acts.indexOf("normalizeSystemOrder(sellSanitizedRaw.map(sanitizeSectionGroupMeta), groups)");
-  const settle = acts.indexOf("await settleRewardCredit(sellSanitized,");
   ok(acts.includes("spec: { sections: normalizeSystemOrder(savedSections, groups), mobs: payload.mobs, groups, ...(docSave.document ? { document: docSave.document } : {}), ...(Object.keys(discounts).length ? { projectDiscounts: discounts } : {}) }"), "#P2a hardening: the final write stays normalised"); // #366: + discounts
 }
 
-/* #P2b core — Estimator Phase 2b: the derived alternate stamp, totals.alt, the Rewards credit pin and the approval fingerprint. */
+/* #P2b core — Estimator Phase 2b: the derived alternate stamp, totals.alt and the approval fingerprint. */
 import * as p2bGroups from "@/lib/estimate-groups/groups";
 import { totals as p2bTotals, systemSellTotal as p2bSell } from "@/app/(app)/estimator/pricing";
-import { withRewardCredit as p2bWithCredit, sanitizeRewardCredit as p2bSanitizeCredit, isRewardCreditItem as p2bIsCredit } from "@/lib/credit-line";
 import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
 {
   type P2bSys = { id: string; groupId?: string; alternate?: true; built?: true; name?: string };
@@ -32922,16 +32850,13 @@ import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
   ok(Math.abs(t1.markup - 400 / 600) < 1e-12, "#P2b core: totals() — markup is the In-total systems' markup");
   const t1tax = p2bTotals([inTotal, alt] as never, 8);
   ok(t1tax.tax === 80 && t1tax.grand === 1080 && t1tax.alt === 500, "#P2b core: totals() — tax is on In-total systems only; alt stays the untaxed system sell");
-  const altCredit = { ...alt, items: [...alt.items, it(9, 1, 0, -100, { rewardCredit: true })] };
-  const t2 = p2bTotals([inTotal, altCredit] as never, 0);
-  ok(t2.credit === 100 && t2.grand === 900 && t2.alt === 500, "#P2b core: totals() — a Rewards credit line on an alternate section still reduces grand (and is not in alt)");
   const allAlt = p2bTotals([{ ...inTotal, alternate: true as const }, alt] as never, 0);
   ok(allAlt.grand === 0 && allAlt.rev === 0 && allAlt.alt === 1500, "#P2b core: totals() — an all-alternate quote totals $0 with every system in alt");
   // No alternates ⇒ identical to the pre-change result (fixture computed before this change).
   const fA = { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 10, priceRound: 25, items: [it(1, 2, 100, 150), it(2, 1, 50, 80, { option: true }), it(3, 4, 40, 60, { labor: true })] };
   const fB = { id: "b", name: "B", kind: "labor", mfr: "", freightPct: 0, sellOverride: 900, items: [it(4, 10, 50, 70)] };
-  const fC = { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 5, items: [it(5, 3, 33.33, 51.17), it(6, 1, 0, -100, { rewardCredit: true })] };
-  const pre = { mat: 466.84, lab: 1150.67, fr: 41, opt: 80, rev: 1617.51, cost: 959.99, tax: 132.6808, grand: 1691.1908, markup: 0.6849238012895967 /* #367: (rev − cost) ÷ cost; was margin 0.40650135084172584 */, adj: 224, credit: 100 };
+  const fC = { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 5, items: [it(5, 3, 33.33, 51.17)] };
+  const pre = { mat: 466.84, lab: 1150.67, fr: 41, opt: 80, rev: 1617.51, cost: 959.99, tax: 132.6808, grand: 1791.1908, markup: 0.6849238012895967 /* #367: (rev − cost) ÷ cost; was margin 0.40650135084172584 */, adj: 224 }; // Rewards credit removed 2026-11-23: the fixture's $100 credit line and `credit` key are gone (grand was 1691.1908)
   const t3 = p2bTotals([fA, fB, fC] as never, 8);
   ok(JSON.stringify(t3) === JSON.stringify(pre), "#P2b core: no alternates ⇒ totals() is identical to the pre-change result, field for field (and no alt key)");
   ok(!("alt" in t3), "#P2b core: no alternates ⇒ no alt key at all");
@@ -32939,22 +32864,6 @@ import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
   const t4 = p2bTotals([fA, fB, fC, { ...alt }] as never, 8);
   const { alt: t4alt, ...t4rest } = t4;
   ok(JSON.stringify(t4rest) === JSON.stringify(pre) && t4alt === 500, "#P2b core: adding an alternate system to that quote changes only alt");
-
-  // --- withRewardCredit pins to the last In-total system ---
-  const sec = (id: string, a?: boolean) => ({ id, name: id, kind: "materials", mfr: "", freightPct: 0, items: [it(Number(id.replace(/\D/g, "")) || 1, 1, 1, 2)], ...(a ? { alternate: true as const } : {}) });
-  const credited = (ss: Array<{ id: string; items: unknown[] }>) => ss.filter((s) => s.items.some(p2bIsCredit)).map((s) => s.id).join();
-  const mixed = [sec("s1"), sec("s2"), sec("s3", true), sec("s4", true)];
-  const wc = p2bWithCredit(mixed as never, 50, 99);
-  ok(credited(wc) === "s2", "#P2b core: withRewardCredit places the credit on the last non-alternate system");
-  ok(credited(p2bWithCredit([sec("s1", true), sec("s2", true)] as never, 50, 99)) === "s2", "#P2b core: withRewardCredit on an all-alternate quote falls back to the last system");
-  ok(credited(p2bWithCredit([sec("s1"), sec("s2")] as never, 50, 99)) === "s2", "#P2b core: withRewardCredit with no alternates still uses the last system");
-  const onAlt = [sec("s1"), { ...sec("s2", true), items: [it(2, 1, 1, 2), it(7, 1, 0, -40, { rewardCredit: true })] }];
-  const moved2 = p2bWithCredit(onAlt as never, 40, 99);
-  ok(credited(moved2) === "s1" && moved2[0].items.find(p2bIsCredit)?.id === 7, "#P2b core: a credit sitting on an alternate is re-homed to the last In-total system, keeping its line id");
-  const sanC = p2bSanitizeCredit(onAlt as never, Number.POSITIVE_INFINITY);
-  ok(sanC.ok && credited(sanC.sections as never) === "s1" && sanC.credit === 40, "#P2b core: sanitizeRewardCredit (the save path) re-pins the credit to the last In-total system");
-  const stamped = p2bGroups.normalizeSystemOrder([{ ...sec("s1"), groupId: "g-b" }, sec("s2")] as never, G) as Array<{ id: string; items: unknown[] }>;
-  ok(credited(p2bWithCredit(stamped as never, 25, 99)) === "s2", "#P2b core: after normalize, the credit lands on the last In-total system (an Alternate group sorts last but is skipped)");
 
   // --- approval fingerprint ---
   const fpSpec = { sections: [
@@ -32978,8 +32887,8 @@ import { approvalFingerprint as p2bFingerprint } from "@/lib/approval-snapshot";
   const iTotals = fBody.indexOf("totals(");
   ok(fBody.length > 0 && iStrip >= 0 && iPlace > iStrip && (iTotals < 0 || iStrip < iTotals), "#P2b core fix: moveSystemToEstimateAction applies withoutGroupMeta before placeSystemInEstimate / any totals( call (Phase 2b: stripped once)");
   const stamped = { id: "m1", name: "Moved", kind: "materials", mfr: "", freightPct: 0, groupId: "g-b", alternate: true as const, items: [{ id: 1, sku: "S1", desc: "d", qty: 2, unit: "ea", cost: 100, price: 200 }] };
-  const rawT = p2bTotals(r282bWithout([stamped]) as never, 0);
-  const fixedT = p2bTotals(r282bWithout([p2bGroups.withoutGroupMeta(stamped)]) as never, 0);
+  const rawT = p2bTotals([stamped] as never, 0);
+  const fixedT = p2bTotals([p2bGroups.withoutGroupMeta(stamped)] as never, 0);
   ok(rawT.grand === 0 && fixedT.grand > 0, "#P2b core fix: a stamped section's sell lands in alt (grand 0) until withoutGroupMeta strips it, then grand > 0");
 }
 
@@ -33098,7 +33007,7 @@ import { renderToStaticMarkup as p2buRender } from "react-dom/server";
   const act = hook.slice(hook.indexOf("const setGroupAlternateAction = "), hook.indexOf("/** Removing a group keeps its systems"));
   ok(act.includes("const next = setGroupAlternate(groups, id, alternate);") && act.includes("if (next === groups) return;") && act.includes("setGroups(next);") && act.includes("reorderSections(normalizeSystemOrder(sections, next));")
     && /\n    setGroupAlternateAction,\n/.test(hook),
-    "#P2b build UI: setGroupAlternateAction updates groups AND reorderSections(normalizeSystemOrder(sections, next)) so stamps + credit pin apply at once; returned from the hook");
+    "#P2b build UI: setGroupAlternateAction updates groups AND reorderSections(normalizeSystemOrder(sections, next)) so the stamps apply at once; returned from the hook");
   const toggle = build.slice(build.indexOf("function AlternateToggle("), build.indexOf("function SystemsRail("));
   ok(toggle.includes("aria-pressed={!alternate}") && toggle.includes("aria-pressed={alternate}") && />\s*In total\s*</.test(toggle) && />\s*Alternate\s*</.test(toggle)
     && toggle.includes('"1px solid " + (on ? "var(--accent)" : "#e4e7ec")') && toggle.includes("background: on ? ACCENT_SOFT") && toggle.includes("color: on ? ACCENT_INK"),
@@ -33286,7 +33195,6 @@ import {
   responseNoteText as p2boNote, responseTaskTitle as p2boTask, alternateScopeLabel as p2boLabel, CLIENT_ACTION_COPY as p2boCopy,
 } from "@/lib/estimate-output/responses";
 import { revisionGroupedSections as p2boRevSecs } from "@/lib/quote-share/photo-response";
-import { withRewardCredit as p2boCredit } from "@/lib/credit-line";
 import { normalizeSystemOrder as p2boNorm } from "@/lib/estimate-groups/groups";
 import { systemSellTotal as p2boSell, fmt as p2boFmt } from "@/app/(app)/estimator/pricing";
 import { outputsP2bCase as p2boCase } from "./outputs-p2b-baseline";
@@ -33326,13 +33234,9 @@ import { renderToStaticMarkup as p2boRender } from "react-dom/server";
   // ---- outputScopes + R1 ----
   ok(p2boScopes(props).map((s) => `${s.num}:${s.id}`).join() === p2boScopes(plain).map((s) => `${s.num}:${s.id}`).join() && !p2boScopes(props).some((s) => s.id.startsWith("a")),
     "#P2b outputs: outputScopes lists In-total systems only, numbered as before");
-  const r1 = (d: typeof props) => Math.round((p2boScopes(d).reduce((n, s) => n + s.price, 0) - (d.t.credit || 0)) * 100) / 100 === Math.round(d.t.grand * 100) / 100;
-  ok(r1(props) && props.t.grand === plain.t.grand && (props.t.alt ?? 0) > 0, "#P2b outputs: R1 — Σ In-total scope prices − credit = grand with alternates present");
+  const r1 = (d: typeof props) => Math.round(p2boScopes(d).reduce((n, s) => n + s.price, 0) * 100) / 100 === Math.round(d.t.grand * 100) / 100;
+  ok(r1(props) && props.t.grand === plain.t.grand && (props.t.alt ?? 0) > 0, "#P2b outputs: R1 — Σ In-total scope prices = grand with alternates present");
   const stamped = p2boNorm([...inTotal(), ...alts()], G);
-  const credited = p2bdProps({ sections: p2boCredit(stamped, 150, 999), groups: G, pdfOptions: opts });
-  const creditOnAlt = p2bdProps({ sections: [...inTotal(), ...alts()].map((s) => (s.id === "a3" ? { ...s, items: [...s.items, ...p2boCredit([{ ...s, items: [] }], 90, 998)[0].items] } : s)), groups: G, pdfOptions: opts });
-  ok(credited.t.credit === 150 && r1(credited) && creditOnAlt.t.credit === 90 && r1(creditOnAlt),
-    "#P2b outputs: R1 holds with a Rewards credit — pinned to the last In-total system, or sitting on an alternate");
 
   // ---- addOptions + POR ----
   ok(p2boOptions(props).map((o) => o.desc).join("|") === "Line 3|Orphan alt option" && p2boOptions(props).map((o) => o.label).join() === "ADD OPTION 1,ADD OPTION 2",
@@ -34278,15 +34182,15 @@ import { commentsBySection as p4pBy, numberComments as p4pNumber } from "@/lib/e
   const b = p4LaborSummary([lsec], rate);
   ok(b.other !== null && b.other.cost === 200 && b.other.sell === 300 && b.loose !== null && b.loose.hours === 4 && b.loose.sell === 320 && b.totals.sell === 620 && b.totals.hours === 4,
     "#P4 final fix: lines of a labor-kind section count (hr lines loose, the rest other) without it.labor");
-  // Credit / option lines out; an alternate system's labor goes to the alternate bucket only.
+  // Option lines out; an alternate system's labor goes to the alternate bucket only.
   const mix = {
     id: "s3", name: "Mix", kind: "materials",
-    items: [L({ labor: true, unit: "lot", cost: 10, price: 20 }), L({ id: 2, labor: true, unit: "lot", cost: 99, price: 99, option: true }), L({ id: 3, labor: true, unit: "lot", qty: 1, price: -50, rewardCredit: true })],
+    items: [L({ labor: true, unit: "lot", cost: 10, price: 20 }), L({ id: 2, labor: true, unit: "lot", cost: 99, price: 99, option: true })],
   } as unknown as P4Section;
   const altSec = { id: "s4", name: "Alt", kind: "materials", alternate: true, items: [L({ labor: true, unit: "lot", cost: 7, price: 14 })] } as unknown as P4Section;
   const c = p4LaborSummary([mix, altSec], rate);
   ok(c.other!.cost === 10 && c.other!.sell === 20 && c.totals.sell === 20 && c.alternate !== null && c.alternate.other!.cost === 7 && c.alternate.other!.sell === 14 && c.alternate.totals.sell === 14,
-    "#P4 final fix: option and reward-credit lines are excluded; alternate labor is its own bucket");
+    "#P4 final fix: option lines are excluded; alternate labor is its own bucket");
   ok(p4LaborSummary([{ id: "x", name: "Mat", kind: "materials", items: [L({ unit: "ea", cost: 5, price: 9 })] } as unknown as P4Section], rate).other === null,
     "#P4 final fix: no labor lines → other is null");
 
@@ -34822,7 +34726,7 @@ import { renderToStaticMarkup as p5fMarkup } from "react-dom/server";
 
   // (2) the refused save stays unsaved
   const acts = rd("src/app/(app)/estimator/actions.ts");
-  const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("await settleRewardCredit(", acts.indexOf("export async function saveQuoteAction")));
+  const fn = acts.slice(acts.indexOf("export async function saveQuoteAction"), acts.indexOf("const negative = negativeLineProblem(", acts.indexOf("export async function saveQuoteAction")));
   // Box goods sale final review: the refusal shape is one helper, shared with the labor refusal.
   const refusal = acts.slice(acts.indexOf("function refusedSave("), acts.indexOf("export async function saveQuoteAction"));
   ok(fn.includes("if (!docSave.ok) return refusedSave(prior, docSave.error);") && /ok: false,\n\s+id: null,\n\s+number: null,/.test(refusal) && !refusal.includes("id: loadedId"),
@@ -35656,7 +35560,7 @@ import { Fragment as P312Fragment, Slice as P312Slice } from "@tiptap/pm/model";
 
   // Resolver: in-total, alternate, missing.
   const alt = { ...byId("s3"), alternate: true } as typeof secs[number];
-  const ctx = { sections: [byId("s1"), byId("s2"), alt] as typeof secs, t: { grand: 0, tax: 0, credit: 0 } as never, quoteId: "Q-312" };
+  const ctx = { sections: [byId("s1"), byId("s2"), alt] as typeof secs, t: { grand: 0, tax: 0 } as never, quoteId: "Q-312" };
   const r = p5rResolve(p5San(doc([total("s1"), total("s3"), total("s9"), total("")]))!, ctx);
   ok(J(r.blocks) === J([
       { t: "systotal", name: "Rigging", price: p5fmt(p5Sell(byId("s1"))), alternate: false },
@@ -35939,7 +35843,7 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
   // + a custom line (s1 line 9): its anchor is the line:9 token and it prints the Custom Device placeholder.
   const secs = base.map((s) => (s.id === "s1" ? { ...s, items: [...s.items, { ...s.items[0], id: 9, sku: "CUSTOM", desc: "Custom bracket", custom: true }] } : s)) as Secs;
   const photos = { "SKU-5": { src: "data:image/png;base64,I5", alt: "Five" }, "GONE-77": { src: "data:image/png;base64,I77", alt: "Gone" } };
-  const ctx = { sections: secs, t: { grand: 4321, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos };
+  const ctx = { sections: secs, t: { grand: 4321, tax: 0 } as never, quoteId: "Q-1", photos };
 
   // (1) Sanitizer.
   ok(J(p5San(doc([IMG("s2", "5", "SKU-5", "left", 40)]))) === J(doc([IMG("s2", "5", "SKU-5", "left", 40)])) &&
@@ -36001,7 +35905,7 @@ import { NodeSelection as I312NodeSel } from "@tiptap/pm/state";
     PB("s1", "4", "SKU-4", "Hidden photo.", { show: false }), PB("s1", "2", "SKU-2", "Allowance words."), PB("s1", "3", "line:3", "Token words."), PB("s1", "77", "GONE-77", "Orphan words."),
     { type: "systemTotal", attrs: { sectionId: "s1" } }, { type: "priceTable" }]))!;
   const oldPhotos = { "SKU-5": { src: "data:image/png;base64,P5R5", alt: "Five" }, "SKU-6": { src: "data:image/png;base64,P5R6", alt: "Six" }, "SKU-1": { src: "data:image/png;base64,P5R1", alt: "One" } };
-  const oldCtx = { sections: base, t: { grand: 4321, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: oldPhotos };
+  const oldCtx = { sections: base, t: { grand: 4321, tax: 0 } as never, quoteId: "Q-1", photos: oldPhotos };
   const nowJson = J({ r: p5rResolve(oldDoc, oldCtx), photo: p5t.docPhotoSkus(oldDoc), prod: p5t.docProductSkus(oldDoc), mfr: p5rMfrSkus(oldDoc, base), gaps: p5Gaps(oldDoc, base) });
   ok(nowJson === OLD_JSON, "#312 images: an old document with photo.show product blocks resolves byte-identically to before (resolvePackageDoc, docPhotoSkus, docProductSkus, manufacturer-fallback skus, gaps)");
   const nowHtml = p5rMarkup(p5rEl(PackageDocView312, { doc: oldDoc, ctx: oldCtx })).replace(/<style>[\s\S]*?<\/style>/, "");
@@ -38071,7 +37975,7 @@ import { canonicalBonusSections as bnCanon } from "@/lib/estimate-bonus/canonica
   const bnSaveStart = bnActs.indexOf("export async function saveQuoteAction(");
   const bnSaveBody = bnActs.slice(bnSaveStart, bnActs.indexOf("\n}\n", bnSaveStart));
   const bnCanonAt = bnSaveBody.indexOf("deriveEstimatorSections("); // #368: the save canonicalizes through the shared helper (derive.ts)
-  ok(bnSaveStart >= 0 && bnCanonAt >= 0 && bnCanonAt < bnSaveBody.indexOf("settleRewardCredit("), "#bonus source pin: saveQuoteAction canonicalizes bonus lines before settleRewardCredit");
+  ok(bnSaveStart >= 0 && bnCanonAt >= 0 && bnCanonAt < bnSaveBody.indexOf("negativeLineProblem(sellSanitized)") && bnSaveBody.includes("if (negative) return refusedSave(prior, negative);") && bnSaveBody.indexOf("negativeLineProblem(sellSanitized)") < bnSaveBody.indexOf("reconcileEstimatorValue("), "#bonus source pin: saveQuoteAction canonicalizes bonus lines, then refuses a negative line, before the value is reconciled");
   const bnPlaceStart = bnActs.indexOf("async function placeSystemInEstimate(");
   const bnPlaceBody = bnActs.slice(bnPlaceStart, bnActs.indexOf("\n}\n", bnPlaceStart));
   ok(bnPlaceStart >= 0 && (bnPlaceBody.match(/stripBonusLines\(withoutGroupMeta\(placed\)\)/g) || []).length === 2, "#bonus source pin: placeSystemInEstimate strips bonus lines from the placed system in both the existing and the new target branch");
@@ -39423,7 +39327,6 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
       line(6, { sku: "SA-P3R", desc: "Amp rack", fixture: true, rackId: "SA-P3R", qty: 1, components: [comp("P3-STALE", "fixture", 1)] }),
       line(7, { sku: "asm:SA-P3F", desc: "Grid wash", qty: 2 }),
       line(8, { sku: "SA-P3F", desc: "Bare fixture", fixture: true, qty: 1 }),
-      line(9, { rewardCredit: true, qty: 1, price: -100 }),
     ] },
     { id: "b", name: "Labor", kind: "labor", mfr: "", freightPct: 0, items: [line(10)] },
   ];
@@ -39841,7 +39744,7 @@ import { bomPdfFileName as bq1File, bomPdfPath as bq1Path } from "@/lib/estimate
 import { DEFAULT_PDF_OPTIONS as s364Defaults, normalizePdfOptions as s364Norm, PDF_TOGGLE_KEYS as s364Keys } from "@/lib/quote-pdf/pdf-options";
 import { bomViewProps as s364Bom } from "@/app/(app)/estimator/quote-document-view";
 import { qd293Props as s364Props, renderQuoteDocument293 as s364Render } from "./qd293-cases";
-import { qd364BomCases as s364Cases } from "./qd364-cases";
+import { qd364BomCases as s364Cases, qd364Baseline as s364Baseline } from "./qd364-cases";
 {
   const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const SW = ["bomLinePrices", "bomMaterials", "bomLabor", "bomFreight"] as const;
@@ -39867,7 +39770,7 @@ import { qd364BomCases as s364Cases } from "./qd364-cases";
     "#364 non-BOM document props: the saved switches ride along but never touch pdfPrices or the show flags (only bomViewProps sets them)");
 
   // ---- render: all on (or untouched) = the pre-change BOM view, byte for byte ----
-  const base = JSON.parse(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")) as Record<string, string>;
+  const base = s364Baseline(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")); // the stored credit case reads as the tax case (see qd364Baseline)
   const untouched = s364Cases();
   const allOn = s364Cases({ bomLinePrices: true, bomMaterials: true, bomLabor: true, bomFreight: true });
   ok(Object.keys(base).length === 5 && Object.keys(base).every((k) => s364Render(untouched[k]) === base[k] && s364Render(allOn[k]) === base[k]),
@@ -39878,16 +39781,16 @@ import { qd364BomCases as s364Cases } from "./qd364-cases";
     "#364 render: the estimate PDF / online Narrative document ignores the switches (all off = the pre-change print and web render)");
 
   // ---- render: each switch off removes its label / amount; the rest stays ----
-  const r = (o: Record<string, unknown>, k = "bomRewards") => s364Render(s364Cases(o)[k]);
-  const b = base.bomRewards;
+  const r = (o: Record<string, unknown>, k = "bomTax") => s364Render(s364Cases(o)[k]);
+  const b = base.bomTax;
   const lineCol = "grid-template-columns:1fr 70px 104px";
   const linePrice = '<span style="font-family:var(--font-mono);text-align:right;font-weight:600">';
   const totalsRow = (label: string, amt: string) => "<span>" + label + '</span><span style="font-family:var(--font-mono)">' + amt + "</span>";
-  const always = (h: string) => h.includes(totalsRow("Sales tax (5%)", "$12.50")) && h.includes("Credit applied") && h.includes(">Total</span>") && h.includes("$340.50") &&
+  const always = (h: string) => h.includes(totalsRow("Sales tax (5%)", "$12.50")) && !h.includes("Credit applied") && !h.includes("est-reward-credit") && h.includes(">Total</span>") && h.includes("$365.50") &&
     h.includes(">$153.00</span>") && h.includes(">$100.00</span>");
   ok(b.includes(lineCol) && b.includes(linePrice) && b.includes(totalsRow("Materials", "$300.00")) && b.includes(totalsRow("Labor — installation &amp; commissioning", "$50.00")) &&
      b.includes(totalsRow("Freight &amp; delivery", "$3.00")) && b.includes("<span>Freight &amp; delivery</span><span></span>") && b.includes("Materials, installation &amp; freight included") && always(b),
-    "#364 render (fixture sanity): the baseline carries line prices, Materials / Labor / Freight rows, a system freight row, the inclusions line, tax, credit, perks and Total");
+    "#364 render (fixture sanity): the baseline carries line prices, Materials / Labor / Freight rows, a system freight row, the inclusions line, tax and Total (no credit line)");
   const lp = r({ bomLinePrices: false });
   ok(!lp.includes(lineCol) && !lp.includes(linePrice) && lp.includes("grid-template-columns:1fr 70px") && lp.includes(totalsRow("Materials", "$300.00")) && always(lp),
     "#364 render: Line prices off drops every line's (and option row's) price column — system prices, totals and the Total stay");
@@ -39908,7 +39811,7 @@ import { qd364BomCases as s364Cases } from "./qd364-cases";
   const none = r({ bomLinePrices: false, bomMaterials: false, bomLabor: false, bomFreight: false });
   ok(!none.includes(linePrice) && !none.includes("<span>Materials</span>") && !none.includes("Labor — installation") && !none.includes("Freight &amp; delivery") && !none.includes(" included</div>") &&
      none.includes("Line 1") && always(none),
-    "#364 render: everything off — parts with system prices, tax, credit and the Total only");
+    "#364 render: everything off — parts with system prices, tax and the Total only");
 
   // ---- source pins ----
   const qd = rd("src/app/(app)/estimator/quote-document.tsx");
@@ -40005,7 +39908,7 @@ import type { SpecItem as B365Item } from "@/app/(app)/estimator/types";
     "#365 render: the BOM view of a sectioned / lean quote (always itemized with descriptions) carries models");
 
   // ---- render: byte-for-byte where nothing should change ----
-  const base364 = JSON.parse(rd("docs/superpowers/fixtures/364-bom-view-baseline.json")) as Record<string, string>;
+  const base364 = s364Baseline(rd("docs/superpowers/fixtures/364-bom-view-baseline.json"));
   ok(Object.keys(base364).length === 5 && Object.keys(base364).every((k) => b365Render(cases[k]) === base364[k] && b365Render({ ...cases[k], bomModelParts: {} }) === base364[k]),
     "#365 render: the BOM view with no model read (absent — a failed read — or empty) is the #364 baseline byte for byte (5 cases)");
   const p5 = JSON.parse(rd("docs/superpowers/fixtures/p5-quote-document-no-document.json")) as Record<string, string>;
@@ -40105,9 +40008,9 @@ const pd366Asm = (): PD366Item => pd366Line({ id: 9, sku: "fa-1", cost: 2600, pr
   const skip = pd366Apply([sec([
     line({ id: 2, sku: "CUSTOM" }), line({ id: 3, vendorQuoteId: "vq1" }), line({ id: 4, allowance: true }),
     line({ id: 5, labor: true }), line({ id: 6, bonus: "package" }), line({ id: 7, curtain: true }), line({ id: 8, cost: 0 }),
-    line({ id: 11, laborOverhead: "shop" }), line({ id: 12, laborTravel: "hotel" }), line({ id: 13, rewardCredit: true }), line({ id: 14, sku: "CRT-3" }),
+    line({ id: 11, laborOverhead: "shop" }), line({ id: 12, laborTravel: "hotel" }), line({ id: 14, sku: "CRT-3" }),
   ])], { ...d, CUSTOM: { pct: 50, note: "", by: "u1", at: 1 } });
-  ok(skip[0].items.every((x) => !("catalogCost" in x) && (x.cost === 2000 || x.cost === 0)), "#366 core: placeholder, vendor-quote, allowance, labor/overhead/travel, bonus, curtain, Rewards and zero-cost lines are never discounted");
+  ok(skip[0].items.every((x) => !("catalogCost" in x) && (x.cost === 2000 || x.cost === 0)), "#366 core: placeholder, vendor-quote, allowance, labor/overhead/travel, bonus, curtain and zero-cost lines are never discounted");
 
   const asm = pd366Asm();
   const [as] = pd366Apply([sec([asm])], d);
@@ -41025,7 +40928,7 @@ import type { SpecItem as E368Item, SpecSection as E368Section } from "@/app/(ap
     ["placeholder SKU", { sku: "CUSTOM" }], ["blank SKU", { sku: "" }], ["assembly", { components: [{ sku: "ETC:CS40", label: "x", role: "fixture", qty: 1, unit: "ea", cost: 100, price: 150 }] } as Partial<E368Item>],
     ["fixture", { fixture: true }], ["rack", { rackId: "rk1" }], ["track", { track: {} as never }], ["curtain", { curtain: true }], ["curtain's track", { curtainTrackKey: "ct-1" }],
     ["labor", { labor: true }], ["labor overhead", { laborOverhead: "shop" }], ["labor travel", { laborTravel: "mileage" }], ["price on request", { por: true }],
-    ["cost 0", { cost: 0 }], ["Labor-category part", { sku: "LAB:INST" }], ["unknown SKU", { sku: "NOPE:1" }], ["catalog cost 0", { sku: "ETC:ZERO" }], ["Rewards credit", { rewardCredit: true, cost: 0, price: -50 }],
+    ["cost 0", { cost: 0 }], ["Labor-category part", { sku: "LAB:INST" }], ["unknown SKU", { sku: "NOPE:1" }], ["catalog cost 0", { sku: "ETC:ZERO" }],
   ];
   for (const [label, o] of excluded) {
     const s0 = [sec([line(o)])];

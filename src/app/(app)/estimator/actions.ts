@@ -52,14 +52,7 @@ import { sameWholeMarkup } from "@/lib/markup";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
-import { reconcileEstimatorValue, sanitizeSystemSell, totals } from "./pricing";
-import {
-  quoteRewardCredit,
-  rewardCreditOf,
-  sanitizeRewardCredit,
-  withoutRewardCredit,
-  withRewardCredit,
-} from "@/lib/credit-line";
+import { negativeLineProblem, reconcileEstimatorValue, sanitizeSystemSell, totals } from "./pricing";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { markQuotePdfStale, scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { limitToLivePatch, liveSaveRefusal } from "@/lib/estimate-live-save/rules";
@@ -244,9 +237,6 @@ export type SaveResult = {
   /** #284 — the next-step view after this save (a first save is what makes
    *  the control appear; an edit can clear an approval). */
   next?: QuoteNextStepView | null;
-  /** #282 phase 2 — the Rewards credit actually stored (after the server's
-   *  clamp), so the builder can match its credit line to it. */
-  rewardCredit?: number;
   /** #355 review M2 — this save's status move reopened a won estimate at the
    *  version that won; the open document holds the edits, so reload. */
   reopenedAtWon?: boolean;
@@ -494,8 +484,7 @@ export async function saveQuoteAction(
   // #301: the output fields (discipline, client goals, cover text) are cleaned the same way.
   const sellSanitizedRaw = Array.isArray(payload.sections) ? payload.sections.map(sanitizeSystemSell).map(withSanitizedKeyProducts).map(withSanitizedOutputFields) : payload.sections;
   // Phase 2a: the groups are sanitised (an older caller without `groups` keeps
-  // the stored ones) and the sections normalised BEFORE the Rewards credit is
-  // settled, so the credit always lands on the true last system. built/groupId
+  // the stored ones) and the sections normalised. built/groupId
   // are hardened (built only when exactly true, groupId only when a string).
   const groups = sanitizeGroups(payload.groups ?? (prior?.spec as { groups?: unknown } | null | undefined)?.groups);
   // #375: removal flags settle here — an open estimate takes the posted ones, a sent / won / lost one keeps its stored ones.
@@ -514,9 +503,8 @@ export async function saveQuoteAction(
   );
   // Estimator bonuses: the server re-derives the 5% package / 2% estimator
   // lines from the sanitized sections, so a stale or hand-crafted client can
-  // never save a wrong bonus. Runs BEFORE the Rewards credit is settled and
-  // the value is reconciled (the credit line is outside the bonus base, and
-  // the stored value must include the bonus). source = the source this save
+  // never save a wrong bonus. Runs BEFORE the value is reconciled (the stored
+  // value must include the bonus). source = the source this save
   // persists; status = the prior status (status changes only travel through
   // setStatus, never this write), "draft" for a brand-new quote.
   // #368: both steps (discounts re-applied, then the bonus lines) are deriveEstimatorSections — the one function
@@ -524,24 +512,10 @@ export async function saveQuoteAction(
   const sellSanitized = Array.isArray(sellNormalizedRaw)
     ? deriveEstimatorSections({ source: savedSource, quoteType: prior?.quoteType, status: prior ? prior.status : "draft" }, sellNormalizedRaw, discounts, await loadBonusRates())
     : sellNormalizedRaw;
-  // A negative price only on a stored credit line, never more than the quote
-  // already carried — refused, not stored, when any other line carries one.
-  const credit = settleRewardCredit(sellSanitized, prior, live && prior ? prior.customerId || null : payload.customerId || null);
-  if (!credit.ok) {
-    return {
-      ok: false,
-      id: loadedId,
-      number: prior ? displayQuoteNumber(prior) : null,
-      revNum: documentRevStamp(prior ?? {}).revNum,
-      updatedAt: prior?.updatedAt ?? Date.now(),
-      review: prior?.review ?? null,
-      status: prior?.status ?? null,
-      pipelineId: prior?.pipelineId ?? null,
-      stage: prior?.stage ?? null,
-      error: credit.error,
-    };
-  }
-  const postedSections = credit.sections;
+  // A negative price or quantity on any line refuses the save — nothing is stored.
+  const negative = negativeLineProblem(sellSanitized);
+  if (negative) return refusedSave(prior, negative);
+  const postedSections = sellSanitized;
   const { sections: savedSections, anyPor, anyConfirm } = isPortalCatalog
     ? clearPricedPor(postedSections)
     : { sections: postedSections, anyPor: false, anyConfirm: false };
@@ -803,7 +777,6 @@ export async function saveQuoteAction(
     // Read back from the store: the key must match what the next check will read.
     liveKey: liveKeyOut ?? (q?.id ? liveKey((await get(q.id)) ?? q) : undefined),
     next: q ? await quoteNextStepFor(q, user) : null,
-    rewardCredit: credit.credit,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
     ...(reopenedAtWon ? { reopenedAtWon: true } : {}),
@@ -811,34 +784,7 @@ export async function saveQuoteAction(
   };
 }
 
-/**
- * The credit a save may store. The Rewards program is gone, so nothing applies
- * a new credit; a quote saved while it existed keeps the one it has:
- * - a negative price/qty on any line but a stored credit line refuses the save;
- * - a won or lost quote keeps exactly the credit it had;
- * - otherwise the credit can't grow past what this quote already carried for
- *   the same customer, or past the quote's pre-credit total.
- */
-function settleRewardCredit(
-  sections: SpecSection[],
-  prior: Quote | null,
-  customerId: string | null
-): { ok: true; sections: SpecSection[]; credit: number } | { ok: false; error: string } {
-  if (!Array.isArray(sections)) return { ok: true, sections, credit: 0 };
-  if (prior && (prior.status === "won" || prior.status === "lost")) {
-    // Locked: re-home the stored amount (the negative-line check still runs).
-    const locked = quoteRewardCredit(prior);
-    const check = sanitizeRewardCredit(sections, 0);
-    if (!check.ok) return check;
-    const maxId = sections.reduce((m, s) => Math.max(m, ...(s?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
-    const out = withRewardCredit(check.sections, locked, maxId + 1);
-    return { ok: true, sections: out, credit: rewardCreditOf(out) };
-  }
-  const had = prior && customerId && (prior.customerId || null) === customerId ? quoteRewardCredit(prior) : 0;
-  return sanitizeRewardCredit(sections, Math.min(had, Math.max(0, totals(withoutRewardCredit(sections), 0).grand)));
-}
-
-/** The stored change key, re-read after a status move (a Lost move can clear the Rewards credit from the spec). */
+/** The stored change key, re-read after a status move. */
 export async function currentLiveKeyAction(id: string): Promise<string | null> {
   await requireUser();
   const q = id ? await get(id) : null;
@@ -923,10 +869,8 @@ export async function moveSystemToEstimateAction(
 ): Promise<MoveSystemResult> {
   const user = await requireUser();
   // #267: a moved system keeps its own price — sanitized like a save.
-  // #282 phase 2: the Rewards credit belongs to the source quote's customer —
-  // it never travels with a moved system.
   // #293: blocks travel as-is (ids are kept) — sanitized like a save.
-  const [movedRaw] = withoutRewardCredit([withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() })]);
+  const movedRaw = withSanitizedKeyProducts({ ...sanitizeSystemSell(section), id: "sys" + Date.now() });
   // #301: a moved system keeps its discipline, goals and cover paragraph — cleaned like a save.
   // Phase 2b: a client-posted section may carry the derived `alternate` stamp / group id —
   // stripped ONCE here, before the value is computed, so the new estimate's stored value counts it.
@@ -1012,19 +956,15 @@ async function placeSystemInEstimate(
     const existingDoc = sanitizePackageDoc(existingSpec?.document);
     // Phase 2a: the target keeps its own (sanitised) groups; the moved system lands ungrouped.
     const existingGroups = sanitizeGroups(existingSpec?.groups);
-    // #282 phase 2: the target's own Rewards credit stays on ITS last system —
-    // re-pinned after the order is normalised, so it really is the last one.
     // #357: item ids are unique per system only — an incoming line whose id the target already uses anywhere is
     // re-minted above the target's ids and its package document's floor (computeNid's), its star following.
     const incoming = reIdIncomingSection(stripBonusLines(withoutGroupMeta(placed)), existingSpec?.sections || [], docIdFloor(existingDoc));
-    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), ...withoutRewardCredit([incoming])], existingGroups);
+    const appendedRaw = normalizeSystemOrder([...(existingSpec?.sections || []), incoming], existingGroups);
     // Estimator bonuses: re-derive on the merged list with the TARGET's own
     // source / quoteType / status (a won or portal target is left untouched).
-    // Before the credit re-pin below, so value/margin include the bonus.
+    // Before the totals below, so value/margin include the bonus.
     // #366: after the target's project discounts are applied (the bonus lines read normal cost).
-    const appended = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, applyProjectDiscounts(appendedRaw, targetDiscounts), await loadBonusRates());
-    const maxItemId = appended.reduce((m, sec) => Math.max(m, ...(sec?.items || []).map((it) => (typeof it?.id === "number" ? it.id : 0))), 0);
-    const mergedSections = withRewardCredit(appended, rewardCreditOf(appended), maxItemId + 1);
+    const mergedSections = canonicalBonusSections({ source: existing.source, quoteType: existing.quoteType, status: existing.status }, applyProjectDiscounts(appendedRaw, targetDiscounts), await loadBonusRates());
     const t = totals(mergedSections, 0);
     // The browser supplies these rows: stamp addedAt and drop any company that isn't a live vendor company BEFORE storing / adding parties.
     const priorTargetVq = vendorQuoteRows(existing.vendorQuotes);
@@ -1059,7 +999,7 @@ async function placeSystemInEstimate(
   }
 
   // Estimator bonuses: the new draft estimate gets its bonus lines at birth.
-  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, withoutRewardCredit([stripBonusLines(withoutGroupMeta(placed))]), await loadBonusRates());
+  const newSections = canonicalBonusSections({ source: "estimator", status: "draft" }, [stripBonusLines(withoutGroupMeta(placed))], await loadBonusRates());
   // #348 slice 3: the lead comes from the STORED source quote (never from the client); an unsaved or missing source
   // simply has none. The id only says which stored quote to read.
   // A read failure only skips the carry; a deleted lead isn't carried.

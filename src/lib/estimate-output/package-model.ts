@@ -78,7 +78,9 @@ export type PackageViewProps = {
   narrativeHref: string;
   bomHref: string;
   scopes: PackageScopeView[];
-  totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
+  /** `creditLabel` / `creditAmount` (always null) and `rewardsLine` (always "") are vestigial — Rewards was removed;
+   *  the keys stay so the stored JSON baselines stay byte-identical. Nothing prints them. */
+  totals: { creditLabel: null; creditAmount: null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
   options: Array<{ label: string; desc: string; reason: string; price: string }>;
   /** Estimator Phase 2b — the Alternates card (mirrors the cover's list);
    *  present only when the revision has printed alternates. */
@@ -170,8 +172,8 @@ export function packageViewModel(i: PackageViewInput): PackageViewProps {
       };
     })),
     totals: {
-      creditLabel: t.creditLabel,
-      creditAmount: t.credit > 0 ? "−" + fmt(t.credit) : null,
+      creditLabel: null,
+      creditAmount: null,
       totalLabel: t.totalLabel,
       total: fmt(t.total),
       rewardsLine: t.rewardsLine,

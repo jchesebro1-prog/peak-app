@@ -175,7 +175,6 @@ export async function liveSavePureChecks(ok: Ok) {
   ok(/if \(q && !live\) \{\s*const decision = resolveSaveStatusChange/.test(saveSrc), "action: a live save never acts on status");
   ok(saveSrc.includes("lastSavedBy"), "action: a save stamps who saved");
   ok(saveSrc.includes("{ ...writePatch, vendorQuotes: storedVendorQuotes, lastSavedBy"), "action: vendorQuotes and lastSavedBy are re-added after the live patch is limited");
-  ok(/live && prior \? prior\.customerId \|\| null : payload\.customerId \|\| null\)/.test(saveSrc), "action: a stored credit reads the stored customer on a live save");
   ok(/live && prior\s*\? await resolveTier\(prior\.customerId/.test(saveSrc), "action: a live save's tier reads the stored customer");
   ok(/live && loadedId \? \(limitToLivePatch\(patch\)/.test(saveSrc), "action: the patch is limited on live && loadedId");
   ok(/if \(live && loadedId && !prior\) return refusedSave\(null, LIVE_MISSING\)/.test(saveSrc), "action: a live save on a missing quote is refused with a reason");
@@ -316,7 +315,7 @@ export async function liveSavePureChecks(ok: Ok) {
   const leaveSrc = hookSrc.slice(hookSrc.indexOf("const live = useLiveSave("), hookSrc.indexOf("const saveNow = live.saveManual"));
   ok(/beforeLeave: \(\) => \{\s*(\/\/[^\n]*\n\s*)*packageDocFlushRef\.current\?\.\(\);/.test(leaveSrc) && /editProbeRef\.current\.packageDoc/.test(leaveSrc) && /packageDocRef\.current/.test(leaveSrc), "M5: leaving flushes the editor and compares what it held against the last edit seen");
   // Pins weakened by Task 5
-  ok((hookSrc.match(/\? setSectionsState : setSections/g) || []).length === 1, "pin: exactly one raw-writer alias outside the setSectionsState( count (a live save's Rewards clamp)");
+  ok((hookSrc.match(/\? setSectionsState : setSections/g) || []).length === 0, "pin: no raw-writer alias outside the setSectionsState( count (the Rewards clamp is gone)");
 }
 
 /** #376: a customer opening the link while the render owed by a send over a stale file runs is told it's being prepared. */

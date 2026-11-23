@@ -158,11 +158,6 @@ export type SpecItem = {
    *  line reopens its modal. One lot; priced parts ride in `components`, as a track
    *  line's do. Built by rigging-bom.ts. */
   rigging?: RiggingConfig;
-  /** #282 phase 2: the quote's Rewards credit — one line on the LAST system,
-   *  qty 1, cost 0, negative `price` (the only line a negative price is
-   *  allowed on). Every system-level rule skips it; `totals()` subtracts it
-   *  from the grand total. See src/lib/rewards/credit-line.ts. */
-  rewardCredit?: boolean;
   /** #366 — the line's normal (undiscounted) cost while a project discount applies; absent otherwise.
    *  On an assembly line: its cost before its discounted parts. Written only by applyProjectDiscounts
    *  (src/lib/project-discounts/rules.ts); freight, the 5% package bonus and the tier re-price read it. */
@@ -701,8 +696,8 @@ export type EstimatorProps = {
   assumptionLibrary: string[];
   /** #368 — what the last Revise re-priced to today's catalog (null when nothing / never). Absent = null. */
   repricedOnRevise?: RepricedOnRevise | null;
-  /** #282 phase 2 — may this user apply Rewards credit (`create`)? */
-  canApplyCredit: boolean;
+  /** The user has `create` (may edit the estimate's companies and bid). */
+  canCreate: boolean;
   /** #287 task B — the signed-in user's name (the one Lead estimator they may always pick). */
   viewerName: string;
   /** #287 task B — may this user make someone else the lead estimator (`approve`)? */

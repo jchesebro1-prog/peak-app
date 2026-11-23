@@ -216,7 +216,7 @@ function packageDocPhotoChecks(ok: Ok) {
     ({ type: "productBlock", attrs: { sectionId: "s2", lineKey, sku, photo }, content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
   const IMG = (lineKey: string, sku: string, align = "left") => ({ type: "productImage", attrs: { sectionId: "s2", lineKey, sku, align, width: 34 } });
   const doc = { type: "doc", version: 1, content: [PB("5", "SKU-5", "Five words."), { type: "paragraph", content: [{ type: "text", text: "After five." }] }, IMG("6", "SKU-6")] } as never;
-  const ctx = { sections, t: { grand: 1, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: PHOTOS, models: { "SKU-5": "Jupiter 4" } };
+  const ctx = { sections, t: { grand: 1, tax: 0 } as never, quoteId: "Q-1", photos: PHOTOS, models: { "SKU-5": "Jupiter 4" } };
   const r = resolvePackageDoc(doc, ctx);
   const prod = r.blocks[0] as { t: string; model?: string }, img = r.blocks[2] as { t: string; model?: string };
   ok(prod.t === "product" && prod.model === "Jupiter 4" && img.t === "image" && img.model === "PN-6", "photo wrap (pkg doc): resolved product blocks and images carry their tag text");
@@ -262,7 +262,7 @@ function packageDocFixRound1Checks(ok: Ok) {
   );
   const a5 = { sectionId: "s2", lineKey: "5", sku: "SKU-5" };
   const sdoc = { type: "doc", version: 1, content: [{ type: "productImage", attrs: { ...a5, align: "right", width: 34 } }] } as never;
-  const sctx = { sections: stale, t: { grand: 1, tax: 0, credit: 0 } as never, quoteId: "Q-1", photos: PHOTOS };
+  const sctx = { sections: stale, t: { grand: 1, tax: 0 } as never, quoteId: "Q-1", photos: PHOTOS };
   const noModels = resolvePackageDoc(sdoc, sctx).blocks[0] as { t: string; model?: string };
   const withModels = resolvePackageDoc(sdoc, { ...sctx, models: { "SKU-5": "Jupiter 4" } }).blocks[0] as { t: string; model?: string };
   ok(noModels.t === "image" && !("model" in noModels) && withModels.model === "Jupiter 4" && photoModelOf(a5, sctx) === "",

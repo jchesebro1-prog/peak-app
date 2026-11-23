@@ -308,7 +308,7 @@ export async function bidSendChecks(ok: Ok) {
     ok(packageBanner(sup, "/x", true)?.text === "This bid is closed." && PACKAGE_COPY.bidClosed === "This bid is closed.", "packageBanner: bidClosed wins");
     ok(packageBanner({ kind: "ok", rev: { rev: 1 }, closed: false, won: false } as never, null, false) === null, "packageBanner: open → null");
     const r = { kind: "accept" as const, sectionNames: ["Rigging", "Curtains"], total: 12500, name: "Pat", email: "pat@x.test", message: "", sectionIds: [] as string[] };
-    ok(responseNoteText(r, "EST-1042", 2, "Miron Construction").startsWith(`Miron Construction (bidder) selected scopes on EST-1042 Rev 2 (bid link): Rigging, Curtains — ${fmt(12500)} before any Rewards credit.`), "responses: bidder accept note");
+    ok(responseNoteText(r, "EST-1042", 2, "Miron Construction").startsWith(`Miron Construction (bidder) selected scopes on EST-1042 Rev 2 (bid link): Rigging, Curtains — ${fmt(12500)}.`), "responses: bidder accept note");
     ok(responseNoteText({ ...r, kind: "question", message: "Hi" }, "EST-1042", 2, "Miron Construction").startsWith("Question from Miron Construction (bidder) on EST-1042 Rev 2 (bid link)."), "responses: bidder question note");
     ok(responseTaskTitle(r, "EST-1042", 2, "Miron Construction") === `Miron Construction accepted EST-1042 Rev 2 — Rigging, Curtains (${fmt(12500)})`, "responses: bidder accept task title");
     ok(responseTaskTitle({ ...r, kind: "question" }, "EST-1042", 2, "Miron Construction") === "Bidder question — EST-1042 · Miron Construction", "responses: bidder question task title");
@@ -482,7 +482,7 @@ export async function bidDbChecks(ok: Ok) {
     ok(cov(dAw).project.owner === "Bid Owner" && cov(dAw).project.customer === "Bid GC One" && !("owner" in cov(dOwn).project), "cover: an addressed estimate shows the Owner row; an owner-addressed one is unchanged");
     const pkg = (d: typeof dAw) => packageViewModel({ doc: d, photos: {}, catalog: new Map(), frozen: { coverSummary: "", notIncluded: "" }, state: { kind: "ok", rev: { rev: 1 } as never, closed: false, won: false }, headerLine: "", currentHref: null, view: "narrative", base: "/x", letterheadSrc: "/l.png" });
     ok(pkg(dAw).owner === "Bid Owner" && !("owner" in pkg(dOwn)), "package page: an addressed estimate carries the owner; an owner-addressed one is unchanged");
-    ok(readFileSync(join(process.cwd(), "src/app/share/quote/[id]/[token]/package-page.tsx"), "utf8").includes("hit.bidder || hit.rev.docFields?.awardedPartyId ? null : creditNoteText("), "rewards: the package page drops the credit note on a bidder / awarded-addressed copy");
+    ok(readFileSync(join(process.cwd(), "src/app/share/quote/[id]/[token]/package-page.tsx"), "utf8").includes("creditNote") === false, "rewards: the package page carries no credit note at all (Rewards credit removed)");
 
     // a revision cut while awarded
     const revAw = await addQuoteRevision(q, { by: "Test", reason: "sent", note: "awarded" });

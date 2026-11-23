@@ -7,7 +7,7 @@ import { lineModel } from "@/lib/catalog-rename/sku";
 /**
  * #301 slice B (spec §2, R6) — the package page's parts list: Qty ·
  * Manufacturer · Model · Description from the customer's own rows
- * (customerLines — options, the Rewards credit and the overhead lines never
+ * (customerLines — options and the overhead lines never
  * appear). Manufacturer / Model come from the line first (frozen with the
  * revision), then the catalog part by sku, else blank. Labor lines are
  * dropped, except that a labor system is its one document row. PackageBomRow

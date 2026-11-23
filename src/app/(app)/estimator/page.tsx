@@ -495,7 +495,7 @@ export default async function EstimatorPage({
       // #368: what the last Revise re-priced (the Build banner shows it while the estimate is a draft).
       repricedOnRevise={repricedOnReviseOf(q?.repricedOnRevise)}
       // Spec records design §6: the Spec select's options, as plain strings.
-      canApplyCredit={can("create", user.roles)}
+      canCreate={can("create", user.roles)}
       // #287 task B: the Lead estimator select — the viewer may always take
       // the quote; only an approver may hand it to someone else.
       viewerName={user.name}

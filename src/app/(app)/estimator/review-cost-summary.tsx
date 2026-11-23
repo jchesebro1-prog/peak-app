@@ -49,22 +49,6 @@ export function ReviewCostSummary({ sections, totals }: { sections: SpecSection[
             <td style={num}>{fmt(totals.rev + totals.fr)}</td>
             <td style={num}>{(totals.markup * 100).toFixed(1)}%</td>
           </tr>
-          {(totals.credit || 0) > 0 && (
-            <>
-              <tr>
-                <td style={cell}>Rewards credit</td>
-                <td style={num} />
-                <td style={num}>−{fmt(totals.credit || 0)}</td>
-                <td style={num} />
-              </tr>
-              <tr style={{ fontWeight: 600 }}>
-                <td style={cell}>Customer total</td>
-                <td style={num} />
-                <td style={num}>{fmt(totals.grand)}</td>
-                <td style={num} />
-              </tr>
-            </>
-          )}
           {alternates.length > 0 && (
             <>
               <tr>

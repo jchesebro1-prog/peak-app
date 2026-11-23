@@ -21,7 +21,6 @@ import { MAX_KEY_PRODUCTS, isLineToken, remapKeyProducts, withKeyProducts } from
 import { newLaborGroupId, pruneLaborGroups } from "@/app/(app)/estimator/labor-group";
 import { linkCurtainTracks, newCurtainTrackKey } from "@/lib/curtain-cut-sheets/track-link";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { isRewardCreditItem } from "@/lib/credit-line";
 
 /** One line of one system. Ids repeat across systems, so both parts are needed. */
 export type LineRef = { sectionId: string; id: number };
@@ -64,7 +63,7 @@ export type LineMoveOpts = {
 };
 
 export function isMovableLine(it: SpecItem): boolean {
-  return !isBonusItem(it) && !isRewardCreditItem(it);
+  return !isBonusItem(it);
 }
 
 const keyOf = (sectionId: string, id: number) => lineRefKey({ sectionId, id });

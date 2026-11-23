@@ -1049,3 +1049,46 @@ Before this ships (collected from the four stages):
    Vercel variables listed in `DEPLOY.md` §5; remove the Gmail / Calendar / Drive scopes and the
    `/api/gmail/callback` redirect in Google Cloud.
 5. Open the app in a browser. Nothing in the four stages was looked at in one.
+
+## Rewards credit removed (2026-11-23)
+
+Jeff's decision: the Customer Rewards credit was never used, so the last of it is gone. Stage 1
+(above) had kept stored credits readable; that no longer applies.
+
+- **Deleted:** `src/lib/credit-line.ts` and every path that read, printed, carried, netted or skipped
+  a credit — the Estimator hook, save / move actions, `totals()` (`QuoteTotals.credit`), the
+  "Credit applied" rows (estimate document, Build sidebar, Review cost summary, cover, package page,
+  package document price table), the scope picker's credit note, the approval fingerprint's gross
+  value, the recall / reopen credit restore in the quote store, and the credit skips in reports,
+  analytics, BOM, cut sheets, copy / move, line move, tier re-price and the CSVs.
+  `SpecItem.rewardCredit` is gone from the type. Gross and net value are now the same number.
+- **Read rule (one place):** `hydrateDoc` in `src/lib/markup/doc-basis.ts` — the doc store's read
+  hook — drops any item flagged `rewardCredit: true` from a quote's live `spec.sections`
+  (`dropStoredCreditLines`). Read-time only: nothing is written for it, and `revisions` are left
+  exactly as stored. The service-subdoc `rewardCredit` number is ignored (hub rows only).
+- **Kept:** the server refuses a save with a negative price or quantity on any line
+  (`NEGATIVE_LINE_ERROR`, `negativeLineProblem` in `src/app/(app)/estimator/pricing.ts`, called by
+  `saveQuoteAction`). It has no exception now, and it returns the same no-id refusal as the other
+  save refusals (`refusedSave`).
+- **Other changes that follow from it:** the client-response note ends "— $48,250.00." (it used to
+  add "before any Rewards credit."); the Quotes hub notice is `statusNotice` only
+  (`data-testid="status-notice"`); `canApplyCredit` is renamed `canCreate`.
+- **Still there on purpose:** `creditLabel: null` / `creditAmount: null` stay as always-null keys in
+  the cover and package totals models (like `rewardsLine: ""`), so the stored JSON baseline
+  `p2b-outputs-no-alternates.json` stays byte-identical. Nothing prints them.
+- **Baselines:** no file under `docs/superpowers/fixtures/` was edited.
+  `364-bom-view-baseline.json` still holds its `bomRewards` entry, rendered with a $25 credit. The
+  harness reads it as the `bomTax` case — the same render without the credit row and with the Total
+  $25 higher (`qd364Baseline` in `scripts/qd364-cases.ts`). Re-running
+  `npx tsx scripts/qd364-baseline.ts` would write that entry as `bomTax` directly; the other four
+  entries were checked to come out byte-identical.
+  `docs/markup/parity-baseline.json` still lists `"credit": 0` in its totals; the parity check skips
+  that one key (after confirming it is 0).
+- **Tests (2026-11-23):** `test-review-and-spec.ts` 10,577 PASS / 0 FAIL, `ALL PASSED`, 225 suites on
+  the chain before and after. `test-batch5`, `test-bids`, `test-box-sale`,
+  `test-estimate-line-move`, `test-estimate-live-save`, `test-markup`, `test-oct15-estimating`,
+  `test-photo-wrap` and `test-markup-settings` each exit 0 alone. Not opened in a browser.
+- **Loose ends:** a frozen revision that carries a credit line (none is expected) is not filtered: it
+  would print the line as an ordinary negative line, and a recall or a library load of it would put
+  the line on a live spec, where the next read drops it. A live quote that carried a credit keeps
+  its stored `value` (net of the credit) until its next save re-prices it.

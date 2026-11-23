@@ -12,7 +12,7 @@
  *
  * Lines counted (the analytics rule, plus assembly expansion): labor sections
  * and lines, the hidden bonus lines (#330), option / allowance /
- * price-on-request lines, the rewards credit and Alternate groups are
+ * price-on-request lines and Alternate groups are
  * skipped. An assembly line counts its members (`expandLine`, #332) — a
  * component's own cost as quoted, else today's catalog cost for a live member
  * (racks, Grid `asm:` lines). Grid quotes (flat `spec.lines`) count at
@@ -22,7 +22,6 @@
  * Pure — the loader hands in quotes, parts, fixtures and the rate.
  */
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
-import { isRewardCreditItem } from "@/lib/credit-line";
 import { mfrKey } from "@/lib/catalog-books";
 import { ALLOWANCE_PART_PREFIX, ASSEMBLY_PART_PREFIX } from "@/lib/quote-line-ids";
 import { CUSTOM_ITEM_PREFIX } from "@/lib/quote-line-ids";
@@ -94,7 +93,7 @@ export function sourcingHits(
     for (const sec of s.sections as SpecSection[]) {
       if (!sec || sec.kind === "labor" || sec.alternate || !Array.isArray(sec.items)) continue;
       for (const it of sec.items as SpecItem[]) {
-        if (!it || isBonusItem(it) || it.labor || it.laborOverhead || it.laborTravel || it.option || it.allowance || it.por || isRewardCreditItem(it)) continue;
+        if (!it || isBonusItem(it) || it.labor || it.laborOverhead || it.laborTravel || it.option || it.allowance || it.por) continue;
         const members = expandLine(it, fixtureOf);
         if (members) {
           // A component's own unit cost as quoted; a live member (rack) at today's catalog cost.

@@ -32,7 +32,9 @@ export type CoverDocumentProps = {
   /** `heading` (Batch 5 #56) — each scope's own heading: the system name, else its discipline, else "Scope N". */
   scopes: Array<{ id: string; heading: string; text: string; missing: boolean; priceLabel: string }>;
   summary: string;
-  totals: { creditLabel: string | null; creditAmount: string | null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
+  /** `creditLabel` / `creditAmount` (always null) and `rewardsLine` (always "") are vestigial — Rewards was removed;
+   *  the keys stay so the stored JSON baselines stay byte-identical. Nothing prints them. */
+  totals: { creditLabel: null; creditAmount: null; totalLabel: string; total: string; rewardsLine: string; standingLines: string[] };
   options: Array<{ label: string; desc: string; reason: string; price: string }>;
   /** Estimator Phase 2b — present only when the quote has printed alternates
    *  (always shown then, whatever the Options toggle). */
@@ -125,8 +127,8 @@ export function coverDocumentPropsFor(input: CoverInput): CoverDocumentProps {
     scopes: scopes.map((s) => ({ id: s.id, heading: coverScopeHeading(s), text: s.cover.text, missing: s.cover.source === "missing", priceLabel: `${scopePriceLabel(s.name)}: ${fmt(s.price)}` })),
     summary: coverSummaryText(input.coverSummary, scopes.map((s) => s.name)),
     totals: {
-      creditLabel: t.creditLabel,
-      creditAmount: t.credit > 0 ? "−" + fmt(t.credit) : null,
+      creditLabel: null,
+      creditAmount: null,
       totalLabel: t.totalLabel,
       total: fmt(t.total),
       rewardsLine: t.rewardsLine,

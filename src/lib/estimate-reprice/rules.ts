@@ -13,7 +13,7 @@ import { deriveEstimatorSections } from "./derive";
  * Ratio math is deliberately convention-neutral — never catalogAddPrice or a
  * margin / markup formula (#367 rewrites those).
  *
- * Not re-priced: stored cost ≤ 0, bonus lines, the Rewards credit, vendor-quote,
+ * Not re-priced: stored cost ≤ 0, bonus lines, vendor-quote,
  * custom, allowance and placeholder-SKU lines, assembly / fixture / rack /
  * track / curtain lines (and the track a curtain hangs from — their own
  * configurators re-price them once the quote is a draft), any labor line

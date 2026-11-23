@@ -2,7 +2,6 @@ import { Fragment, type CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
 import { customerLines, fmt, inclusionsLine, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import { systemSellTotal } from "./pricing";
-import { CREDIT_APPLIED_LABEL } from "@/lib/credit-line";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 import { narrativeBlocks, printableKeyProducts, type NarrativeBlock } from "./narrative";
 import { alternateGroupsForPrint, alternatingPhotoSides, documentAppendixSystemIds, printedGroupHeadings } from "./quote-document-view";
@@ -1080,7 +1079,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
           <div style={{ borderTop: "2px solid #16181d", paddingTop: 14, marginTop: 22 }}>
             <div className="est-totals">
             {/* #364: Show on BOM → Materials / Labor / Freight hide these rows in the
-                BOM view only; tax, the Rewards credit and the Total always print. */}
+                BOM view only; tax and the Total always print. */}
             {p.showMaterials !== false && (
               <div
                 style={{
@@ -1135,27 +1134,6 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
               >
                 <span>Sales tax ({p.taxRatePct}%)</span>
                 <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.tax)}</span>
-              </div>
-            )}
-            {/* #282 phase 2: the Rewards credit, its own line after the
-                system subtotals; the Total below is already net of it.
-                #282 points follow-up: the customer sees it as points
-                ("Rewards points applied (300 pts)") with the dollars in the
-                price column, so the total still adds up. */}
-            {(p.t.credit || 0) > 0 && (
-              <div
-                className="est-reward-credit"
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 12.5,
-                  color: "#1f8a5b",
-                  fontWeight: 600,
-                  marginBottom: 10,
-                }}
-              >
-                <span>{CREDIT_APPLIED_LABEL}</span>
-                <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(p.t.credit || 0)}</span>
               </div>
             )}
             <div

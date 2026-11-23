@@ -32,7 +32,7 @@ import { docPhotoFigureStyle, docPhotoImgStyle, photoTagStyle } from "@/lib/esti
  *     wrap beside it, or full (block, centred, max-height 4in); phones
  *     always full width; headings clear it (an image never spills into the
  *     next system); no photo source → nothing
- *   priceTable → systems · price rows, tax / Rewards credit rows, Total
+ *   priceTable → systems · price rows, tax row, Total
  *     (t.grand); alternates listed after it as "priced separately"
  *   systemTotal → one bold row: the system name left, its sell total right
  *     (mono) under a thin rule; an alternate system adds " — priced

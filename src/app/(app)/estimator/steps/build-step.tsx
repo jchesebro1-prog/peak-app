@@ -29,7 +29,7 @@ import { boxSaleLaborBanner } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 
 /**
- * #305 — Build: the systems sidebar (markup, cost breakdown, Rewards credit),
+ * #305 — Build: the systems sidebar (markup, cost breakdown),
  * the system cards and every configurator modal. A card's narrative snippet
  * opens the Build package step (onOpenNarrative), where the narrative lives.
  */
@@ -84,7 +84,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
     applyAutoMiles,
     applyTravelTrip,
     blobUploads,
-    canApplyCredit,
     cardRefs,
     closeInput,
     confirmDiscardInput,
@@ -402,12 +401,6 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#8c919c" }}>
                   <span>Alternates (not in total)</span>
                   <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(t.alt ?? 0)}</span>
-                </div>
-              )}
-              {(t.credit || 0) > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 7, color: "#1f8a5b", fontWeight: 600 }}>
-                  <span>Credit applied</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>−{fmt(t.credit || 0)}</span>
                 </div>
               )}
             </div>

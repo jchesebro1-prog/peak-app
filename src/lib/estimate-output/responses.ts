@@ -26,7 +26,7 @@ export type ClientResponse = {
   message: string;
   sectionIds: string[];
   sectionNames: string[];
-  /** Σ the selected scopes' prices, pre-credit (R1). 0 for a question. */
+  /** Σ the selected scopes' prices (R1). 0 for a question. */
   total: number;
   /** #348 2b-ii — the bidder (pty_ + 16 hex) whose v3 link sent this; absent on the owner's link. */
   partyId?: string;
@@ -291,10 +291,10 @@ export function responseNoteText(r: CleanResponse, number: string, revNo: number
   const bidder = cleanBidderName(bidderName);
   const head = bidder
     ? r.kind === "accept"
-      ? `${bidder} (bidder) selected scopes on ${number} Rev ${revNo} (bid link): ${r.sectionNames.join(", ")} — ${fmt(r.total)} before any Rewards credit.`
+      ? `${bidder} (bidder) selected scopes on ${number} Rev ${revNo} (bid link): ${r.sectionNames.join(", ")} — ${fmt(r.total)}.`
       : `Question from ${bidder} (bidder) on ${number} Rev ${revNo} (bid link).`
     : r.kind === "accept"
-      ? `Client selected scopes on ${number} Rev ${revNo} (client link): ${r.sectionNames.join(", ")} — ${fmt(r.total)} before any Rewards credit.`
+      ? `Client selected scopes on ${number} Rev ${revNo} (client link): ${r.sectionNames.join(", ")} — ${fmt(r.total)}.`
       : `Client question on ${number} Rev ${revNo} (client link).`;
   // Jeff 2026-10-15 #15: an accept names its signer and any PO number.
   const signed = r.kind === "accept" && r.title ? acceptanceLine(r) : "";
@@ -360,10 +360,4 @@ export function responseRows(raw: unknown, revNoOf: (rev: number) => number, bid
       message: r.message,
       when: chicagoStamp(r.at),
     }));
-}
-
-/** R1 — under the live "Selected scopes" total. `creditAmount` is the page's formatted "−$X". */
-export function creditNoteText(creditAmount: string | null | undefined): string | null {
-  const amt = (creditAmount || "").replace(/^[−-]\s*/, "").trim();
-  return amt ? `A Rewards credit of ${amt} applies to your order.` : null;
 }

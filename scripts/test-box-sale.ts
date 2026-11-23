@@ -136,10 +136,10 @@ function documentChecks(ok: Ok) {
 
 function wiringChecks(ok: Ok) {
   const act = rd("src/app/(app)/estimator/actions.ts");
-  const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("async function settleRewardCredit("));
+  const save = act.slice(act.indexOf("export async function saveQuoteAction("), act.indexOf("export async function currentLiveKeyAction("));
   const at = save.indexOf("const boxProblem = boxSaleSaveProblem(boxSale, Array.isArray(payload.sections) ? payload.sections : []);");
-  ok(save.includes("const boxSale = boxSaleForSave(prior, payload.boxSale);") && at > save.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") && save.includes("if (!docSave.ok) return refusedSave(prior, docSave.error);") && at < save.indexOf("settleRewardCredit(") && at < save.indexOf("await update(") && at < save.indexOf("await create("),
-    "box sale save (source): the labor refusal runs after the document check and before the Rewards credit or any write");
+  ok(save.includes("const boxSale = boxSaleForSave(prior, payload.boxSale);") && at > save.indexOf("if (!docSave.ok) return refusedSave(prior, docSave.error);") && save.includes("if (!docSave.ok) return refusedSave(prior, docSave.error);") && at < save.indexOf("negativeLineProblem(") && at < save.indexOf("await update(") && at < save.indexOf("await create("),
+    "box sale save (source): the labor refusal runs after the document check and before the negative-line check or any write");
   ok(save.includes("if (boxProblem) return refusedSave(prior, boxProblem);") && /function refusedSave\(prior: Quote \| null, error: string\): SaveResult \{\s*return \{\s*ok: false,\s*id: null,\s*number: null,/.test(rd("src/app/(app)/estimator/actions.ts")),
     "box sale save (source): a refusal returns no id — nothing is written and the edit stays unsaved");
   ok(/\n\s+boxSale,\n/.test(save.slice(save.indexOf("const patch: QuotePatch = {"), save.indexOf("patch.spec = await quoteSpecFollowingRenames"))),

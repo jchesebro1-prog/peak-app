@@ -1,6 +1,5 @@
 import { curtainCost, curtainPrice, fabricAreaRateOf, type CurtainSewing } from "@/lib/design/curtain-pricing";
 import { ceilToStep, PRICE_OVERRIDE_MAX, typedPriceWarning, type PriceWarning } from "@/lib/price-rounding";
-import { creditLineAmount, isRewardCreditItem } from "@/lib/credit-line";
 import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/flags";
 import { normalCostOf } from "@/lib/project-discounts/rules";
 import { MARKUP_MAX, DEFAULT_MARKUP, sellAt } from "@/lib/markup";
@@ -150,11 +149,9 @@ export function vendorTotalSeed(storedTotal: number, linesTotal: number): string
 
 /* ---------------- section + quote totals ---------------- */
 
-/** A line the system's own price counts: not optional, not the #282 Rewards
- *  credit (a quote-level amount parked on the last system — `totals()`
- *  subtracts it after tax, so no system-level rule ever sees it). */
+/** A line the system's own price counts: not optional. */
 export function isSystemLine(x: SpecItem): boolean {
-  return !x.option && !isRewardCreditItem(x);
+  return !x.option;
 }
 
 export function systemItemsRev(sec: SpecSection): number {
@@ -304,9 +301,6 @@ export type QuoteTotals = {
   markup: number;
   /** #267: the systems' price adjustments (typed sells + $25 rounding), already inside rev/mat/lab. */
   adj?: number;
-  /** #282 phase 2: the Rewards credit taken off `grand` (after tax; never
-   *  more than rev + fr + tax, so `grand` never goes below $0). 0 = none. */
-  credit?: number;
   /** Phase 2b: Σ systemSellTotal of the alternate systems (`sec.alternate`) — shown, never part of
    *  rev/cost/mat/lab/fr/opt/adj/tax/grand. Present only when the quote has an alternate system. */
   alt?: number;
@@ -320,28 +314,20 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     rev = 0,
     cost = 0,
     adjSum = 0,
-    creditSum = 0,
     altSum = 0,
     anyAlt = false;
   for (const sec of sections) {
     // Phase 2b: an alternate system (priced separately) adds its own price to
     // `alt` and NOTHING else — no lines, options, freight or sell adjustment.
-    // A Rewards credit line parked on it (defensive; it pins to the last
-    // In-total system) still comes off the grand total.
     if (sec.alternate === true) {
       anyAlt = true;
       altSum += systemSellTotal(sec);
-      for (const it of sec.items) if (isRewardCreditItem(it)) creditSum += creditLineAmount(it);
       continue;
     }
     let secMat = 0,
       secLab = 0,
       secEst = 0;
     for (const it of sec.items) {
-      if (isRewardCreditItem(it)) {
-        creditSum += creditLineAmount(it);
-        continue;
-      }
       const ext = lineExtSellOf(it);
       if (it.option) {
         opt += ext;
@@ -384,10 +370,6 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
   }
   const taxRate = (taxRatePct ?? 0) / 100;
   const tax = (rev + fr) * taxRate;
-  const pre = rev + fr + tax;
-  // #282 phase 2: credit after tax, capped at the pre-credit total. Margin
-  // readouts stay on rev/cost — the credit is not a price the systems carry.
-  const credit = round2(Math.max(0, Math.min(creditSum, pre)));
   return {
     mat,
     lab,
@@ -396,10 +378,9 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
     rev,
     cost,
     tax,
-    grand: pre - credit,
+    grand: rev + fr + tax,
     markup: cost > 0 ? (rev - cost) / cost : 0,
     adj: round2(adjSum),
-    credit,
     ...(anyAlt ? { alt: round2(altSum) } : {}),
   };
 }
@@ -430,6 +411,27 @@ export function inclusionsLine(t: Pick<QuoteTotals, "mat" | "lab" | "fr">): stri
   return joined.charAt(0).toUpperCase() + joined.slice(1) + " included";
 }
 
+export const NEGATIVE_LINE_ERROR = "A line can't have a negative price or quantity.";
+
+/**
+ * Server rule for a posted Estimator save: a negative price or quantity on
+ * any line refuses the save. Returns the message, or null when every line is
+ * fine (or the sections are not a list). Pure — the save action calls it.
+ */
+export function negativeLineProblem(sections: unknown): string | null {
+  if (!Array.isArray(sections)) return null;
+  for (const sec of sections) {
+    const items = sec && typeof sec === "object" ? (sec as { items?: unknown }).items : null;
+    if (!Array.isArray(items)) continue;
+    for (const it of items) {
+      if (!it || typeof it !== "object") continue;
+      const { price, qty } = it as { price?: unknown; qty?: unknown };
+      if ((typeof price === "number" && price < 0) || (typeof qty === "number" && qty < 0)) return NEGATIVE_LINE_ERROR;
+    }
+  }
+  return null;
+}
+
 /**
  * #242 final — the value a saved Estimator quote carries is the server's own
  * figure, never a client-posted one: the review-limit gate auto-approves on
@@ -450,20 +452,14 @@ export function reconcileEstimatorValue(
       freightPct: n(sec.freightPct),
       items: (Array.isArray(sec.items) ? sec.items : [])
         .filter((it) => !!it && typeof it === "object")
-        .map((it) =>
-          // #282 phase 2: a negative price is accepted ONLY on the Rewards
-          // credit line (qty 1, cost 0); anywhere else price and qty floor
-          // at 0 (the save refuses such a line before this — belt and braces).
-          isRewardCreditItem(it)
-            ? { ...it, qty: 1, cost: 0, price: Math.min(0, n(it.price)), extSellOverride: undefined, option: false }
-            : {
-                ...it,
-                qty: Math.max(0, n(it.qty)),
-                cost: n(it.cost),
-                price: Math.max(0, n(it.price)),
-                extSellOverride: typeof it.extSellOverride === "number" && Number.isFinite(it.extSellOverride) ? it.extSellOverride : undefined,
-              }
-        ),
+        // Price and qty floor at 0 (the save refuses a negative line before this — belt and braces).
+        .map((it) => ({
+          ...it,
+          qty: Math.max(0, n(it.qty)),
+          cost: n(it.cost),
+          price: Math.max(0, n(it.price)),
+          extSellOverride: typeof it.extSellOverride === "number" && Number.isFinite(it.extSellOverride) ? it.extSellOverride : undefined,
+        })),
     }));
   const t = totals(safe, 0);
   const grand = n(t.grand);
@@ -1099,7 +1095,6 @@ export type CustomerLine = { item: SpecItem; ext: number } | { item: null; desc:
  * system's total and neither bonus is ever named.
  */
 function customerLinesRaw(sec: SpecSection): CustomerLine[] {
-  // #282 phase 2: the Rewards credit prints on its own under the totals.
   const visible = sec.items.filter(isSystemLine);
   // Estimator bonuses: the 2% line is spread over every row at the end;
   // the 5% line folds into labor exactly like shop & engineering (D251).

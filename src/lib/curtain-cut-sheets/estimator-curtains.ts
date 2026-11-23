@@ -8,7 +8,6 @@
  * CURTAIN lines of a quote the removed Grid made.
  */
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { isRewardCreditItem } from "@/lib/credit-line";
 import type { TrackOperation, TrackSeries } from "@/lib/track-series";
 import { pathSignature } from "@/lib/track-path";
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
@@ -111,7 +110,7 @@ export function estimatorCurtains(sections: readonly SpecSection[], fabrics: rea
   const read = empty();
   for (const sec of sections) {
     for (const it of sec.items || []) {
-      if (!it.curtain || isRewardCreditItem(it)) continue;
+      if (!it.curtain) continue;
       const lineRef: CurtainLineRef = { ref: `${sec.id}/line-${it.id}`, where: sec.name || "System", desc: it.desc || "", sectionId: sec.id, lineId: it.id };
       const qty = lineQty(it.qty);
       // Phase 2b: an Alternate group's systems are out of the base bid, like option lines
@@ -261,7 +260,7 @@ export function curtainFabricLookups(spec: unknown, project: GridProjectLite = n
   if (Array.isArray(s.sections) && s.sections.length) {
     for (const sec of s.sections as SpecSection[]) {
       for (const it of sec?.items || []) {
-        if (!it?.curtain || isRewardCreditItem(it)) continue;
+        if (!it?.curtain) continue;
         const ci = it.curtainInputs;
         if (!ci) byName = true;
         else if (ci.fabricSku) {

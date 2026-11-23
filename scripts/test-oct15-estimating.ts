@@ -118,7 +118,7 @@ export async function oct15PureChecks(ok: Ok) {
     const photos = { A: { src: "/a", alt: "" }, B: { src: "/b", alt: "" }, C: { src: "/c", alt: "" }, D: { src: "/d", alt: "" } };
     const sections = [{ id: "s1", name: "S", kind: "materials", mfr: "", freightPct: 0, items: ["A", "B", "C", "D"].map((sku, i) => ({ id: i + 1, sku, desc: sku, qty: 1, unit: "ea", cost: 1, price: 2 })) }];
     const img = (sku: string, n: number, align?: "left" | "right" | "full" | "auto") => productImageFor("s1", n, sku, align ? { align } : undefined);
-    const ctx = { sections, t: { grand: 0, tax: 0, credit: 0 }, quoteId: "Q", photos } as never;
+    const ctx = { sections, t: { grand: 0, tax: 0 }, quoteId: "Q", photos } as never;
     const aligns = (content: unknown[]) => resolvePackageDoc({ type: "doc", version: 1, content } as never, ctx).blocks.map((b) => (b as { photo?: { align: string } }).photo?.align).join();
     ok(aligns([img("A", 1), img("B", 2), img("C", 3)]) === "right,left,right", "oct15 #20: Auto images alternate right, left, right");
     ok(aligns([img("A", 1), img("B", 2, "right"), img("C", 3), img("D", 4, "full")]) === "right,right,left,full", "oct15 #20: an explicit choice wins and the next Auto image goes opposite it");

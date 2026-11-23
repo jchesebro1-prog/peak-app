@@ -1,7 +1,6 @@
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 import { lineModel, lineOwnModel } from "@/lib/catalog-rename/sku";
 import { isBonusItem } from "@/lib/estimate-bonus/flags";
-import { isRewardCreditItem } from "@/lib/credit-line";
 import { isPlaceholderSku } from "@/lib/quote-line-ids";
 
 /**
@@ -13,8 +12,8 @@ import { isPlaceholderSku } from "@/lib/quote-line-ids";
  *
  * A line prints a model only when it is a plain catalog line: a real SKU
  * (never CUSTOM / AI / CURTAIN / CRT-n), and not a vendor-quote line, an
- * allowance, a curtain, a labor line (labor / overhead / travel), a bonus or
- * Rewards credit line, or an assembly / rack / track line (its SKU is an
+ * allowance, a curtain, a labor line (labor / overhead / travel), a bonus
+ * line, or an assembly / rack / track line (its SKU is an
  * assembly id). The model is `lineModel(line, part)` (the line's own frozen
  * Model # → the catalog part's Model # → the line's MFR P/N → partModel) when
  * the catalog knows the SKU; otherwise only what the line itself carries
@@ -53,7 +52,7 @@ export function bomModelEligible(it: SpecItem | null | undefined): it is SpecIte
   if (!it || typeof it !== "object") return false;
   if (it.labor || it.laborOverhead || it.laborTravel) return false;
   if (it.vendorQuoteId || it.allowance || it.curtain) return false;
-  if (isBonusItem(it) || isRewardCreditItem(it)) return false;
+  if (isBonusItem(it)) return false;
   const sku = String(it.sku ?? "").trim();
   if (!sku || isPlaceholderSku(sku)) return false;
   return !isAssemblyish(it);

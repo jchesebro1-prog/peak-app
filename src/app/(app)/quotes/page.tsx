@@ -170,9 +170,8 @@ export default async function QuotesPage({
   // surfaced on the selected row instead of a raw thrown-exception 500.
   const statusError = one(sp.statusError) || null;
   const packageError = one(sp.packageError) || null;
-  // #282 phase 3: a Recall that reduced or removed the revision's Rewards credit.
-  // #355 review M8: …or a status move that reopened a won estimate at the version that won (same notice line).
-  const creditNotice = one(sp.creditNotice) || one(sp.statusNotice) || null;
+  // #355 review M8: a status move that reopened a won estimate at the version that won.
+  const statusNotice = one(sp.statusNotice) || null;
 
   const hrefFor = (over: {
     who?: string;
@@ -835,7 +834,7 @@ export default async function QuotesPage({
                   backHref={hrefFor({ id: q.id, page: paged.page })}
                   statusError={statusError}
                   packageError={packageError}
-                  creditNotice={creditNotice}
+                  statusNotice={statusNotice}
                   next={nextStep}
                 />
               )}
@@ -889,7 +888,7 @@ function SelectedPanel({
   backHref,
   statusError,
   packageError,
-  creditNotice,
+  statusNotice,
   next,
 }: {
   q: Quote;
@@ -901,8 +900,8 @@ function SelectedPanel({
    *  row (punch #60). */
   statusError: string | null;
   packageError: string | null;
-  /** #282 phase 3: the Recall's Rewards credit notice (reduced / removed). */
-  creditNotice: string | null;
+  /** #355 review M8: the reopened-at-the-won-version notice. */
+  statusNotice: string | null;
   /** #284 — the one next-step view (pill, primary action, ⋯ menu) for this quote and viewer. */
   next: QuoteNextStepView | null;
 }) {
@@ -939,9 +938,9 @@ function SelectedPanel({
           )}
         </div>
       )}
-      {creditNotice && (
-        <div role="status" data-testid="reward-credit-notice" style={{ padding: "10px 14px", marginBottom: 10, background: "#fdf6e7", border: "1px solid #f0e0b8", borderRadius: 10, fontSize: 12.5, color: "#7a5a12", fontWeight: 600 }}>
-          {creditNotice}
+      {statusNotice && (
+        <div role="status" data-testid="status-notice" style={{ padding: "10px 14px", marginBottom: 10, background: "#fdf6e7", border: "1px solid #f0e0b8", borderRadius: 10, fontSize: 12.5, color: "#7a5a12", fontWeight: 600 }}>
+          {statusNotice}
         </div>
       )}
       {packageError && (

@@ -391,8 +391,10 @@ export async function markupParityChecks(ok: Ok) {
   const secs = SECTIONS as never;
   const t = totals(secs, 0) as unknown as Record<string, number>;
   const bt = B.totals as Record<string, number>;
-  // Every numeric key in the baseline totals except `margin` (margin-era; compared as a markup just below).
-  const { margin: btMargin, ...btDollars } = bt;
+  // Every numeric key in the baseline totals except `margin` (margin-era; compared as a markup just below) and
+  // `credit` — the Rewards credit figure, removed 2026-11-23. The baseline recorded $0 of it, so no price is skipped.
+  const { margin: btMargin, credit: btCredit, ...btDollars } = bt;
+  ok(btCredit === 0 && !("credit" in t), "markup parity: the baseline's Rewards credit was $0, and totals() no longer reports one");
   same("totals$", t, btDollars);
   near1("totals markup", t.markup, mk(btMargin));
   (B.systemMargin as number[]).forEach((m, i) => near1(`systemMarkup[${i}]`, systemMarkup((SECTIONS as never[])[i]), mk(m)));

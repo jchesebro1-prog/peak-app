@@ -18,7 +18,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { parseStep } from "@/lib/estimate-steps/steps";
 import { bonusRatesFor, bonusRulesApply, isBonusEligibleQuote, withBonusLines, withBonusRemoved } from "@/lib/estimate-bonus/rules";
 import { applyProjectDiscounts, parseDiscountPct, projectDiscountsKey, PROJECT_DISCOUNT_NOTE_MAX, type ProjectDiscounts } from "@/lib/project-discounts/rules";
-import { isRewardCreditItem, rewardCreditOf, withoutRewardCredit, withRewardCredit } from "@/lib/credit-line";
 import type { WonEditField } from "@/app/(app)/quotes/new/handoff";
 import { DISC_LABEL, type SuggestPart } from "./estimator-data";
 import { backSolveExtSell, priceFromUnitSellEdit, repriceAtMarkup, buildLaborItems, computeCurtain, computeLabor, lineMarkupOf, makeLaborRate, repricedAtLineMarkup, round2, clearSellOverride, parseSellOverride, SYSTEM_PRICE_STEP, systemSellTotal, totals, vendorTotalSeed, withPriceRound } from "./pricing";
@@ -85,21 +84,6 @@ const freshSections = (freightPct: number, boxSale = false): SpecSection[] => [
   // #267: a new system's auto price rounds up to the next $25. Box goods sale: Itemized.
   { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, priceRound: SYSTEM_PRICE_STEP, presentation: newSystemPresentation([], boxSale), items: [] },
 ];
-
-/** Phase 2a — unmarkEdited, blind to the Rewards credit line. The credit
- *  re-pins to the last system after every reorder; that move is not an edit
- *  to either system, so it must not clear their `built`. */
-function unmarkUserEdits(prev: SpecSection[], next: SpecSection[]): SpecSection[] {
-  if (!next.some((s) => s.built)) return next;
-  const kept = unmarkEdited(withoutRewardCredit(prev), withoutRewardCredit(next));
-  let changed = false;
-  const out = next.map((s, i) => {
-    if (!s.built || kept[i].built) return s;
-    changed = true;
-    return withoutBuilt(s);
-  });
-  return changed ? out : next;
-}
 
 /** Phase 2a — which systems this person has collapsed on this quote (JSON array of section ids). */
 const COLLAPSED_KEY_PREFIX = "quartzite.estimator.collapsed.v1:";
@@ -229,7 +213,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const {
     initial, pipelines, fabrics, curtainSewingPct, trackSeries, trackParts, pipeTypes, linesetTypes, riggingParts, laborRates, fixtureRates,
     fixtureAssemblies, vendors, blobUploads, customers, travel, next: initialNext, people,
-    assumptionLibrary, freightRule, canApplyCredit,
+    assumptionLibrary, freightRule, canCreate,
     viewerName, viewerCanApprove, canWriteNarrativeLibrary, narrativeIntros, notIncludedDefault, peopleSentOnce = false, bonusRates,
     repricedOnRevise = null,
   } = props;
@@ -308,7 +292,7 @@ export function useEstimatorState(props: EstimatorProps) {
     // Phase 2a: any edit to a built system other than `built` itself un-marks it.
     // Flagged only when the result differs: a flag left pending would turn the next automatic write into a step.
     setSectionsState((prev) => {
-      const next = unmarkUserEdits(prev, typeof v === "function" ? v(prev) : v);
+      const next = unmarkEdited(prev, typeof v === "function" ? v(prev) : v);
       if (next !== prev) undoRef.current?.flagEdit();
       return next;
     });
@@ -1560,16 +1544,6 @@ export function useEstimatorState(props: EstimatorProps) {
           setRevNum(res.revNum);
           setRevDateMs(res.updatedAt);
           if (res.next !== undefined) setNext(res.next ?? null);
-          // #282 phase 2: take the server's (clamped) Rewards credit back.
-          if (typeof res.rewardCredit === "number") {
-            const stored = res.rewardCredit;
-            // Only when the server clamped it — an edit like any other.
-            // A live save's clamp is the server's own write, so it doesn't start another save.
-            if (rewardCreditOf(sectionsRef.current) !== stored) {
-              const write = auto ? setSectionsState : setSections;
-              write((ss) => withRewardCredit(ss, stored, nextId()));
-            }
-          }
           // Server-confirmed either way (ok or refused/stale) — this IS the
           // resync: whether the requested status applied, was refused, or
           // was left alone because this tab was stale, res.status is always
@@ -1735,7 +1709,7 @@ export function useEstimatorState(props: EstimatorProps) {
   useEffect(() => {
     baseStatusRef.current = baseStatus;
   }, [baseStatus]);
-  // A server-confirmed status move can rewrite the spec (a Lost move clears the Rewards credit): re-read the key.
+  // A server-confirmed status move can rewrite the spec: re-read the key.
   // In the queue, so a read that started before a save can't land after it and put back the older key. Never during a
   // conflict: that key is the other person's, and adopting it would let the next Save overwrite them with no prompt.
   useEffect(() => {
@@ -1954,9 +1928,6 @@ export function useEstimatorState(props: EstimatorProps) {
     const pc = c ? c.contacts.find((ct) => ct.primary) || c.contacts[0] : undefined;
     const contact = pc ? pc.name : "";
     guardWonMeta("customer", () => {
-      // #282 phase 2: Rewards credit belongs to one customer — a new
-      // customer starts with none on this quote.
-      if (id !== customerId) setSections((ss) => (rewardCreditOf(ss) > 0 ? withoutRewardCredit(ss) : ss));
       setCustomerId(id || null);
       setLocationId(locId);
       setCustName(name);
@@ -2082,8 +2053,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setSections((ss) =>
       ss.map((s) => ({
         ...clearSellOverride(s),
-        // #282 phase 2: the Rewards credit is not a priced line.
-        items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMarkup(it.cost, k) })),
+        items: s.items.map((it) => (isBonusItem(it) ? it : { ...it, ...repriceAtMarkup(it.cost, k) })),
       }))
     );
   };
@@ -2092,7 +2062,7 @@ export function useEstimatorState(props: EstimatorProps) {
     setSections((ss) =>
       ss.map((s) =>
         s.id === secId
-          ? { ...clearSellOverride(s), items: s.items.map((it) => (isRewardCreditItem(it) || isBonusItem(it) ? it : { ...it, ...repriceAtMarkup(it.cost, k) })) }
+          ? { ...clearSellOverride(s), items: s.items.map((it) => (isBonusItem(it) ? it : { ...it, ...repriceAtMarkup(it.cost, k) })) }
           : s
       )
     );
@@ -2130,8 +2100,7 @@ export function useEstimatorState(props: EstimatorProps) {
   const setSystemPresentation = (secId: string, presentation: "itemized" | "narrative") =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, presentation } : s)));
   const deleteSystem = (secId: string) => {
-    // #282 phase 2: the Rewards credit is the quote's — it moves to the new last system.
-    const list = withRewardCredit(sections.filter((s) => s.id !== secId), rewardCreditOf(sections), nextId());
+    const list = sections.filter((s) => s.id !== secId);
     setSections(list);
     setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
   };
@@ -2172,9 +2141,7 @@ export function useEstimatorState(props: EstimatorProps) {
       );
       if (res.ok) {
         postChanged("quote", res.targetId);
-        // #282 phase 2: the Rewards credit stays on this quote (the server
-        // never moves it with a system).
-        const list = withRewardCredit(sections.filter((s) => s.id !== secId), rewardCreditOf(sections), nextId());
+        const list = sections.filter((s) => s.id !== secId);
         setSections(list);
         if (movedVq.length) setVendorQuotes((vs) => vs.filter((v) => !movedVqIds.has(v.id)));
         setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
@@ -2287,8 +2254,7 @@ export function useEstimatorState(props: EstimatorProps) {
     if (od !== packageDocOverDraft) setPackageDocOverDraft(od);
     const targetId = resolved.kind === "new" ? resolved.id : resolved.sectionId;
     const targetName = resolved.kind === "new" ? resolved.name : sections.find((s) => s.id === targetId)?.name || "that system";
-    // Same order as reorderSections: a system inserted last must not leave the Rewards credit off the last row.
-    setSections(withRewardCredit(normalizeSystemOrder(next, groups), rewardCreditOf(sections), nextId()));
+    setSections(normalizeSystemOrder(next, groups));
     const n = plan.lines.length;
     setMoveNotice({ ok: true, targetId: "", targetName: "", targetNumber: "", verb: "Lines", detail: `Moved ${n} line${n === 1 ? "" : "s"} to ${targetName}` });
     requestAnimationFrame(() => requestAnimationFrame(() => selectSystem(targetId)));
@@ -2389,11 +2355,10 @@ export function useEstimatorState(props: EstimatorProps) {
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToCard(sec.id)));
   };
   /* ---------------- Phase 2a: groups, moves, built ---------------- */
-  /** Every reorder writes through here: the Rewards credit re-pins to the new
-   *  last system, exactly like deleteSystem. A no-op (same reference) writes nothing. */
+  /** Every reorder writes through here. A no-op (same reference) writes nothing. */
   const reorderSections = (list: SpecSection[]) => {
     if (list === sections) return;
-    setSections(withRewardCredit(list, rewardCreditOf(sections), nextId()));
+    setSections(list);
   };
   /** + Add group — returns the new group's id, or null at the 20-group cap. */
   const addGroupAction = (name?: string): string | null => {
@@ -2426,8 +2391,7 @@ export function useEstimatorState(props: EstimatorProps) {
     reorderSections(normalizeSystemOrder(sections, next));
   };
   /** Phase 2b: In total / Alternate. Re-normalises at once so every system in
-   *  the group gains/loses its `alternate` stamp (and the Rewards credit
-   *  re-pins inside reorderSections) in the same render. */
+   *  the group gains/loses its `alternate` stamp in the same render. */
   const setGroupAlternateAction = (id: string, alternate: boolean) => {
     const next = setGroupAlternate(groups, id, alternate);
     if (next === groups) return;
@@ -3535,7 +3499,7 @@ export function useEstimatorState(props: EstimatorProps) {
     assumptions,
     blobUploads,
     blocks,
-    canApplyCredit,
+    canCreate,
     canWriteNarrativeLibrary,
     cardRefs,
     boxSale,
