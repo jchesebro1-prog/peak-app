@@ -38,7 +38,7 @@ const VISUALLY_HIDDEN: CSSProperties = { position: "absolute", width: 1, height:
 const FIELD: CSSProperties = { width: "100%", boxSizing: "border-box", fontFamily: "var(--font-ui)", fontSize: 12.5, border: "1px solid #d8dbe1", borderRadius: 7, padding: "6px 8px", background: "#fff" };
 
 /**
- * Estimator Phase 4 (spec §11.2–11.3) — the Customer review step's internal
+ * Estimator Phase 4 (spec §11.2–11.3) — the Internal review step's internal
  * sidebar (never client-visible): the review actions (QuoteNextStep, as
  * before) plus an approver's "Send back with N comments", the cost summary,
  * the Labor table, the Package checklist and the review Comments.

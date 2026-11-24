@@ -165,6 +165,7 @@ async function initialFrom(
       estimatorBonusSplit: null,
       leadId: null,
       boxSale: false,
+      bomEstimate: false,
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -254,6 +255,8 @@ async function initialFrom(
     leadId: q.leadId || null,
     // Box goods sale (spec 2026-10-21): the stored flag (a non-system quote reads false).
     boxSale: boxSaleOf(q),
+    // #379: whether the stored estimate already carries the BOM-estimate stamp.
+    bomEstimate: q.bomEstimate === true,
     // A stored quote of the removed customer portal: left exact on load, prints its stored "Valid until".
     portal: q.source === "portal-catalog" ? { portalFirm: q.portalFirm ?? null } : null,
   };

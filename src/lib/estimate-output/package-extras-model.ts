@@ -36,6 +36,12 @@ export function boxSaleExtras(x: PackageExtras): PackageExtras {
   return { datasheets: {}, downloads: null, plans: [], actions: x.actions };
 }
 
+/** #379 — a BOM estimate that isn't a box sale: the itemized list plus the Downloads card (the zip, the datasheet
+ *  book and each datasheet) — no key-product datasheet links (the list has no key products) and no plans. Pure. */
+export function bomEstimateExtras(x: PackageExtras): PackageExtras {
+  return { datasheets: {}, downloads: x.downloads, plans: [], actions: x.actions };
+}
+
 export function packageDocHref(base: string, docId: string): string {
   return `${base}/doc/${encodeURIComponent(docId)}`;
 }

@@ -5,7 +5,7 @@ import { isEstimatorBonusItem, isPackageBonusItem } from "@/lib/estimate-bonus/f
 import { fmt, lineExtSellOf, systemFreight, systemItemsCost, systemMarkup, systemSellTotal, type QuoteTotals } from "./pricing";
 
 /**
- * #305 — Customer review's internal numbers (never on a customer document): cost, sell and markup per system.
+ * #305 — Internal review's (was Customer review) internal numbers (never on a customer document): cost, sell and markup per system.
  * Phase 2b: In-total systems sit above the Total (their rows add up to it); alternate systems are listed
  * below it under "Alternates (not in total)".
  */

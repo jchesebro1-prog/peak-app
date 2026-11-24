@@ -204,7 +204,6 @@ function toggleLabelChecks(ok: Ok) {
   const online = src("src/components/online-estimate/online-estimate.tsx");
   ok(online.includes("{ONLINE_VIEW_LABELS.narrative}") && online.includes("{ONLINE_VIEW_LABELS.bom}") && !/>\s*Narrative\s*</.test(online) && !/>\s*BOM\s*</.test(online),
     "#63: the portal / share online estimate toggle reads the same labels");
-  ok(CLIENT_PACKAGE_COPY.narrative === "Narrative" && PACKAGE_TAB_LABEL.narrative === "Narrative", "#63: staff-side labels (Client package presentation, Build package tabs) are unchanged");
 }
 
 export async function batch5PureChecks(ok: Ok) {

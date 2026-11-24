@@ -23,7 +23,7 @@ import {
 } from "./state";
 import { pdfStorage } from "./storage";
 import { signPrintToken } from "./token";
-import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
+import { bomOutputOf } from "@/lib/estimate-box-sale/rules";
 
 export { canHavePdf };
 
@@ -140,7 +140,8 @@ export type AppendixSources = { drawings: PackageFile[]; hasLinks: boolean };
  *  put before them — whether the links page has rows. With no drawings the links print in the one render. */
 export async function loadAppendixSources(q: Quote, origin: string): Promise<AppendixSources> {
   // Box goods sale (spec 2026-10-21): no drawings and no datasheet-links page — one plain render of the BOM layout.
-  if (boxSaleOf(q)) return { drawings: [], hasLinks: false };
+  // #379: the same for every BOM estimate — drawings are retired from the customer document.
+  if (bomOutputOf(q)) return { drawings: [], hasLinks: false };
   const drawings = shownPackageFiles(cleanPackageFiles(q.packageFiles), q.packageSelection);
   if (!drawings.length) return { drawings, hasLinks: false };
   return { drawings, hasLinks: (await loadDatasheetLinkRows(q, origin)).length > 0 };

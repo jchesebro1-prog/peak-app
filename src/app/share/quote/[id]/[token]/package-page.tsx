@@ -10,8 +10,8 @@ import { OpenBeacon } from "./open-beacon";
 import { buildPackageSlots } from "./package-slots";
 import { onlineCutSheets } from "@/lib/curtain-cut-sheets/online";
 import { OnlineCutSheets } from "@/components/cutsheets/online-cut-sheets";
-import { revisionBoxSale } from "@/lib/estimate-box-sale/rules";
-import { boxSaleExtras } from "@/lib/estimate-output/package-extras-model";
+import { revisionBomOutput, revisionBoxSale } from "@/lib/estimate-box-sale/rules";
+import { bomEstimateExtras, boxSaleExtras } from "@/lib/estimate-output/package-extras-model";
 
 /**
  * #301 slice B — the v2/v3 (rev-pinned) share link's page: the estimate package
@@ -35,7 +35,8 @@ export async function SharedPackagePage({ id, token, view }: { id: string; token
   // Jeff 2026-10-15 #22: the cut sheets the sent PDF carries (owner-addressed, like the PDF's own).
   const cut = await onlineCutSheets(hit.q, hit.rev);
   const extras = await loadPackageExtras(hit, base);
-  const built = buildPackageSlots(box ? boxSaleExtras(extras) : extras, {
+  // #379: a BOM estimate keeps the Downloads card (datasheets) and drops the plans.
+  const built = buildPackageSlots(box ? boxSaleExtras(extras) : revisionBomOutput(hit.rev) ? bomEstimateExtras(extras) : extras, {
     id: hit.q.id,
     token,
     // #348 2b-ii: a v3 link may act only while its bid is pending or awarded; a missing result counts as closed.

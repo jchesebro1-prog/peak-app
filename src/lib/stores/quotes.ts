@@ -412,6 +412,9 @@ export type Quote = {
    *  (QUOTE_CONTENT_FIELDS — a toggle stales the PDF) and frozen in a sent revision's docFields. Nothing narrative is
    *  ever deleted for it. Read through boxSaleOf (src/lib/estimate-box-sale/rules.ts). */
   boxSale?: boolean;
+  /** #379 — the customer document is the BOM estimate. Stored only as `true`, stamped by an Estimator Save of a
+   *  draft system estimate (bomEstimateForSave); absent = the narrative document. Read through bomOutputOf. */
+  bomEstimate?: boolean;
   /** Estimator Phase 4 (spec §11.3) — review comments pinned to systems
    *  (sectionId null = the whole estimate), oldest first, ≤ 200. Written only
    *  by addReviewComment / resolveReviewComment / deleteReviewComment under
@@ -481,6 +484,8 @@ export const QUOTE_CONTENT_FIELDS = [
   "bid",
   // Box goods sale (spec 2026-10-21): the whole customer document switches to the BOM view.
   "boxSale",
+  // #379: so does the BOM-estimate stamp.
+  "bomEstimate",
 ] as const;
 
 /** A comparable key of what the customer document shows. Pure. */
@@ -496,6 +501,8 @@ export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
       }
       // Box goods sale: only a stored true counts — false and absent are the same document.
       if (k === "boxSale") return rec.boxSale === true ? true : null;
+      // #379: the same for the BOM-estimate stamp.
+      if (k === "bomEstimate") return rec.bomEstimate === true ? true : null;
       return rec[k] ?? null;
     })
   );
@@ -541,6 +548,9 @@ export type QuoteRevisionDocFields = {
   /** Box goods sale (spec 2026-10-21) — present (true) only when the live quote was one; absent = a normal
    *  estimate, and on every revision cut before the field existed. quoteAsOfRevision reads it, never the live flag. */
   boxSale?: boolean;
+  /** #379 — present (true) only when the live quote carried the BOM-estimate stamp. Absent = the narrative
+   *  document, and on every revision cut before the field existed. quoteAsOfRevision reads it, never the live flag. */
+  bomEstimate?: boolean;
   /** #293 slice 3 — the Rev N and the date the revision's PDF printed
    *  (QuotePdfState.printed), stamped once with the PDF copy
    *  (setRevisionPdfPath). Absent until then, when the render couldn't be
@@ -946,6 +956,13 @@ export async function update(
     delete clean.pricingBasis;
     // Box goods sale: stored only as true on a system quote; false (or any other type) removes the key, so turning
     // it off leaves exactly a normal estimate's doc. A patch without the key leaves it alone.
+    // #379: the BOM-estimate stamp follows the same rule.
+    if ("bomEstimate" in clean) {
+      const on = clean.bomEstimate === true && isBoxSaleQuoteType(clean.quoteType ?? q.quoteType) && isBoxSaleSource(clean.source ?? q.source);
+      delete clean.bomEstimate;
+      if (on) q.bomEstimate = true;
+      else delete q.bomEstimate;
+    }
     if ("boxSale" in clean) {
       const on = clean.boxSale === true && isBoxSaleQuoteType(clean.quoteType ?? q.quoteType) && isBoxSaleSource(clean.source ?? q.source);
       delete clean.boxSale;
@@ -1016,6 +1033,8 @@ export function revisionDocFields(doc: Quote): QuoteRevisionDocFields {
     ...(d.bid ? { bid: { ...d.bid, addenda: [...(d.bid.addenda || [])] } } : {}),
     // Box goods sale: only when on — a normal estimate's revision is byte-identical.
     ...(d.boxSale === true ? { boxSale: true } : {}),
+    // #379: likewise the BOM-estimate stamp — only when on.
+    ...(d.bomEstimate === true ? { bomEstimate: true } : {}),
   };
 }
 

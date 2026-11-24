@@ -38,6 +38,36 @@ export function revisionBoxSale(rev: { docFields?: { boxSale?: unknown } | null 
   return rev?.docFields?.boxSale === true;
 }
 
+type OutputQuote = (NonNullable<FlagQuote> & { bomEstimate?: unknown }) | null | undefined;
+
+/**
+ * #379 (Jeff 2026-11-24) — the customer document of an Estimator system estimate is the BOM estimate: the
+ * estimate PDF is the BOM view, and there is no narrative, cover PDF, drawings or cut sheets. Unlike a box goods
+ * sale it may carry labor, and the client link offers the datasheet downloads.
+ *
+ * `Quote.bomEstimate` is the stored flag (absent = false). The Estimator stamps it on every Save of a DRAFT system
+ * estimate (`bomEstimateForSave`), and a revision freezes it (`revisionDocFields`). So an estimate sent before #379
+ * has no stamp and stays the narrative document it was sent as; so does a draft nobody has saved in the Estimator
+ * since. True for a box goods sale too.
+ */
+export function bomOutputOf(q: OutputQuote): boolean {
+  if (!q || !isBoxSaleQuoteType(q.quoteType) || !isBoxSaleSource(q.source)) return false;
+  return q.boxSale === true || q.bomEstimate === true;
+}
+
+/** A revision's frozen answer: a box goods sale, or stamped `bomEstimate` (#379). Cut before either existed → false. */
+export function revisionBomOutput(rev: { docFields?: { boxSale?: unknown; bomEstimate?: unknown } | null } | null | undefined): boolean {
+  return rev?.docFields?.boxSale === true || rev?.docFields?.bomEstimate === true;
+}
+
+/** What an Estimator Save stores (#379): true on a system estimate that is new, a draft, or already stamped — a
+ *  sent / won / lost estimate that was sent as a narrative document is never switched by a save. A box goods sale
+ *  is stamped too (its own flag still decides what it offers). */
+export function bomEstimateForSave(prior: (OutputQuote & { status?: string | null }) | null | undefined): boolean {
+  if (prior && (!isBoxSaleQuoteType(prior.quoteType) || !isBoxSaleSource(prior.source))) return false;
+  return !prior || prior.bomEstimate === true || !prior.status || prior.status === "draft";
+}
+
 /** What an Estimator Save stores: `posted` on a system estimate; an older caller that omits it keeps the stored
  *  flag; any other quote type never has one. */
 export function boxSaleForSave(prior: FlagQuote, posted: unknown): boolean {
@@ -82,7 +112,7 @@ export function boxSaleSendProblem(q: { boxSale?: boolean | null; quoteType?: st
 /** The Estimator's and + New quote's copy. */
 export const BOX_SALE_COPY = {
   label: "Box goods sale",
-  switchHint: "Equipment + freight only. The customer gets the BOM PDF and the online BOM — no cover, narrative, datasheets or drawings. Turn it off to bring them back.",
+  switchHint: "Equipment + freight only — no labor. The customer gets the BOM PDF and the online BOM, without the datasheet downloads.",
   chipTitle: "Box goods sale — equipment + freight only; the customer gets the itemized BOM",
   cardSub: "Equipment + freight only — the customer gets the itemized BOM",
   laborSystems: "Systems with labor:",
@@ -96,9 +126,8 @@ export function bomSwitchShown(flag: string, boxSale: boolean): boolean {
 /** The note (and the locked Line prices tooltip) when the estimate-wide Prices toggle is off. A box sale hides the Client
  *  package tab, so it points at the Show prices toggle on the same BOM quote tab instead. */
 export function bomPricesHiddenNote(boxSale: boolean): string {
-  return boxSale
-    ? "Prices are hidden on client documents. Turn on Show prices (Show on BOM)."
-    : "Prices are hidden on client documents (Client package → Line detail).";
+  void boxSale; // #379: every estimate has Show prices on this tab now
+  return "Prices are hidden on client documents. Turn on Show prices.";
 }
 
 /** The Build banner: the refusal sentence, then the systems that carry labor. */

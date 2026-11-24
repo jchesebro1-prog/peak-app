@@ -127,6 +127,9 @@ export function quoteAsOfRevision(q: Quote, rev: QuoteRevision): Quote {
   // + estimate-number, #293t).
   if (rev.docFields?.boxSale === true) asOf.boxSale = true;
   else delete asOf.boxSale;
+  // #379: likewise the BOM-estimate stamp — the revision's, never the live one.
+  if (rev.docFields?.bomEstimate === true) asOf.bomEstimate = true;
+  else delete asOf.bomEstimate;
   return asOf as unknown as Quote;
 }
 

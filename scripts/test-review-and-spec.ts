@@ -223,12 +223,11 @@ const ESTIMATOR_FILES = [
   "steps/client-package-tab.tsx",
   "steps/review-step.tsx",
   "steps/send-step.tsx",
-  "steps/review-tabs.tsx",
   "steps/review-sidebar.tsx",
 ];
 const PREVIEW_FILES = [
   "preview-doc.tsx", "steps/package-step.tsx", "steps/package-narrative-tab.tsx", "steps/package-bom-tab.tsx", "steps/client-package-tab.tsx", "steps/review-step.tsx", "steps/send-step.tsx",
-  "steps/review-tabs.tsx", "steps/review-sidebar.tsx",
+  "steps/review-sidebar.tsx",
 ];
 const readJoined = (files: string[]) =>
   files
@@ -13674,8 +13673,8 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   // #245 Task 11 adds the one other same-origin framing exception: the
   // portal part sidebar's inline datasheet viewer (/portal/catalog/doc/:id).
   // Estimator Phase 4 adds a third, the staff preview (/estimator-preview/:path*, pinned by "#P4 preview").
-  ok(!/source: "\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 2 && /"\/estimator-preview\/:path\*",\s*headers: \[\s*\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}/.test(cfg) && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && !cfg.includes("/portal/"),
-    "#222 next.config: the framing exceptions are the PDF route's and (Phase 4) the staff preview's alone");
+  ok(!/source: "\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 3 && /"\/api\/part-documents\/:id",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && /"\/estimator-preview\/:path\*",\s*headers: \[\s*\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}/.test(cfg) && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && !cfg.includes("/portal/"),
+    "#222 next.config: the framing exceptions are the PDF route's, (Phase 4) the staff preview's and (#379) the datasheet files' alone");
 }
 
 async function quotePdfRoutes222AsyncChecks(): Promise<void> {
@@ -19439,7 +19438,7 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
 
 
 /* --- #374: the Review spreadsheet lists each system's labor inside its block --- */
-import { reviewLaborRows as r374Rows, reviewSheetModel as r374Model, partsListRows as r374Parts, partsListCsvRows as r374Csv, partsListSkus as r374Skus, systemFees as r374Fees } from "@/app/(app)/estimator/parts-csv";
+import { reviewMoney as r378Money, reviewLaborRows as r374Rows, reviewSheetModel as r374Model, partsListRows as r374Parts, partsListCsvRows as r374Csv, partsListSkus as r374Skus, systemFees as r374Fees } from "@/app/(app)/estimator/parts-csv";
 import { buildLaborItems as r374Build, computeLabor as r374Calc, systemSellTotal as r374Total, lineExtSellOf as r374Ext } from "@/app/(app)/estimator/pricing";
 import { withLaborGroup as r374With } from "@/app/(app)/estimator/labor-group";
 import { buildReviewWorkbook as r374Xlsx } from "@/app/(app)/estimator/review-sheet-xlsx";
@@ -19453,6 +19452,112 @@ const r374Mob = (people: string, days: string, hoursPerDay: string, extra: Parti
 const r374Rate = (sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 60, "TVL-MIL": 0.7, "TVL-HTL": 150, "TVL-FOD": 50, "EQP-LIFT": 400 }[sku] || 0);
 const r374Draft = (mobs: R374Mob[]): R374Draft =>
   ({ discipline: "RIG", margin: "30", mobs, pmHrs: "", pmAuto: false, shopHrs: "", drfHrs: "", drfAuto: false, misc: "" });
+/* --- #378: Internal review's Review tab — the Review spreadsheet's columns on screen --- */
+import { REVIEW_GRID_COLUMNS as r378Cols, reviewGrid as r378Grid, reviewGridCells as r378Cells, reviewQty as r378Qty, reviewRowMarkup as r378Markup } from "@/app/(app)/estimator/review-grid";
+import { REVIEW_SHEET_HEADER as r378Header } from "@/app/(app)/estimator/review-sheet-xlsx";
+{
+  const sec = r374Sec([
+    r374It(1, "PART-A", "Truss", 2, 100, { link: "https://example.com/truss" }),
+    r374It(2, "CUSTOM", "Free part", 1, 0, { custom: true, price: 50 }),
+    r374It(3, "PART-B", "Clamp", 3, 10.5, { unit: "ft", internalNote: "check length" }),
+  ], { freightPct: 10 });
+  const model = r374Model([sec, r374Sec([r374It(9, "ALT", "Alt part", 1, 5)], { id: "s-alt", alternate: true })], [], { "PART-A": { mfr: "Acme", manufacturerModelNumber: "T-12" } });
+  const grid = r378Grid(model);
+  const b = grid[0];
+  ok(r378Cols === r378Header && r378Cols.join("|") === "Manufacturer|Item name|Description|Room|System|Qty|Unit Cost|Unit Sell|Ext Cost|Ext Sell|Markup|Price source|Link|Notes",
+    "#378 review grid: the columns ARE the Review spreadsheet's header, in its order");
+  ok(grid.length === 1 && b.sectionId === "s-373" && b.rows.length === 3 && b.rows.every((r) => r378Cells(r).length === r378Cols.length),
+    "#378 review grid: one block per listed system (alternates left out, as on the spreadsheet), a cell for every column");
+  const [a, free, clamp] = b.rows;
+  ok(a.manufacturer === "Acme" && a.itemName === "T-12" && a.qty === "2" && a.unitCost === "$100.00" && a.unitSell === "$200.00" && a.extCost === "$200.00" && a.extSell === "$400.00" && a.markup === "100.0%" &&
+     a.link === "https://example.com/truss" && a.source === "Catalog",
+    "#378 review grid: a row shows qty, unit and extended cost / sell, markup on its own sell, the price source and its link");
+  ok(free.markup === "" && free.extSell === "$50.00" && clamp.qty === "3" && clamp.extCost === "$31.50" && clamp.notes === "per ft; check length",
+    "#378 review grid: a zero-cost row prints no markup; Notes carry the unit and the internal note");
+  const close = Object.fromEntries(b.closing.map((c) => [c.key, c]));
+  ok(b.closing.map((c) => c.key).join() === "cost,markup,accts,freight,sell" && close.cost.label === "System cost — Rigging" && close.accts.label === "ACCTs" && close.freight.label === "Freight" && close.sell.label === "Package sell — Rigging",
+    "#378 review grid: each system closes with System cost, System markup, ACCTs, Freight and Package sell");
+  ok(close.cost.amount === "$231.50" && close.markup.amount === "$281.50" && close.freight.amount === r378Money(model[0].fees.freight) && close.sell.amount === r378Money(r374Total(sec)),
+    "#378 review grid: the closing rows are the sums the spreadsheet's formulas give, and Package sell is the system's real price");
+  ok(r378Qty(2.5) === "2.5" && r378Qty(248) === "248" && r378Qty(1 / 3) === "0.33" && r378Markup(0, 10) === "" && r378Markup(100, 90) === "-10.0%" && r378Markup(100, 100) === "0.0%",
+    "#378 review grid: quantities drop trailing zeros; markup is blank at zero cost, negative below cost");
+  const tabSrc = readFileSync(join(process.cwd(), EST_DIR, "steps/review-grid-tab.tsx"), "utf8");
+  const stepSrc378 = readFileSync(join(process.cwd(), EST_DIR, "steps/review-step.tsx"), "utf8");
+  ok(tabSrc.includes("reviewSheetModel(sections, vendorQuotes, info.parts, venueRoomName, projectDiscounts)") && tabSrc.includes("resolveCatalogSkusAction(skus)") && tabSrc.includes("exportReviewSheet()") &&
+     tabSrc.includes('target="_blank" rel="noopener noreferrer"'),
+    "#378 review grid (source): the tab builds the spreadsheet's own model from the live estimate, offers the download, and opens links in a new tab");
+  ok(stepSrc378.includes("<ReviewGridTab s={s} />") && !stepSrc378.includes("ReviewTabs") && !existsSync(join(process.cwd(), EST_DIR, "steps/review-tabs.tsx")),
+    "#378 / #379 review grid (source): Internal review's main area is the Review grid — the client-view tabs are gone");
+}
+/* --- #379: the customer document is the BOM estimate; Build package = BOM Estimate Generator + Datasheets --- */
+import { bomEstimateForSave as r379ForSave, bomOutputOf as r379Out, revisionBomOutput as r379Rev } from "@/lib/estimate-box-sale/rules";
+import { revisionDocFields as r379DocFields, quoteContentKey as r379ContentKey, type Quote as R379Quote, type QuoteRevision as R379Revision } from "@/lib/stores/quotes";
+import { quoteAsOfRevision as r379AsOf } from "@/lib/quote-share/view";
+import { bomEstimateExtras as r379Extras } from "@/lib/estimate-output/package-extras-model";
+import { datasheetAnchor as r379Anchor, datasheetPreview as r379Preview } from "@/lib/estimate-output/datasheet-preview";
+import { clientRowViews as r379Views } from "@/lib/estimate-output/client-package-ui";
+import { estimateReadiness as r379Ready } from "@/lib/estimate-steps/readiness";
+import { LIVE_PATCH_FIELDS as r379LiveFields } from "@/lib/estimate-live-save/rules";
+import { pdfDocKey as r379DocKey } from "@/app/(app)/estimator/pdf-doc-key";
+{
+  ok(r379Out({ bomEstimate: true }) && r379Out({ boxSale: true }) && !r379Out({}) && !r379Out(null) && !r379Out({ bomEstimate: "true" }),
+    "#379 rule: an estimate is a BOM estimate when it carries the stored stamp (or is a box goods sale); an unstamped one is still the narrative document");
+  ok(!r379Out({ bomEstimate: true, quoteType: "repair" }) && !r379Out({ bomEstimate: true, source: "portal-catalog" }) && r379Out({ bomEstimate: true, quoteType: "system", source: "estimator" }),
+    "#379 rule: only an Estimator system estimate — never another quote type or a portal quote");
+  ok(r379ForSave(null) && r379ForSave(undefined) && r379ForSave({ status: "draft" }) && r379ForSave({}) && r379ForSave({ status: "sent", bomEstimate: true }),
+    "#379 save: a new estimate, a draft and an already-stamped estimate are stamped");
+  ok(!r379ForSave({ status: "sent" }) && !r379ForSave({ status: "won" }) && !r379ForSave({ status: "lost" }) && !r379ForSave({ status: "draft", quoteType: "repair" }) && !r379ForSave({ status: "draft", source: "portal-catalog" }),
+    "#379 save: an estimate sent as a narrative document is never switched by a save; nor is another quote type");
+  ok(r379Rev({ docFields: { bomEstimate: true } }) && r379Rev({ docFields: { boxSale: true } }) && !r379Rev({ docFields: {} }) && !r379Rev({}) && !r379Rev(null),
+    "#379 revision: the frozen stamp (or a box sale's) answers for a revision; one cut before it reads false");
+  const base = { id: "Q-379", name: "n", customer: "c", status: "draft", spec: { sections: [] } } as unknown as R379Quote;
+  const stamped = { ...base, bomEstimate: true } as R379Quote;
+  ok(r379DocFields(stamped).bomEstimate === true && !("bomEstimate" in r379DocFields(base)), "#379 revision: a new revision freezes the stamp only when the live quote has it (an unstamped quote's revision is unchanged)");
+  ok(r379ContentKey(stamped) !== r379ContentKey(base) && r379ContentKey({ ...base, bomEstimate: false } as R379Quote) === r379ContentKey(base),
+    "#379 content: gaining the stamp is a document change (the stored PDF goes stale); false and absent are the same document");
+  const rev = (docFields: Record<string, unknown>): R379Revision => ({ rev: 1, at: 5, by: "t", reason: "sent", name: "n", value: 0, spec: { sections: [] }, docFields } as unknown as R379Revision);
+  const sentOld = { ...stamped, status: "sent", revisions: [rev({})] } as unknown as R379Quote;
+  ok(!r379Out(r379AsOf(sentOld, sentOld.revisions![0])) && r379Out(r379AsOf({ ...base, revisions: [rev({ bomEstimate: true })] } as unknown as R379Quote, rev({ bomEstimate: true }))),
+    "#379 as sent: a revision reads its OWN frozen stamp — one sent before #379 stays narrative even after the live estimate is stamped");
+  ok((r379LiveFields as readonly string[]).includes("bomEstimate"), "#379 save: the stamp rides a live save too");
+  const keyIn = { quoteNumber: "Q", projectName: "", custName: "", contactName: "", quoteNote: "", assumptions: "", paymentTerms: "Net 30", sections: [], vendorQuotes: [], pdfOptions: {} } as unknown as Parameters<typeof r379DocKey>[0];
+  ok(r379DocKey({ ...keyIn, bomEstimate: true }) !== r379DocKey(keyIn) && r379DocKey({ ...keyIn, bomEstimate: false }) === r379DocKey(keyIn),
+    "#379 doc key: an estimate waiting for its stamp reads as changed until it is saved; an unstamped key is unchanged");
+  const extras = { datasheets: { A: { href: "/d", name: "d" } }, downloads: { zipHref: "/z", datasheetsPdfHref: "/p", files: [{ href: "/f", name: "f", kindLabel: "Datasheet" }], specifications: false }, plans: [{ href: "/pl", name: "p", kindLabel: "Plan", sizeLabel: "1 KB", isImage: false }], actions: { scopes: [] } };
+  const bx = r379Extras(extras);
+  ok(bx.downloads === extras.downloads && bx.plans.length === 0 && Object.keys(bx.datasheets).length === 0 && bx.actions === extras.actions,
+    "#379 client link: a BOM estimate keeps the Downloads card (the zip, the datasheet book, each datasheet) and the client actions — no plans, no key-product links");
+  const row = (sku: string, mfr: string, model: string, state: "own" | "covered" | "not-needed" | "missing", href?: string) =>
+    ({ sku, mfr, model, label: sku + " label", state, coveredBy: state === "covered" ? ["FIX"] : [], datasheet: href ? { href, name: sku + ".pdf" } : null, partOf: [] });
+  const rows = [row("Z-1", "Zeta", "Z1", "own", "/api/part-documents/PD-z"), row("FIX", "acme", "B2", "own", "/api/part-documents/PD-b"), row("A-9", "Acme", "A9", "own", "/api/part-documents/PD-a"),
+    row("LENS", "Acme", "L1", "covered"), row("NUT", "", "", "not-needed"), row("GAP", "Beta", "G1", "missing"), row("OUT", "Beta", "O1", "own", "/api/part-documents/PD-o")];
+  const pv = r379Preview(r379Views(rows, ["OUT"]));
+  ok(pv.sheets.map((d) => d.sku).join() === "A-9,FIX,Z-1" && pv.sheets.every((d) => d.href.startsWith("/api/part-documents/") && !d.image),
+    "#379 datasheets preview: every ticked product with its own datasheet, A to Z by manufacturer then model (case-insensitive); covered, not-needed and left-out rows add nothing");
+  ok(pv.missing.map((m) => m.sku).join() === "GAP", "#379 datasheets preview: a ticked product with no datasheet on file is named as a gap");
+  ok(r379Preview(r379Views(rows, ["OUT", "A-9"])).sheets.map((d) => d.sku).join() === "FIX,Z-1" && r379Preview(r379Views(rows, [])).sheets.length === 4,
+    "#379 datasheets preview: unticking a product takes its sheet out; ticking it back in returns it (the preview follows every tick)");
+  ok(r379Preview(r379Views([row("P1", "Acme", "X", "own", "/api/part-documents/PD-x"), row("P2", "Acme", "Y", "own", "/api/part-documents/PD-x")], [])).sheets.length === 1 && r379Anchor("Acme:S4 26/x") === "ds-Acme-S4-26-x",
+    "#379 datasheets preview: one entry per datasheet file; anchors are DOM-safe");
+  const narr = [{ id: "n", name: "Rigging", kind: "materials", mfr: "", freightPct: 0, presentation: "narrative", items: [{ id: 1, sku: "S", desc: "d", qty: 1, unit: "ea", cost: 1, price: 2 }] }] as never[];
+  const rb = r379Ready({ saved: true, sections: narr, review: null, status: "draft", revNum: 1, bomOutput: true });
+  ok(rb.package.state === "ok" && rb.package.label === "✓ Ready" && !rb.send.label.includes("no intro text") && r379Ready({ saved: true, sections: narr, review: null, status: "draft", revNum: 1 }).package.state === "gaps",
+    "#379 readiness: a BOM estimate has no narrative gaps on Build package or Send & track (the rule without the flag is unchanged)");
+  const rd379 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const dsTab = rd379(`${EST_DIR}/steps/package-datasheets-tab.tsx`);
+  ok(dsTab.includes("clientPackageDocsAction({ sections: req.projection })") && dsTab.includes("setDatasheetsIncluded(skus, included)") && dsTab.includes("datasheetPreview(views)") && /<aside aria-label=\{TAB\.settings\}/.test(dsTab) &&
+     dsTab.indexOf("<aside") < dsTab.indexOf('data-testid="datasheets-preview"') && dsTab.includes('loading="lazy"') && dsTab.includes("quoteDatasheetsPdfPath(loadedId)"),
+    "#379 Datasheets tab (source): the ticks on the left (the unsaved BOM's rows, the autosaved selection), the live preview on the right (cover, index, lazily loaded pages), and the saved estimate's PDF download");
+  const act = rd379(`${EST_DIR}/actions.ts`), hook379 = rd379(`${EST_DIR}/use-estimator-state.ts`), cli379 = rd379(`${EST_DIR}/estimator-client.tsx`);
+  ok(act.includes("...(bomEstimateForSave(prior) ? { bomEstimate: true } : {}),") && hook379.includes('const bomStamp = canBoxSale && (initial.bomEstimate || baseStatus === "draft");') && hook379.includes("bomEstimate: initial.bomEstimate }"),
+    "#379 save (source): Save stamps a new or draft system estimate; a stored draft without the stamp reads as unsaved until then");
+  ok(cli379.includes("bomOutput: true,") && rd379(`${EST_DIR}/steps/build-step.tsx`).includes("                    bomOutput\n") && rd379(`${EST_DIR}/steps/send-step.tsx`).includes('data-testid="send-documents"'),
+    "#379 steps (source): the step badges and the Build cards drop the narrative; Send & track offers the estimate PDF and the datasheet package");
+  ok(["src/lib/quote-pdf/quote-document-data.ts", "src/lib/quote-pdf/generate.ts", "src/app/print/quote/[id]/page.tsx", "src/app/print/cover/[id]/page.tsx", "src/lib/estimate-output/cover-pdf-server.ts", "src/lib/estimate-output/package-live-loader.ts", "src/lib/estimate-output/package-panel-server.ts"].every((f) => rd379(f).includes("bomOutputOf(")  || rd379(f).includes("refuse: bomOutputOf")) &&
+     ["src/lib/estimate-output/package-loader.ts", "src/lib/curtain-cut-sheets/online.ts", "src/app/share/quote/[id]/[token]/package-page.tsx"].every((f) => rd379(f).includes("revisionBomOutput(")) &&
+     rd379("src/app/share/quote/[id]/[token]/datasheets.pdf/route.ts").includes("revisionBoxSale(pkg.rev)"),
+    "#379 outputs (source): the estimate PDF, the cover, the appendix, the staff preview and the client link all read the one rule; the shared datasheet book is refused for a box sale only");
+}
 {
   const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
   const byDesc = (rows: ReturnType<typeof r374Rows>, d: string) => rows.find((r) => r.desc === d);
@@ -32241,7 +32346,7 @@ import {
 } from "@/lib/estimate-steps/steps";
 {
   ok(e304Steps.join(",") === "build,package,review,send", "#305 steps: four steps in order");
-  ok(e304Label.build === "Build" && e304Label.package === "Build package" && e304Label.review === "Customer review" && e304Label.send === "Send & track",
+  ok(e304Label.build === "Build" && e304Label.package === "Build package" && e304Label.review === "Internal review" && e304Label.send === "Send & track",
     "#305 steps: the tab labels are exactly the spec's");
   ok(e304Parse(null) === "build" && e304Parse(undefined) === "build" && e304Parse("") === "build" && e304Parse("bogus") === "build" && e304Parse("PACKAGE") === "build",
     "#305 steps: a missing, unknown or wrong-case step is Build");
@@ -32328,9 +32433,9 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   ok(pkg.includes("<NarrativeColumn") && /<(PdfOptionsPanel|PdfLineDetailGroup)\b/.test(pkg) && pkg.includes("<CoverPackagePanel") && pkg.includes('section="documents"') && !pkg.includes('section="grid"'),
     "#305 steps: Build package holds the narrative, Show-on-PDF options, cover and drawings/gaps");
   // Phase 4: the desktop tabs and sidebar moved into review-tabs.tsx / review-sidebar.tsx.
-  const reviewAll = review + st("review-tabs.tsx") + st("review-sidebar.tsx");
-  ok(reviewAll.includes("<PdfPreviewPane") && reviewAll.includes("<ReviewCostSummary") && review.includes('variant="panel"') && review.includes("<ReviewSidebar") && review.includes("<ReviewTabs"),
-    "#305 steps: Customer review holds the PDF, the cost summary and the review actions");
+  const reviewAll = review + st("review-sidebar.tsx");
+  ok(reviewAll.includes("<PdfPreviewPane") && reviewAll.includes("<ReviewCostSummary") && review.includes('variant="panel"') && review.includes("<ReviewSidebar") && review.includes("<ReviewGridTab"),
+    "#305 steps: Internal review holds the Review grid (#379), a phone's PDF, the cost summary and the review actions");
   const staff = readFileSync(join(process.cwd(), "src/app/(app)/estimator/package-staff-panel.tsx"), "utf8");
   ok(/section = "all"/.test(staff) && staff.includes('const showDocuments = section === "all" || section === "documents";') && !staff.includes("showGrid") && staff.includes('(section === "all" || section === "responses") &&'),
     "#305 steps (#333 split): PackageStaffPanel shows all, only its documents half, or only responses");
@@ -32344,7 +32449,7 @@ import { estimateReadiness as e304Ready } from "@/lib/estimate-steps/readiness";
   const modalMounts = ESTIMATOR_FILES.filter((f) => existsSync(join(process.cwd(), EST_DIR, f)) && readFileSync(join(process.cwd(), EST_DIR, f), "utf8").includes("<AiScopeModal"));
   const rv = readFileSync(join(process.cwd(), EST_DIR, "steps/review-step.tsx"), "utf8");
   const phoneBranch = rv.slice(rv.lastIndexOf("{phone && ("));
-  ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && phoneBranch.includes("<CoverPackagePanel"), "#305 review: the phone's bottom block mounts the cover panel and the Client link panel");
+  ok(phoneBranch.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && !rv.includes("CoverPackagePanel"), "#305 review: the phone's bottom block mounts the Client link panel (#379: the cover panel is retired)");
   ok(ESTIMATOR_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))) && PREVIEW_FILES.every((f) => existsSync(join(process.cwd(), EST_DIR, f))),
     "#305 harness: every joined Estimator file exists (a rename can't turn the joined-source pins vacuous)");
 }
@@ -33952,27 +34057,11 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
 {
   const C = p4r.REVIEW_UI_COPY;
   // Exact copy (constraints).
-  ok(p4r.REVIEW_TABS.map((t) => p4r.REVIEW_TAB_LABEL[t]).join("|") === "Document|Package page|BOM|Cut sheets|Datasheets|Drawings",
-    "#P4 review UI: tabs read Document, Package page, BOM, Cut sheets, Datasheets, Drawings — in that order");
-  ok(p4r.REVIEW_DEVICES.map((d) => p4r.REVIEW_DEVICE_LABEL[d]).join("|") === "Desktop|Phone", "#P4 review UI: the frame toggle reads Desktop / Phone");
-  ok(C.unsaved === "Unsaved changes — Save to refresh what the client sees." && C.saveFirst === "Save the estimate first.",
-    "#P4 review UI: the unsaved banner and the save-first note are exact");
   ok(C.internalOnly === "Internal only" && C.labor === "Labor" && C.checklist === "Package checklist" && C.comments === "Comments" &&
      C.wholeEstimate === "Whole estimate" && C.addComment === "Add comment" && C.resolve === "Resolve" && C.delete === "Delete" && C.edited === "edited",
     "#P4 review UI: sidebar titles, Whole estimate, Add comment, Resolve, Delete and the edited marker are exact");
 
   // Framed tabs: src + width + key.
-  ok(p4r.frameSrc("Q-2041", "package") === "/estimator-preview/Q-2041?tab=package" && p4r.frameSrc("Q-2041", "bom") === "/estimator-preview/Q-2041?tab=bom" &&
-     p4r.frameSrc("Q-2041", "cutsheets") === "/estimator-preview/Q-2041?tab=cutsheets",
-    "#P4 review UI: Package page / BOM / Cut sheets frame /estimator-preview/<id>?tab=package|bom|cutsheets");
-  ok(p4r.frameSrc("Q-2041", "document") === null && p4r.frameSrc("Q-2041", "datasheets") === null && p4r.frameSrc("Q-2041", "drawings") === null &&
-     p4r.frameSrc(null, "package") === null && p4r.frameSrc("", "bom") === null,
-    "#P4 review UI: Document / Datasheets / Drawings aren't framed, and an unsaved quote frames nothing");
-  ok(p4r.frameWidth("desktop") === "100%" && p4r.frameWidth("phone") === "390px" && p4r.PHONE_FRAME_WIDTH === 390, "#P4 review UI: the frame is 100% wide on Desktop, 390 px on Phone");
-  ok(p4r.frameKey("bom", 1, 2) !== p4r.frameKey("bom", 3, 2) && p4r.frameKey("bom", 1, 2) !== p4r.frameKey("bom", 1, 5) && p4r.frameKey("bom", 1, 2) === p4r.frameKey("bom", 1, 2),
-    "#P4 review UI: the frame remounts after a Save (pdf.savedAt) or a status change (asOf), not otherwise");
-  ok(p4r.tabNeedsSave("document") === false && ["package", "bom", "cutsheets", "datasheets", "drawings"].every((t) => p4r.tabNeedsSave(t as p4r.ReviewTab)),
-    "#P4 review UI: every tab but Document needs a saved quote");
 
   // Send back: label pluralisation, enablement, visibility.
   ok(p4r.sendBackLabel(0) === "Send back with 0 comments" && p4r.sendBackLabel(1) === "Send back with 1 comment" && p4r.sendBackLabel(3) === "Send back with 3 comments",
@@ -34004,32 +34093,15 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
   ok(p4r.checklistRows([], { state: "ok", label: "✓ Ready" }).map((r) => `${r.ok}:${r.text}`).join() === "true:Nothing missing." &&
      p4r.checklistRows(null, { state: "ok", label: "✓ Ready" }).length === 0,
     "#P4 review UI: no gaps and a ready badge → Nothing missing. (nothing claimed before the package has loaded)");
-  const ds = (o: Partial<{ datasheet: { href: string; name: string } | null; datasheetCoveredBy: string[]; datasheetOk: boolean }>) =>
-    p4r.datasheetCell({ datasheet: null, datasheetCoveredBy: [], datasheetOk: false, ...o });
-  const own = ds({ datasheet: { href: "/api/part-documents/PD-1", name: "ds.pdf" }, datasheetOk: true });
-  ok(own.kind === "link" && own.href === "/api/part-documents/PD-1" && JSON.stringify(ds({ datasheetOk: true, datasheetCoveredBy: ["FIX-1", "FIX-2"] })) === JSON.stringify({ kind: "note", text: "covered by FIX-1, FIX-2" }) &&
-     JSON.stringify(ds({ datasheetOk: true })) === JSON.stringify({ kind: "note", text: "not needed" }) && ds({}).kind === "missing",
-    "#P4 review UI: a Datasheets cell is its own document, covered by …, not needed, or Missing");
   const tg = p4r.commentTargets([{ id: "s1", name: "Rigging" }, { id: "s2", name: " " }]);
   ok(tg.map((o) => `${o.value}=${o.label}`).join("|") === "=Whole estimate|s1=Rigging|s2=Untitled system", "#P4 review UI: the comment target select offers Whole estimate first, then the systems in order");
 
   // Source pins.
   const r4 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  const tabs = r4(`${EST_DIR}/steps/review-tabs.tsx`);
+  const tabs = ""; // #379: review-tabs.tsx is gone
   const side = r4(`${EST_DIR}/steps/review-sidebar.tsx`);
   const step = r4(`${EST_DIR}/steps/review-step.tsx`);
   const hook = r4(`${EST_DIR}/use-estimator-state.ts`);
-  ok(/<iframe\s+key=\{frameKey\(tab, pdf\?\.savedAt, next\?\.asOf\)\}\s+src=\{src\}\s+title=\{/.test(tabs) && tabs.includes("width: frameWidth(device)") && tabs.includes("const src = frameSrc(loadedId, tab);") &&
-     (!/sandbox=/.test(tabs) || /sandbox="[^"]*allow-same-origin[^"]*"/.test(tabs) && /allow-downloads/.test(tabs)),
-    "#P4 review UI: the framed tabs are an iframe keyed on the saved version, titled, sized by the device, never sandboxed without downloads");
-  ok(/\{framed && \(\s*<div role="group"/.test(tabs) && tabs.includes("REVIEW_DEVICE_LABEL[d]"), "#P4 review UI: the Desktop / Phone toggle shows only on a framed tab");
-  ok(/\{pdfDirty && tab !== "document" && \(/.test(tabs) && tabs.includes("{COPY.unsaved}") && /tabNeedsSave\(tab\) && !loadedId\) \{\s*body = <p style=\{NOTE\}>\{COPY\.saveFirst\}<\/p>;/.test(tabs),
-    "#P4 review UI: unsaved edits show the banner (Document keeps its own Save), and an unsaved quote reads Save the estimate first.");
-  ok(tabs.includes("<PdfPreviewPane") && tabs.includes("actionsInline={!phone}") && tabs.includes("onSave={doSave}") && (tabs.match(/target="_blank" rel="noopener noreferrer"/g) || []).length >= 2,
-    "#P4 review UI: Document is the existing PDF pane; Datasheets / Drawings links open in a new tab");
-  ok(step.includes("reviewDocsAction(loadedId)") && /\}, \[phone, loadedId, savedAt, asOf\]\);/.test(step) && /\{phone \? \(\s*<PdfPreviewPane/.test(step) &&
-     step.includes("<ReviewTabs s={s} docs={loadedId ? docs : null} />") && step.includes("estimateReadiness(") && step.includes("}).package,"),
-    "#P4 review UI: the step reads the docs once (re-read after a Save / status change) for both tabs and checklist; a phone keeps the plain PDF");
   ok(/savedOnly=\{pdfDirty\}\s+disabled=\{statusChanging \|\| tierResolving\}\s+beforeAction=\{pdfDirty \? saveNow : undefined\}/.test(side) && side.includes("onActed(action);"),
     "#P4 review UI: the sidebar's QuoteNextStep keeps its wiring (savedOnly, disabled, beforeAction, onActed on ok)");
   const sb = side.slice(side.indexOf("function SendBackWithComments"), side.indexOf("function LaborTable"));
@@ -34046,7 +34118,7 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
   ok(r4(`${EST_DIR}/page.tsx`).includes("viewerRoles={user.roles}") && r4(`${EST_DIR}/types.ts`).includes("viewerRoles: string[];"), "#P4 review UI: the Estimator gets the viewer's roles for the comment rules");
   ok(/reviewComments,\s+setReviewComments,\s+refreshReviewComments,\s+next,\s+\};\s+\}/.test(hook) && hook.includes("listReviewCommentsAction(loadedId)") && (hook.match(/reviewSeqRef\.current \+= 1;/g) || []).length === 1,
     "#P4 review UI: the hook owns the comments (load once per saved quote, a mutation overtakes a read) with next still last");
-  for (const [name, src] of [["review-tabs", tabs], ["review-sidebar", side], ["review-step", step]] as const)
+  for (const [name, src] of [["review-sidebar", side], ["review-step", step]] as const)
     ok(!/\.components|customerLines\(|window\.print|est-doc|reviewBarOpen/.test(src) && !/from "@\/lib\/(stores|db)\//.test(src.replace(/import type [^\n]+\n/g, "")),
       `#P4 review UI: ${name}.tsx stays clear of the pinned hazards and store/db value imports`);
 
@@ -34085,18 +34157,13 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
     "#P4 review UI fix: the adapter's note equals sendBackNote over the same saved systems");
 
   // 3. Tab keyboard model + comment aria-labels.
-  ok(p4r.nextReviewTab("document", "ArrowRight") === "package" && p4r.nextReviewTab("drawings", "ArrowRight") === "document" &&
-     p4r.nextReviewTab("document", "ArrowLeft") === "drawings" && p4r.nextReviewTab("bom", "ArrowLeft") === "package" &&
-     p4r.nextReviewTab("bom", "Home") === "document" && p4r.nextReviewTab("bom", "End") === "drawings" && p4r.nextReviewTab("bom", "a") === null,
-    "#P4 review UI fix: Left/Right move between tabs (wrapping), Home/End jump, other keys do nothing");
-  ok(p4r.reviewTabId("bom") === "review-tab-bom" && p4r.reviewPanelId("bom") === "review-panel-bom" &&
-     p4r.commentActionLabel("resolve", 2) === "Resolve comment 2" && p4r.commentActionLabel("delete", 3) === "Delete comment 3" && p4r.commentActionLabel("delete", null) === "Delete resolved comment",
-    "#P4 review UI fix: tab/panel ids and the per-comment aria-labels read exactly");
+  ok(p4r.commentActionLabel("resolve", 2) === "Resolve comment 2" && p4r.commentActionLabel("delete", 3) === "Delete comment 3" && p4r.commentActionLabel("delete", null) === "Delete resolved comment",
+    "#P4 review UI fix: the per-comment aria-labels read exactly");
   ok(p4r.REVIEW_UI_COPY.sendBackSaveFirst === "Save first — the note numbers follow the saved estimate.", "#P4 review UI fix: the dirty-disable title is exact");
 
   // Source pins.
   const rf = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
-  const tabsSrc = rf(`${EST_DIR}/steps/review-tabs.tsx`);
+  const tabsSrc = ""; // #379: review-tabs.tsx is gone
   const sideSrc = rf(`${EST_DIR}/steps/review-sidebar.tsx`);
   const hookSrc = rf(`${EST_DIR}/use-estimator-state.ts`);
   ok(sideSrc.includes("withoutSendBack(next)") && /<QuoteNextStep\s+quoteId=\{loadedId\}\s+view=\{panelView\}/.test(sideSrc),
@@ -34111,10 +34178,6 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
     "#P4 review UI fix: while the estimate is unsaved both Send back buttons are disabled with the save-first title");
   ok(sideSrc.includes("refreshReviewComments()") && sideSrc.includes('addEventListener("focus", kick)') && sideSrc.includes("setTimeout(() => void refreshReviewComments(), 400)"),
     "#P4 review UI fix: the review comments refresh when the step opens and (debounced) on focus");
-  ok(tabsSrc.includes('role="tablist"') && tabsSrc.includes('role="tab"') && tabsSrc.includes("aria-selected={tab === t}") && tabsSrc.includes("aria-controls={reviewPanelId(t)}") &&
-     tabsSrc.includes("id={reviewTabId(t)}") && tabsSrc.includes('role="tabpanel"') && tabsSrc.includes("aria-labelledby={reviewTabId(tab)}") && tabsSrc.includes("id={reviewPanelId(tab)}") &&
-     tabsSrc.includes("onKeyDown={onTabKey}") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)") && tabsSrc.includes("tabIndex={tab === t ? 0 : -1}"),
-    "#P4 review UI fix: the tabs are a tablist/tab/tabpanel with aria-selected, aria-controls, aria-labelledby, roving tabindex and arrow keys");
   ok(sideSrc.includes('aria-label={commentActionLabel("resolve", n)}') && sideSrc.includes('aria-label={commentActionLabel("delete", n)}') && sideSrc.includes("actions(comment, n)") && sideSrc.includes("actions(c, null)"),
     "#P4 review UI fix: Resolve / Delete carry per-comment aria-labels");
   ok(/setReviewCommentsState\(\[\]\);\s+if \(!loadedId\) return;\s+listReviewCommentsAction\(loadedId\)/.test(hookSrc),
@@ -38808,21 +38871,15 @@ import { stepSearch as p3StepSearch } from "@/lib/estimate-steps/steps";
 // ---- Task 1: package tab URL helpers ----
 {
   const T = p3Tabs;
-  ok(JSON.stringify(T.PACKAGE_TABS) === JSON.stringify(["narrative", "bom", "client"]), "#333 tabs: Narrative · BOM quote · Client package, in that order");
-  ok(T.PACKAGE_TAB_LABEL.narrative === "Narrative" && T.PACKAGE_TAB_LABEL.bom === "BOM quote" && T.PACKAGE_TAB_LABEL.client === "Client package", "#333 tabs: labels");
-  ok(T.parsePackageTab("client") === "client" && T.parsePackageTab("bom") === "bom" && T.parsePackageTab("narrative") === "narrative", "#333 tabs: parsePackageTab reads a known tab");
-  ok(T.parsePackageTab("Client") === "narrative" && T.parsePackageTab(null) === "narrative" && T.parsePackageTab(undefined) === "narrative" && T.parsePackageTab("bogus") === "narrative" && T.parsePackageTab("") === "narrative",
-    "#333 tabs: unknown, missing or wrong-case ptab reads as Narrative");
-  ok(T.packageTabSearch("?id=Q-1&step=package", "bom") === "?id=Q-1&step=package&ptab=bom", "#333 tabs: packageTabSearch writes ptab, keeping every other param");
-  ok(T.packageTabSearch("?id=Q-1&step=package&ptab=bom", "narrative") === "?id=Q-1&step=package", "#333 tabs: Narrative writes no ptab");
-  ok(T.packageTabSearch("id=Q-1&step=package&ptab=bom", "client") === "?id=Q-1&step=package&ptab=client" && T.packageTabSearch("", "narrative") === "", "#333 tabs: packageTabSearch tolerates a missing ? and an empty search");
+  ok(JSON.stringify(T.PACKAGE_TABS) === JSON.stringify(["bom", "datasheets"]) && T.PACKAGE_TAB_LABEL.bom === "BOM Estimate Generator" && T.PACKAGE_TAB_LABEL.datasheets === "Datasheets", "#379 tabs: BOM Estimate Generator · Datasheets, in that order");
+  ok(T.parsePackageTab("datasheets") === "datasheets" && ["narrative", "client", "Bom", null, undefined, "junk"].every((r) => T.parsePackageTab(r) === "bom"), "#379 tabs: a missing, unknown or retired ptab (narrative, client) reads as the estimate tab");
+  ok(T.packageTabSearch("?id=Q-1&step=package&ptab=datasheets", "bom") === "?id=Q-1&step=package" && T.nextPackageTab("bom", "ArrowRight") === "datasheets" && T.nextPackageTab("datasheets", "ArrowRight") === "bom" && T.nextPackageTab("bom", "End") === "datasheets" && T.nextPackageTab("bom", "x") === null && T.nextPackageTab("bom", "ArrowRight", T.BOX_SALE_PACKAGE_TABS) === "bom",
+    "#379 tabs: the estimate tab writes no ptab; arrow keys move across the shown tabs only");
+  ok(T.packageTabSearch("?id=Q-1&step=package", "datasheets") === "?id=Q-1&step=package&ptab=datasheets", "#333 tabs: packageTabSearch writes ptab, keeping every other param");
   ok(p3StepSearch("?id=Q-1&step=package&ptab=client", "review") === "?id=Q-1&step=review", "#333 tabs: stepSearch drops ptab off the package step");
   ok(p3StepSearch("?id=Q-1&step=package&ptab=client", "build") === "?id=Q-1", "#333 tabs: stepSearch to Build drops ptab too");
   ok(p3StepSearch("?step=package&ptab=client", "package") === "?step=package&ptab=client", "#333 tabs: stepSearch to the package step keeps ptab");
   ok(p3StepSearch("?id=Q-1&step=review", "send") === "?id=Q-1&step=send", "#333 tabs: stepSearch unchanged when there is no ptab");
-  ok(T.nextPackageTab("client", "ArrowRight") === "narrative" && T.nextPackageTab("narrative", "ArrowLeft") === "client" && T.nextPackageTab("narrative", "ArrowRight") === "bom",
-    "#333 tabs: ←/→ wrap");
-  ok(T.nextPackageTab("bom", "Home") === "narrative" && T.nextPackageTab("bom", "End") === "client" && T.nextPackageTab("bom", "Enter") === null, "#333 tabs: Home/End jump; any other key → null");
   ok(T.packageTabId("bom") === "pkg-tab-bom" && T.packageTabPanelId("bom") === "pkg-panel-bom", "#333 tabs: tab / panel ids");
 }
 
@@ -38998,7 +39055,6 @@ async function pkg333StoreChecks(): Promise<void> {
 
 // ---- Task 5: every datasheet consumer honours the project's choices ----
 import { reviewDatasheetRows as p3ReviewRows } from "@/lib/estimate-output/package-preview";
-import { datasheetCell as p3Cell, REVIEW_UI_COPY as p3ReviewCopy } from "@/lib/estimate-review/review-ui";
 {
   const bom = [{ sku: "FIX", desc: "Fixture" }, { sku: "LENS", desc: "Lens" }, { sku: "OWN", desc: "Own" }];
   const by = new Map([
@@ -39008,10 +39064,6 @@ import { datasheetCell as p3Cell, REVIEW_UI_COPY as p3ReviewCopy } from "@/lib/e
   ]);
   const rows = p3ReviewRows(bom, by);
   ok(rows[0].excluded === "self" && rows[1].excluded === "parent" && !("excluded" in rows[2]), "#333 review rows: a left-out product's row carries excluded (absent otherwise — unchanged rows)");
-  ok(JSON.stringify(p3Cell(rows[0])) === JSON.stringify({ kind: "note", text: "Left out of this package" }) && p3ReviewCopy.leftOut === "Left out of this package",
-    "#333 review cell: a left-out datasheet reads \"Left out of this package\"");
-  ok(JSON.stringify(p3Cell(rows[1])) === JSON.stringify({ kind: "note", text: "Left out with S4-26" }), "#333 review cell: an accessory left out with its fixture reads \"Left out with S4-26\"");
-  ok(p3Cell(rows[2]).kind === "link", "#333 review cell: an included product keeps its link");
 
   // 8. Source pin: every specPackageDocs( call site passes a selection argument (the datasheet-rows action excepted).
   const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
@@ -39207,8 +39259,8 @@ import { packageGapChips as p3GapChips } from "@/lib/estimate-output/package-gap
   const panel = rdq("src/lib/estimate-output/package-panel-server.ts");
   ok(panel.includes("drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,"), "#333 panel (source): the gap chips know drawings are off");
   const ra = rdq("src/app/(app)/estimator/review-actions.ts");
-  ok(ra.includes("drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,") && rdq("src/app/(app)/estimator/steps/review-tabs.tsx").includes("<DrawingsList rows={docs.drawings} off={docs.drawingsOff} />"),
-    "#333 Customer review (source): the Drawings tab gets the off flag and still lists the files");
+  ok(ra.includes("drawingsOff: !normalizePackageSelection(q.packageSelection).drawings,"),
+    "#333 review docs (source): the review rows know drawings are off");
 }
 
 async function pkg333DrawingChecks(): Promise<void> {
@@ -39403,13 +39455,11 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
   const shell = rdq("steps/package-step.tsx");
   const narr = rdq("steps/package-narrative-tab.tsx");
   const col = rdq("narrative-column.tsx");
-  ok(shell.includes('role="tablist"') && shell.includes('role="tab"') && shell.includes("parsePackageTab(params.get(\"ptab\"))") && shell.includes("packageTabSearch(window.location.search, to)") && shell.includes("nextPackageTab(tab, e.key)"),
+  ok(shell.includes('role="tablist"') && shell.includes('role="tab"') && shell.includes("parsePackageTab(params.get(\"ptab\"))") && shell.includes("packageTabSearch(window.location.search, to)") && shell.includes("nextPackageTab(tab, e.key, tabs)"),
     "#333 shell: a tablist reads ?ptab= (parsePackageTab) and writes it with pushState(packageTabSearch), ←/→/Home/End");
-  ok(shell.includes('<div id={packageTabPanelId("narrative")} role="tabpanel" aria-labelledby={packageTabId("narrative")} style={{ ...PANEL, display: tab === "narrative" ? "flex" : "none" }}>') &&
-     !/\{tab === "narrative" && /.test(shell),
-    "#333 shell: the Narrative panel is always mounted and hidden with display: \"none\" — never conditionally rendered (TipTap keeps its undo)");
-  ok(/\{visited\.bom && \(/.test(shell) && /\{visited\.client && \(/.test(shell) && shell.includes('display: tab === "bom" ? "flex" : "none"') && shell.includes('display: tab === "client" ? "flex" : "none"'),
-    "#333 shell: BOM quote and Client package mount on first visit, then stay mounted while hidden");
+  ok(/\{visited\.bom && \(/.test(shell) && /\{visited\.datasheets && \(/.test(shell) && shell.includes('display: tab === "bom" ? "flex" : "none"') && shell.includes('display: tab === "datasheets" ? "flex" : "none"') &&
+     !shell.includes("PackageNarrativeTab") && !shell.includes("ClientPackageTab"),
+    "#379 shell: BOM Estimate Generator and Datasheets mount on first visit, then stay mounted while hidden; the Narrative and Client package tabs are not mounted");
   ok(!/<select[\s\S]{0,200}presentation/.test(col) && !col.includes('aria-label="Customer presentation"') && col.includes("Change in Client package →") && col.includes("Prints on the quote only in Narrative mode."),
     "#333 narrative column: no presentation select — a read-only \"Prints as …\" line links to Client package (the hint stays)");
   ok(!narr.includes("<PackageStaffPanel") && !narr.includes("<PdfOptionsPanel") && narr.includes("<QuotePeopleFields") && narr.includes("<CoverPackagePanel"),
@@ -39425,7 +39475,7 @@ import { datasheetExclusion as p3Exclusion } from "@/lib/part-docs/exclusions";
   const shell = rdq("steps/package-step.tsx");
   ok(bom.startsWith('"use client";') && bom.includes('import { liveBomDocumentProps } from "@/lib/estimate-output/live-bom";') && !/^import[^\n]*\b(bomViewProps|quoteDocumentDataFor)\b/m.test(bom) && !/\b(bomViewProps|quoteDocumentDataFor)\(/.test(bom) && !/from "@\/lib\/stores\//.test(bom),
     "#333 BOM tab: builds its props only through live-bom.ts (the saved preview's path) and imports nothing from a store");
-  ok(bom.includes('href={previewPath(loadedId, "bom")}') && /\{loadedId && \(/.test(bom), "#333 BOM tab: \"Open saved preview ↗\" = previewPath(id, \"bom\"), only once saved");
+  ok(bom.includes('href={previewPath(loadedId, "bom")}') && /\{loadedId \? \(/.test(bom), "#333 BOM tab: \"Open saved preview ↗\" = previewPath(id, \"bom\"), only once saved");
   ok(bom.includes("<QuoteDocument {...props} layout=\"web\" />") && bom.includes("<style>{QUOTE_WEB_EMBED_CSS}</style>") && /useMemo\(\(\) => \(shown \? liveBomDocumentProps\(shown\)/.test(bom),
     "#333 BOM tab: renders the customer QuoteDocument (web layout) from memoised live props");
   ok(/const PackageBomTab = dynamic\(\(\) => import\("\.\/package-bom-tab"\), \{ ssr: false/.test(shell) && !/^import [^\n]*package-bom-tab/m.test(shell),
@@ -39520,7 +39570,6 @@ import * as p3Cpu from "@/lib/estimate-output/client-package-ui";
   ok(!card.includes("onSetPresentation") && !card.includes("Customer: itemized</option>") && card.includes('data-testid="card-presentation"') && card.includes("p.onOpenPresentation();"),
     "#333 Q4: the Build card's presentation select is a read-only \"Customer: … ↗\" chip linking to Client package");
   const cli = readFileSync(join(root, "estimator-client.tsx"), "utf8");
-  ok(cli.includes('packageTabSearch(stepSearch(window.location.search, "package"), "client") + "#systems"'), "#333 Q4: the chip lands on Build package → Client package → #systems");
   ok(readFileSync(join(root, "narrative.ts"), "utf8").includes('presentation: "narrative"'), "#333 Q4: Draft narrative still switches its system to Narrative (same field)");
 }
 import { DEFAULT_PACKAGE_SELECTION as p3DefaultSel } from "@/lib/estimate-output/package-selection";
@@ -39638,13 +39687,11 @@ import * as p3rCpu from "@/lib/estimate-output/client-package-ui";
     "#333 review L: QUOTE_WEB_EMBED_CSS has no page-level print rules (QUOTE_WEB_CSS keeps them for its own pages)");
 
   // M (tabs).
-  ok(shell.includes("aria-controls={mounted(t) ? packageTabPanelId(t) : undefined}") && shell.includes("goTab(to, undefined, true)") && shell.includes('window.history[replace ? "replaceState" : "pushState"]'),
+  ok(shell.includes("aria-controls={visited[t] ? packageTabPanelId(t) : undefined}") && shell.includes("goTab(to, true)") && shell.includes('window.history[replace ? "replaceState" : "pushState"]'),
     "#333 review M: aria-controls only names mounted panels; arrow-key moves replaceState, clicks pushState");
 
   // N (review drawings).
-  const rv = rd("src/app/(app)/estimator/steps/review-tabs.tsx");
-  ok(/\{off \? \(\s*<p style=\{NOTE\}>\{COPY\.drawingsOff\}<\/p>\s*\) : !rows\.length \? \(/.test(rv) || rv.includes("if (off && !rows.length) return <p style={NOTE}>{COPY.drawingsOff}</p>;"),
-    "#333 review N: drawings off with no files shows only \"Drawings are off…\"");
+  const rv = ""; // #379: review-tabs.tsx is gone
 
   // O (Systems lists every system with items).
   const it = (id: number, price: number) => ({ id, sku: "S" + id, desc: "d", qty: 1, unit: "ea", cost: 0, price });
@@ -39821,7 +39868,7 @@ import { qd364BomCases as s364Cases, qd364Baseline as s364Baseline } from "./qd3
     .map((f) => [f, (rd(f).match(/\bshow(Materials|Labor|Freight):/g) || []).length] as const);
   ok(assigners.every(([f, n]) => (f.endsWith("quote-document-view.ts") ? n === 3 : n === 0)), "#364: only bomViewProps sets the show flags — the print, cover, package and online loaders don't");
   const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
-  ok(tab.includes('showOnBom: "Show on BOM"') && tab.includes("onClick={() => togglePdf(flag)}") && tab.includes('const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;') && tab.includes("disabled={locked}") && tab.includes("aria-pressed={on}") &&
+  ok(tab.includes('showOnBom: "Show on BOM"') && tab.includes("() => togglePdf(flag)") && tab.includes('const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;') && tab.includes("disabled={!!opts.locked}") && tab.includes("aria-checked={on}") &&
      ["Line prices", "Materials", "Labor", "Freight"].every((l) => tab.includes('label: "' + l + '"')),
     "#364 BOM tab: four Show on BOM switches through togglePdf; Line prices is disabled while the quote hides prices");
   const st = rd("src/app/(app)/estimator/use-estimator-state.ts");

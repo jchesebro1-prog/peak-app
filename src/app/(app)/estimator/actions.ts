@@ -68,7 +68,7 @@ import { setQuotePeopleAs } from "@/lib/quote-people";
 import { addVendorPartiesForSave, prepareVendorQuotesForSave } from "@/lib/stores/vendor-quotes";
 import { quoteSpecFollowingRenames, selectionFollowingRenames } from "@/lib/stores/catalog-renames";
 import { leadIdForCreate } from "@/lib/lead-for-create";
-import { boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
+import { bomEstimateForSave, boxSaleForSave, boxSaleOf, boxSaleSaveProblem } from "@/lib/estimate-box-sale/rules";
 import { REVISE_FIRST, repriceLocked } from "@/lib/estimate-reprice/lock";
 import { deriveEstimatorSections } from "@/lib/estimate-reprice/derive";
 import { repricedNow } from "@/lib/estimate-reprice/rules";
@@ -562,6 +562,8 @@ export async function saveQuoteAction(
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
     // Box goods sale: content (QUOTE_CONTENT_FIELDS); create keeps it via buildQuote, update() stores only true.
     boxSale,
+    // #379: the customer document is the BOM estimate — stamped on a new or draft system estimate, never taken off.
+    ...(bomEstimateForSave(prior) ? { bomEstimate: true } : {}),
     // #301 (R14): not content fields — they never re-render the estimate PDF.
     ...(typeof payload.coverSummary === "string" ? { coverSummary: cleanPlainText(payload.coverSummary, COVER_SUMMARY_MAX) } : {}),
     ...(typeof payload.notIncluded === "string" ? { notIncluded: cleanPlainText(payload.notIncluded, NOT_INCLUDED_MAX) } : {}),

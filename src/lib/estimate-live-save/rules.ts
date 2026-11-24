@@ -15,7 +15,7 @@ export function liveSaveRefusal(q: LiveQuoteFields): string | null {
 }
 
 /** What a live save writes on an existing quote. The header stays with the header autosave, so a stale window can't overwrite it. */
-export const LIVE_PATCH_FIELDS = ["spec", "value", "margin", "pdfOptions", "paymentTerms", "boxSale", "pricingTier", "tierMargin", "source"] as const;
+export const LIVE_PATCH_FIELDS = ["spec", "value", "margin", "pdfOptions", "paymentTerms", "boxSale", "bomEstimate", "pricingTier", "tierMargin", "source"] as const;
 
 export function limitToLivePatch<T extends object>(patch: T): Partial<T> {
   const out: Record<string, unknown> = {};

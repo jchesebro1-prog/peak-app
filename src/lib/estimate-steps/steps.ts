@@ -12,7 +12,7 @@ export type EstimateStep = (typeof ESTIMATE_STEPS)[number];
 export const STEP_LABEL: Record<EstimateStep, string> = {
   build: "Build",
   package: "Build package",
-  review: "Customer review",
+  review: "Internal review",
   send: "Send & track",
 };
 

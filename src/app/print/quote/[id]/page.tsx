@@ -20,7 +20,7 @@ import { CutSheetPages, CLIENT_PRINT_CSS } from "@/components/cutsheets/cut-shee
 import { printOriginFor } from "@/lib/quote-pdf/origin";
 import { loadDatasheetLinkRows } from "@/lib/estimate-output/datasheet-links-server";
 import DatasheetLinksPage from "@/components/estimate-output/datasheet-links-page";
-import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
+import { bomOutputOf } from "@/lib/estimate-box-sale/rules";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Quote", robots: { index: false, follow: false } };
@@ -76,7 +76,8 @@ export default async function PrintQuotePage({
   const src = revision ? quoteAsOfRevision(q, revision) : q;
   // Box goods sale (spec 2026-10-21): the whole customer PDF is the BOM quote PDF's layout (#360) — no title page,
   // no cut sheets, no datasheet links, no photos. Read from the quote as printed (a revision's frozen flag).
-  const bomLayout = bom || boxSaleOf(src);
+  // #379: and so is every BOM estimate (bomOutputOf — a revision answers from its own frozen stamp).
+  const bomLayout = bom || bomOutputOf(src);
   // A revision render shows what was sent: live edits since that revision (content changed after it was cut) would make the live-built cut sheets disagree, so they are skipped.
   const cutSheetsOk = !revision || !(typeof q.contentChangedAt === "number" && q.contentChangedAt > revision.at);
   // The links' absolute origin — the print origin, the Cover PDF's way (spec §5). Unresolvable → no links page.

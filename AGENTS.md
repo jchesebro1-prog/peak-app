@@ -139,8 +139,10 @@ Account from the user menu. Everything below exists in the code today.
   `public/sw.js`, and the Capacitor shells in `ios/` and `android/`.
 
 **Estimating**
-- `/estimator` — one URL, four steps (Build · Build package · Customer review ·
-  Send & track). State lives in `src/app/(app)/estimator/use-estimator-state.ts`;
+- `/estimator` — one URL, four steps (Build · Build package · Internal review ·
+  Send & track). Build package is two live previews beside their settings: BOM
+  Estimate Generator and Datasheets (`src/lib/estimate-steps/package-tabs.ts`).
+  Internal review is the Review spreadsheet's columns on screen. State lives in `src/app/(app)/estimator/use-estimator-state.ts`;
   pricing in `estimator/pricing.ts` and `src/lib/markup/` (every percentage is
   markup on cost). Rules by area: `src/lib/estimate-steps/`, `estimate-groups/`,
   `estimate-bonus/`, `estimate-box-sale/`, `estimate-line-move/`,
@@ -150,6 +152,15 @@ Account from the user menu. Everything below exists in the code today.
   track (`src/lib/track-engine.ts`, `track-path/`), pipe and lineset
   (`src/lib/rigging-config/`), fixture assemblies, labor, vendor quotes
   (`src/lib/vendor-quotes/`).
+- **The customer document is the BOM estimate** (#379, 2026-11-24): an estimate
+  saved in the Estimator carries `Quote.bomEstimate`, and `bomOutputOf` /
+  `revisionBomOutput` (`src/lib/estimate-box-sale/rules.ts`) switch the PDF, the
+  staff preview and the client link to the itemized BOM plus the datasheet
+  downloads. No narrative, cover PDF, drawings or cut sheets go out on those.
+  An estimate sent before #379 has no stamp and still renders as the narrative
+  document, so the narrative code below is live for old revisions — do not
+  delete it as dead. `steps/package-narrative-tab.tsx` and
+  `steps/client-package-tab.tsx` are no longer mounted.
 - Customer output: the estimate PDF and cover PDF (`src/lib/quote-pdf/`, print
   routes `/print/quote`, `/print/cover`, `/print/cutsheets`), the client link
   and package page (`src/lib/quote-share/`, `src/lib/estimate-output/`,

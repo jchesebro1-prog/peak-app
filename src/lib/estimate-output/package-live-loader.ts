@@ -15,7 +15,7 @@ import { specPackageDocs } from "./package-docs-server";
 import { catalogFor } from "./package-loader";
 import { packageFrozenFields, packagePhotoSections, packageViewModel, type PackageViewProps } from "./package-model";
 import { previewHeaderLine, previewPath, staffPackageExtras, staffPartDocHref, type StaffPackageExtras } from "./package-preview";
-import { boxSaleOf } from "@/lib/estimate-box-sale/rules";
+import { bomOutputOf, boxSaleOf } from "@/lib/estimate-box-sale/rules";
 
 /**
  * Estimator Phase 4 (spec §11.1) — the staff preview's data, from the SAVED
@@ -63,7 +63,8 @@ export async function loadLivePackagePreview(
     catalogFor(packageBomSkus(doc.sections)),
     getEstimateOutputDefaults(),
     // Box goods sale (spec 2026-10-21): no datasheets, downloads or plans to read.
-    boxSaleOf(q) ? staffPackageExtras(null, false, [], q.id) : liveExtras(q),
+    // #379: a BOM estimate keeps the Downloads card (datasheets) — no key-product links, no plans.
+    boxSaleOf(q) ? staffPackageExtras(null, false, [], q.id) : bomOutputOf(q) ? liveExtras(q).then((x) => ({ ...x, datasheets: {}, plans: [] })) : liveExtras(q),
   ]);
   const model = packageViewModel({
     doc,
@@ -78,7 +79,7 @@ export async function loadLivePackagePreview(
     view: opts.view,
     base: previewPath(q.id, "package"),
     letterheadSrc: opts.letterheadSrc,
-    boxSale: boxSaleOf(q),
+    boxSale: bomOutputOf(q),
   });
   // The page's Narrative / BOM toggle stays on the package tab.
   return { model: { ...model, narrativeHref: previewPath(q.id, "package"), bomHref: previewPath(q.id, "package", "bom") }, extras };

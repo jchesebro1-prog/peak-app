@@ -1027,6 +1027,9 @@ export function useEstimatorState(props: EstimatorProps) {
      are part of the key, so flipping one asks for a Save. */
   const [pdf, setPdf] = useState<QuotePdfView | null>(initial.pdf);
   const docCustName = customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName;
+  // #379: what the next Save stores for the BOM-estimate stamp (bomEstimateForSave's rule): already stamped, or a
+  // draft system estimate. A stored draft without it reads as unsaved until that Save.
+  const bomStamp = canBoxSale && (initial.bomEstimate || baseStatus === "draft");
   const docInput = useMemo<PdfDocKeyInput>(
     () => ({
       quoteNumber: quoteId,
@@ -1043,9 +1046,10 @@ export function useEstimatorState(props: EstimatorProps) {
       vendorQuotes,
       pdfOptions: pdfOpts,
       boxSale,
+      bomEstimate: bomStamp,
       document: packageDoc,
     }),
-    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, packageDoc, boxSale, sections, groups, vendorQuotes, pdfOpts]
+    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, packageDoc, boxSale, bomStamp, sections, groups, vendorQuotes, pdfOpts]
   );
   const docKey = useMemo(() => pdfDocKey(docInput), [docInput]);
   // #267: when the load-time $25 stamp moved a system's price, the saved PDF
@@ -1054,8 +1058,8 @@ export function useEstimatorState(props: EstimatorProps) {
   const [savedDoc, setSavedDoc] = useState<PdfDocKeyInput>(() =>
     initial.sections &&
     initial.sections.some((s, i) => !!sections[i] && systemSellTotal(s) !== systemSellTotal(sections[i]))
-      ? { ...docInput, sections: initial.sections }
-      : docInput
+      ? { ...docInput, sections: initial.sections, bomEstimate: initial.bomEstimate }
+      : { ...docInput, bomEstimate: initial.bomEstimate }
   );
   const savedDocKey = useMemo(() => pdfDocKey(savedDoc), [savedDoc]);
   const pdfDirty = !!loadedId && docKey !== savedDocKey;

@@ -156,6 +156,9 @@ export type SectionCardProps = {
   onSetDiscipline: (value: ScopeDiscipline | "") => void;
   /** Box goods sale (spec 2026-10-21): hide + Configure labor, the Customer chip, Discipline, Add narrative… and ★. */
   boxSale?: boolean;
+  /** #379: the customer document is the BOM estimate — no presentation chip, discipline, narrative snippet or
+   *  key-product star (a box sale hides the same). Labor stays. */
+  bomOutput?: boolean;
   onDelete: () => void;
   onSetMarkup: (v: string) => void;
   /** #267: a typed system sell (raw text; empty/0/junk clears it). */
@@ -356,6 +359,7 @@ export default function SectionCard(p: SectionCardProps) {
   };
 
   const { sec, isInternal, cols } = p;
+  const bomOnly = p.boxSale === true || p.bomOutput === true;
   const itemsCost = systemItemsCost(sec);
   const secFreight = systemFreight(sec);
   // #267: the system's actual price — a typed sell, or the auto price rounded
@@ -548,7 +552,7 @@ export default function SectionCard(p: SectionCardProps) {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, padding: "0 5px" }} onClick={(e) => e.stopPropagation()}>
-              {!p.boxSale && (
+              {!bomOnly && (
               <a
                 href={p.presentationHref}
                 data-testid="card-presentation"
@@ -564,7 +568,7 @@ export default function SectionCard(p: SectionCardProps) {
               </a>
               )}
               {/* #301: which discipline this system answers. Blank = inferred from the name (never stored). */}
-              {sec.kind !== "labor" && !p.boxSale && (
+              {sec.kind !== "labor" && !bomOnly && (
                 <select
                   value={sec.discipline || ""}
                   onChange={(e) => p.onSetDiscipline(e.target.value as ScopeDiscipline | "")}
@@ -603,7 +607,7 @@ export default function SectionCard(p: SectionCardProps) {
                 </option>
               </select>
               {/* #281: a read-only snippet — the narrative itself is written in the right column. */}
-              {!p.boxSale && (
+              {!bomOnly && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -1642,7 +1646,7 @@ export default function SectionCard(p: SectionCardProps) {
                     {configLocked && (
                       <button type="button" className="est-action-btn" disabled title={p.uiRepriceLock} aria-label={`Edit ${it.desc} — ${p.uiRepriceLock}`} style={{ ...ACTION_BTN, cursor: "not-allowed", opacity: 0.45 }}>✎</button>
                     )}
-                    {kpStar !== "none" && !p.boxSale && (
+                    {kpStar !== "none" && !bomOnly && (
                       <button
                         type="button"
                         className="est-action-btn"

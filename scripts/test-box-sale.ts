@@ -3,7 +3,7 @@
    Pure half alone: `npx tsx scripts/test-box-sale.ts`.
    Both halves: `TEST_DB=$(mktemp -d) && PGLITE_PATH="$TEST_DB" npx tsx scripts/test-box-sale.ts; rm -rf "$TEST_DB"`
    (never without PGLITE_PATH pointing at a fresh temp dir — the DB half writes quotes). */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ok } from "./ok-type";
 import { dropFixtures, fixtureId, registerFixture } from "./test-fixtures";
@@ -30,7 +30,6 @@ import { bomPricesHiddenNote, bomSwitchShown } from "../src/lib/estimate-box-sal
 import { pdfDocKey } from "../src/app/(app)/estimator/pdf-doc-key";
 import { normalizePdfOptions } from "../src/lib/quote-pdf/pdf-options";
 import { BOX_SALE_PACKAGE_TABS, boxSalePackageTab, PACKAGE_TABS, packageTabsFor, parsePackageTab } from "../src/lib/estimate-steps/package-tabs";
-import { BOX_SALE_REVIEW_TABS, nextReviewTab, REVIEW_TABS, reviewTabsFor } from "../src/lib/estimate-review/review-ui";
 import { estimateReadiness } from "../src/lib/estimate-steps/readiness";
 import { packageViewModel } from "../src/lib/estimate-output/package-model";
 import { boxSaleExtras } from "../src/lib/estimate-output/package-extras-model";
@@ -130,7 +129,7 @@ function documentChecks(ok: Ok) {
   ok(stored.sections[0].presentation === "narrative" && stored.sections[0].narrative === "Intro." && stored.document === DOC,
     "box sale document: the stored narrative, presentation and package document are untouched (nothing is deleted)");
   const qdd = rd("src/lib/quote-pdf/quote-document-data.ts");
-  ok(qdd.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && qdd.includes("return boxSaleOf(q) ? bomViewProps(props) : props;"),
+  ok(qdd.includes('import { bomViewProps } from "@/app/(app)/estimator/quote-document-view";') && qdd.includes("return bomOutputOf(q) ? bomViewProps(props) : props;"),
     "box sale document (source): quoteDocumentDataFor applies bomViewProps once, at the one seam");
 }
 
@@ -193,16 +192,16 @@ async function storeDbChecks(ok: Ok) {
 function printChecks(ok: Ok) {
   const page = rd("src/app/print/quote/[id]/page.tsx");
   const srcAt = page.indexOf("const src = revision ? quoteAsOfRevision(q, revision) : q;");
-  ok(srcAt > 0 && page.indexOf("const bomLayout = bom || boxSaleOf(src);") > srcAt,
+  ok(srcAt > 0 && page.indexOf("const bomLayout = bom || bomOutputOf(src);") > srcAt,
     "box sale print (source): the BOM layout is decided from the quote as printed (a sent revision's frozen flag for a bidder copy)");
   ok(page.includes('!bomLayout && part !== "tail" && cutSheetsOk && normalizePdfOptions(src.pdfOptions).pdfCutSheets') && page.includes('!bomLayout && !bidder && part !== "main" ? loadDatasheetLinkRows(q, origin) : []') &&
      /if \(!bomLayout\) \{\s*const h = await headers\(\);/.test(page) && page.indexOf("if (bomLayout) {") > 0 && page.indexOf("if (bomLayout) {") < page.indexOf("keyProductPhotoDataUris("),
     "box sale print (source): a box sale prints #360's BOM layout — no cut sheets, no datasheet links, no photos, no print-origin read");
   ok(page.includes("if (bom && (rawBidder !== undefined || rawRev !== undefined || rawPart !== undefined)) notFound();"),
     "box sale print (source): ?view=bom's own param gate is unchanged — a box sale's bidder copy still renders");
-  ok(rd("src/lib/quote-pdf/generate.ts").includes("if (boxSaleOf(q)) return { drawings: [], hasLinks: false };"), "box sale print (source): loadAppendixSources returns nothing to merge for a box sale");
-  ok(rd("src/app/print/cover/[id]/page.tsx").includes('if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || boxSaleOf(q)) notFound();'), "box sale cover (source): the cover print page is a 404 for a box sale");
-  ok(rd("src/lib/estimate-output/cover-pdf-server.ts").includes("refuse: boxSaleOf,") &&
+  ok(rd("src/lib/quote-pdf/generate.ts").includes("if (bomOutputOf(q)) return { drawings: [], hasLinks: false };"), "box sale print (source): loadAppendixSources returns nothing to merge for a box sale");
+  ok(rd("src/app/print/cover/[id]/page.tsx").includes('if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || bomOutputOf(q)) notFound();'), "box sale cover (source): the cover print page is a 404 for a box sale");
+  ok(rd("src/lib/estimate-output/cover-pdf-server.ts").includes("refuse: bomOutputOf,") &&
      rd("src/lib/quote-pdf/signed-print-pdf.ts").includes('if (!q || pdfKindForQuoteType(q.quoteType) !== "quote" || opts.refuse?.(q)) return { ok: false, status: 404, error: "Not found" };') &&
      !rd("src/lib/estimate-output/bom-pdf-server.ts").includes("refuse"),
     "box sale cover (source): renderCoverPdf refuses a box sale through the shared render's `refuse` (404); the BOM PDF does not");
@@ -249,8 +248,8 @@ function buildUiChecks(ok: Ok) {
   ok(pdfDocKey(keyIn) === pdfDocKey({ ...keyIn, boxSale: false }) && pdfDocKey(keyIn) !== pdfDocKey({ ...keyIn, boxSale: true }),
     "box sale build: the switch is a document change (asks for a Save); off is the same key as before");
   const card = rd("src/app/(app)/estimator/section-card.tsx");
-  ok(card.includes("  boxSale?: boolean;") && card.includes("{!p.boxSale && (\n              <a\n                href={p.presentationHref}") && card.includes('sec.kind !== "labor" && !p.boxSale && (') &&
-     /\{\/\* #281: a read-only snippet[^\n]*\*\/\}\s*\{!p\.boxSale && \(\s*<button/.test(card) && card.includes('kpStar !== "none" && !p.boxSale && (') &&
+  ok(card.includes("  boxSale?: boolean;") && card.includes("const bomOnly = p.boxSale === true || p.bomOutput === true;") && card.includes("{!bomOnly && (\n              <a\n                href={p.presentationHref}") && card.includes('sec.kind !== "labor" && !bomOnly && (') &&
+     /\{\/\* #281: a read-only snippet[^\n]*\*\/\}\s*\{!bomOnly && \(\s*<button/.test(card) && card.includes('kpStar !== "none" && !bomOnly && (') &&
      card.includes('{!p.boxSale && addBtn("+ Configure labor", p.onToggleLabor, openMethod === "labor")}'),
     "box sale build (source): the card hides the Customer chip, Discipline, Add narrative…, ★ key product and + Configure labor");
   const head = rd("src/app/(app)/estimator/estimator-header.tsx");
@@ -267,7 +266,7 @@ function buildUiChecks(ok: Ok) {
   const refuse = saveNow.indexOf("const boxProblem = boxSaleSaveProblem(boxSale, sections);");
   ok(refuse > 0 && refuse < saveNow.indexOf("saveQuoteAction(") && /if \(boxProblem\) \{\s*if \(!auto\) \{\s*setActionNotice\(null\);\s*setGateRefused\(false\);\s*setActionError\(boxProblem\);\s*\}\s*return \{ kind: "refused", message: boxProblem \};\s*\}/.test(saveNow),
     "box sale build (source): Save refuses a box sale with labor in the browser, with the same sentence, and sends nothing");
-  ok(saveNow.includes("          boxSale,\n") && us.includes("      boxSale,\n      document: packageDoc,\n    }),") && us.includes("packageDoc, boxSale, sections, groups, vendorQuotes, pdfOpts]"),
+  ok(saveNow.includes("          boxSale,\n") && us.includes("      boxSale,\n      bomEstimate: bomStamp,\n      document: packageDoc,\n    }),") && us.includes("packageDoc, boxSale, bomStamp, sections, groups, vendorQuotes, pdfOpts]"),
     "box sale build (source): the flag rides every Save and is part of the document key");
   ok(us.includes("presentation: newSystemPresentation([], boxSale)") && us.includes("presentation: newSystemPresentation(ss, boxSale)") &&
      (us.match(/presentation: newSystemPresentation\(sections, boxSale\),/g) || []).length === 1 && us.includes("      : freshSections(initialFreightDefault.pct, initial.boxSale)"),
@@ -276,13 +275,9 @@ function buildUiChecks(ok: Ok) {
 
 function packageReviewChecks(ok: Ok) {
   ok(packageTabsFor(true).join() === "bom" && packageTabsFor(false) === PACKAGE_TABS && BOX_SALE_PACKAGE_TABS.join() === "bom", "box sale package: Build package is the BOM quote tab alone");
-  ok(["narrative", "client", "bom", null, "junk"].every((raw) => boxSalePackageTab(parsePackageTab(raw), true) === "bom") &&
-     boxSalePackageTab(parsePackageTab("client"), false) === "client" && boxSalePackageTab(parsePackageTab(null), false) === "narrative",
-    "box sale package: ?ptab=narrative / client (or none) lands on BOM quote; a normal estimate is unchanged");
-  ok(reviewTabsFor(true).join() === "document,bom" && reviewTabsFor(false) === REVIEW_TABS && BOX_SALE_REVIEW_TABS.join() === "document,bom", "box sale review: Customer review shows Document and BOM only");
-  ok(nextReviewTab("document", "ArrowRight", BOX_SALE_REVIEW_TABS) === "bom" && nextReviewTab("bom", "ArrowRight", BOX_SALE_REVIEW_TABS) === "document" && nextReviewTab("document", "End", BOX_SALE_REVIEW_TABS) === "bom" &&
-     nextReviewTab("document", "ArrowRight") === "package" && nextReviewTab("document", "x", BOX_SALE_REVIEW_TABS) === null,
-    "box sale review: arrow keys move across the shown tabs only (the default list is unchanged)");
+  ok(["narrative", "client", "bom", "datasheets", null, "junk"].every((raw) => boxSalePackageTab(parsePackageTab(raw), true) === "bom") &&
+     boxSalePackageTab(parsePackageTab("datasheets"), false) === "datasheets" && boxSalePackageTab(parsePackageTab(null), false) === "bom" && boxSalePackageTab(parsePackageTab("client"), false) === "bom",
+    "box sale package: any ?ptab lands on the estimate tab; a normal estimate opens it by default and keeps Datasheets (#379 — the retired narrative / client read as the default)");
   const narr = sys("n", "Rigging", [line(1)], { presentation: "narrative" });
   const base = { saved: true, sections: [narr] as never[], review: null, status: "draft" as const, revNum: 1 };
   const plainR = estimateReadiness(base), boxR = estimateReadiness({ ...base, boxSale: true });
@@ -291,23 +286,21 @@ function packageReviewChecks(ok: Ok) {
   ok(plainR.package.state === "gaps", "box sale readiness: a normal estimate still counts its gaps");
   const shell = rd("src/app/(app)/estimator/steps/package-step.tsx");
   ok(shell.includes('const tab = boxSalePackageTab(parsePackageTab(params.get("ptab")), s.boxSale);') && shell.includes("const tabs = packageTabsFor(s.boxSale);") &&
-     shell.includes("if (!to || !tabs.includes(to)) return;") && shell.includes("{tabs.map((t) => ("),
+     shell.includes("nextPackageTab(tab, e.key, tabs)") && shell.includes("{tabs.map((t) => ("),
     "box sale package (source): the shell lands a box sale on BOM quote and lists only its tabs");
   const bomTab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
-  ok(/\{s\.boxSale && \(\s*<div[^>]*data-testid="box-sale-people"[^>]*>\s*<QuotePeopleFields s=\{s\} tone="light" \/>/.test(bomTab) && !/from "@\/lib\/stores\//.test(bomTab),
-    "box sale package (source): BOM quote carries Lead estimator / Prepared by on a box sale (and still imports no store)");
-  const tabsSrc = rd("src/app/(app)/estimator/steps/review-tabs.tsx");
-  ok(tabsSrc.includes("const tabs = reviewTabsFor(s.boxSale);") && tabsSrc.includes('const tab: ReviewTab = tabs.includes(picked) ? picked : "document";') && tabsSrc.includes("{tabs.map((t) => (") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)"),
-    "box sale review (source): the review tabs follow reviewTabsFor; a hidden tab reads as Document");
+  ok(/<div data-testid="bom-people"[^>]*>[\s\S]{0,120}<QuotePeopleFields s=\{s\} tone="light" \/>/.test(bomTab) && !/from "@\/lib\/stores\//.test(bomTab),
+    "box sale package (source): the estimate tab carries Lead estimator / Prepared by (every estimate since #379) and still imports no store");
+  ok(!existsSync("src/app/(app)/estimator/steps/review-tabs.tsx") && rd("src/app/(app)/estimator/steps/review-step.tsx").includes("<ReviewGridTab s={s} />"),
+    "box sale review (source): Internal review is the Review grid for every estimate — no client-view tabs (#379)");
   ok(rd("src/app/(app)/estimator/steps/review-sidebar.tsx").includes("{!s.boxSale && <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />}"), "box sale review (source): the sidebar's package checklist is hidden");
   const reviewSrc = rd("src/app/(app)/estimator/steps/review-step.tsx");
-  ok(/\{!s\.boxSale && \(\s*<CoverPackagePanel/.test(reviewSrc) && reviewSrc.split("<CoverPackagePanel").length === 2,
-    "box sale review (source): the Cover PDF / package panel is not rendered for a box sale");
+  ok(!reviewSrc.includes("CoverPackagePanel"), "box sale review (source): no Cover PDF / package panel on Internal review — for any estimate (#379)");
   ok(reviewSrc.includes("<ClientLinkPanel quoteId={loadedId} withPackage={!s.boxSale} />") && reviewSrc.split("<ClientLinkPanel").length === 2,
     "box sale review (source): the client link stays but its package section is off for a box sale");
   const client = rd("src/app/(app)/estimator/estimator-client.tsx");
   ok(client.includes("        boxSale: s.boxSale,\n") && client.includes("s.revNum, s.boxSale]"), "box sale readiness (source): the step badges read the live flag");
-  ok(rd("src/lib/estimate-output/package-panel-server.ts").includes("gaps: boxSaleOf(q) ? [] : packageGapChips({"), "box sale readiness (source): the package panel shows no gap chips for a box sale");
+  ok(rd("src/lib/estimate-output/package-panel-server.ts").includes("gaps: boxSaleOf(q) ? [] : bomOutputOf(q) ? packageGapChips({"), "box sale readiness (source): the package panel shows no gap chips for a box sale");
 }
 
 function sendPackageChecks(ok: Ok) {
@@ -341,10 +334,10 @@ function sendPackageChecks(ok: Ok) {
   ok(Object.keys(bx.datasheets).length === 0 && bx.downloads === null && bx.plans.length === 0 && bx.actions === extras.actions,
     "box sale package page: no datasheet links, downloads or plans; the client actions (options, alternates, question) stay");
   const pkgPage = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
-  ok(pkgPage.includes("const box = revisionBoxSale(hit.rev);") && pkgPage.includes("const cut = await onlineCutSheets(hit.q, hit.rev);") && pkgPage.includes("buildPackageSlots(box ? boxSaleExtras(extras) : extras, {"),
+  ok(pkgPage.includes("const box = revisionBoxSale(hit.rev);") && pkgPage.includes("const cut = await onlineCutSheets(hit.q, hit.rev);") && pkgPage.includes("buildPackageSlots(box ? boxSaleExtras(extras) : revisionBomOutput(hit.rev) ? bomEstimateExtras(extras) : extras, {"),
     "box sale package page (source): the client link drops cut sheets, datasheet links, downloads and plans — from the revision's frozen flag");
   const live = rd("src/lib/estimate-output/package-live-loader.ts");
-  ok(rd("src/lib/estimate-output/package-loader.ts").includes("boxSale: revisionBoxSale(hit.rev),") && live.includes("boxSale: boxSaleOf(q),") && live.includes("boxSaleOf(q) ? staffPackageExtras(null, false, [], q.id) : liveExtras(q),"),
+  ok(rd("src/lib/estimate-output/package-loader.ts").includes("boxSale: revisionBomOutput(hit.rev),") && live.includes("boxSale: bomOutputOf(q),") && live.includes("boxSaleOf(q) ? staffPackageExtras(null, false, [], q.id) : bomOutputOf(q) ?"),
     "box sale package page (source): the client page and the staff preview both build the box-sale model");
   ok(["src/app/share/quote/[id]/[token]/package.zip/route.ts", "src/app/share/quote/[id]/[token]/datasheets.pdf/route.ts"].every((f) => rd(f).includes("if (!pkg || revisionBoxSale(pkg.rev)) return notFound();")),
     "box sale package page (source): the zip and the datasheet book are a 404 for a box sale");
@@ -403,7 +396,7 @@ async function finalReviewChecks(ok: Ok) {
     ok((await onlineCutSheets(q, box)) === null, "box sale final I2: onlineCutSheets is null for a box-sale revision, even with Cut sheets asked for");
   }
   const pkgPage = rd("src/app/share/quote/[id]/[token]/package-page.tsx");
-  ok(pkgPage.includes("const cut = await onlineCutSheets(hit.q, hit.rev);") && rd("src/lib/curtain-cut-sheets/online.ts").includes("if (revisionBoxSale(rev)) return null;"), "box sale final I2 (source): the gate lives in onlineCutSheets; the package page no longer repeats it");
+  ok(pkgPage.includes("const cut = await onlineCutSheets(hit.q, hit.rev);") && rd("src/lib/curtain-cut-sheets/online.ts").includes("if (revisionBomOutput(rev)) return null;"), "box sale final I2 (source): the gate lives in onlineCutSheets; the package page no longer repeats it");
 
   // I3: the hub menu entry.
   const ctl = rd("src/app/(app)/quotes/controls.tsx");
@@ -430,42 +423,30 @@ async function finalReviewChecks(ok: Ok) {
 function bomToggleChecks(ok: Ok) {
   ok(!bomSwitchShown("bomLabor", true) && bomSwitchShown("bomLabor", false), "box sale BOM toggles: the Labor switch is hidden on a box sale, shown on a normal estimate");
   ok(["bomLinePrices", "bomMaterials", "bomFreight"].every((f) => bomSwitchShown(f, true) && bomSwitchShown(f, false)), "box sale BOM toggles: Line prices / Materials / Freight show either way");
-  const normal = "Prices are hidden on client documents (Client package → Line detail).";
-  ok(bomPricesHiddenNote(false) === normal, "box sale BOM toggles: a normal estimate's locked note is unchanged");
-  const box = bomPricesHiddenNote(true);
-  ok(box !== normal && !box.includes("Client package") && box.includes("Show prices"), "box sale BOM toggles: the box-sale note points at the Show prices toggle on this tab, not Client package");
-  ok(box === "Prices are hidden on client documents. Turn on Show prices (Show on BOM)." && !box.includes("above"), "box sale BOM toggles: the box-sale note says where the toggle is (Show on BOM), not 'above'");
+  const note = "Prices are hidden on client documents. Turn on Show prices.";
+  ok(bomPricesHiddenNote(false) === note && bomPricesHiddenNote(true) === note && !note.includes("Client package"),
+    "BOM toggles: the locked note points at Show prices on this tab for every estimate (#379 — the Client package tab is gone)");
 
   const tab = rd("src/app/(app)/estimator/steps/package-bom-tab.tsx");
-  ok(/togglePdf\("pdfPrices"\)[\s\S]{0,200}Show prices/.test(tab) && /togglePdf\("pdfQty"\)[\s\S]{0,200}Show quantities/.test(tab),
-    "box sale BOM toggles (source): the BOM tab renders Prices / Quantities toggles through the shared togglePdf");
-  // The box-sale-only region: from its `{s.boxSale && (` guard to the guard's own close. Both control blocks must sit inside it.
-  const guard = tab.lastIndexOf("{s.boxSale && (", tab.indexOf('data-testid="box-sale-show-toggles"'));
-  const guardEnd = tab.indexOf("\n            )}\n", guard);
-  const region = guard >= 0 && guardEnd > guard ? tab.slice(guard, guardEnd) : "";
-  ok(region.includes('data-testid="box-sale-show-toggles"') && region.includes('data-testid="box-sale-document-controls"'),
-    "box sale BOM toggles (source): the Show prices / quantities block and the document-controls block both sit inside one s.boxSale guard");
-  ok(tab.includes('data-testid="box-sale-show-toggles"') && tab.indexOf('data-testid="box-sale-show-toggles"') > tab.indexOf("aria-label={BOM_TAB_COPY.showOnBom}") && tab.indexOf('data-testid="box-sale-show-toggles"') < tab.indexOf("{BOM_TAB_COPY.showOnBomHint}"),
-    "box sale BOM toggles (source): the Show prices / quantities row sits inside the Show on BOM group, before its hint");
-  ok(tab.includes("BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale))") && tab.includes("title={locked ? bomPricesHiddenNote(s.boxSale) : undefined}") && tab.includes("{bomPricesHiddenNote(s.boxSale)}"),
-    "box sale BOM toggles (source): Labor filtered and the locked tooltip / strip note follow the box-sale wording");
+  ok(/toggle\("Show prices", pdfOpts\.pdfPrices, \(\) => togglePdf\("pdfPrices"\)\)/.test(tab) && /toggle\("Show quantities", pdfOpts\.pdfQty, \(\) => togglePdf\("pdfQty"\)\)/.test(tab),
+    "BOM toggles (source): the estimate tab renders Show prices / Show quantities through the shared togglePdf");
+  ok(tab.includes('data-testid="bom-show-toggles"') && tab.includes('data-testid="bom-document-controls"') && !tab.includes("{s.boxSale && ("),
+    "BOM toggles (source): the show toggles and the document controls are on every estimate, not box sales only (#379)");
+  ok(tab.includes("BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale))") && tab.includes("locked: locked ? bomPricesHiddenNote(s.boxSale) : undefined") && tab.includes("{bomPricesHiddenNote(s.boxSale)}"),
+    "BOM toggles (source): Labor filtered on a box sale; the locked tooltip and the strip note share one wording");
   ok(tab.includes("togglePdf(flag)") && tab.includes("const locked = flag === \"bomLinePrices\" && !pdfOpts.pdfPrices;") && !/pdfQty\b[\s\S]{0,40}useState/.test(tab),
-    "box sale BOM toggles (source): no second state path — the existing togglePdf and the unchanged lock rule");
-  ok(!rd("src/app/(app)/estimator/steps/client-package-tab.tsx").includes("bomSwitchShown") && rd("src/app/(app)/estimator/preview-doc.tsx").includes("p.togglePdf(\"pdfPrices\")"),
-    "box sale BOM toggles (source): the Client package tab and PdfLineDetailGroup are untouched");
+    "BOM toggles (source): no second state path — the existing togglePdf and the unchanged lock rule");
+  ok(/<aside aria-label=\{BOM_TAB_COPY\.settings\}/.test(tab) && tab.includes('data-testid="bom-preview"') && tab.indexOf("<aside") < tab.indexOf('data-testid="bom-preview"') && tab.includes("<BomDocument props={docProps} />"),
+    "BOM toggles (source): settings on the left, the live document on the right (#379)");
 
-  // Final controls (2026-10-22): anything a box sale's BOM prints is settable from the BOM tab — Payment terms, Terms, Options, Cover note.
-  const pd = rd("src/app/(app)/estimator/preview-doc.tsx");
-  ok(/export function PaymentTermsSelect\(/.test(pd) && pd.includes("<PaymentTermsSelect") && !/<select[\s\S]*aria-label="Payment terms"/.test(pd.slice(pd.indexOf("export function PdfLineDetailGroup"), pd.indexOf("export function PdfPreviewPane"))),
-    "box sale BOM controls (source): Payment terms is one shared PaymentTermsSelect, used by the Client package group");
+  // Anything the estimate prints is settable from this tab — Payment terms, Terms, Options, Cover note.
+  ok(/export function PaymentTermsSelect\(/.test(rd("src/app/(app)/estimator/preview-doc.tsx")), "BOM controls (source): Payment terms is the shared PaymentTermsSelect");
   ok(tab.includes("PaymentTermsSelect") && tab.includes("PAYMENT_TERMS") && tab.includes("s.setPaymentTerms") && tab.includes("value={paymentTerms}"),
-    "box sale BOM controls (source): the BOM tab reuses the shared select, the same options list and the same setPaymentTerms");
-  ok(/togglePdf\("pdfTerms"\)[\s\S]{0,200}Terms/.test(tab) && /togglePdf\("pdfOptions"\)[\s\S]{0,200}Options/.test(tab) && /togglePdf\("pdfCover"\)[\s\S]{0,400}Cover note/.test(tab),
-    "box sale BOM controls (source): Terms / Options / Cover note toggle through the same togglePdf");
-  const dc = tab.indexOf('data-testid="box-sale-document-controls"');
-  const dcRegion = dc > 0 ? tab.slice(dc, tab.indexOf("\n            )}\n", dc)) : "";
+    "BOM controls (source): the tab reuses the shared select, the same options list and the same setPaymentTerms");
+  const dc = tab.indexOf('data-testid="bom-document-controls"');
+  const dcRegion = dc > 0 ? tab.slice(dc, tab.indexOf('data-testid="bom-people"', dc)) : "";
   ok(["PaymentTermsSelect", 'togglePdf("pdfTerms")', 'togglePdf("pdfOptions")', 'togglePdf("pdfCover")'].every((x) => dcRegion.includes(x)),
-    "box sale BOM controls (source): all four controls sit inside the box-sale-only document-controls block");
+    "BOM controls (source): Terms / Options / Cover note / Payment terms sit in the document-controls group");
   const hdr = rd("src/app/(app)/estimator/estimator-header.tsx");
   const qn = hdr.indexOf("onChange={(e) => onQuoteNote(e.target.value)}");
   ok(qn > hdr.indexOf("{qdOpen && (") && !hdr.slice(hdr.lastIndexOf("<div className=\"est-qd-col\">", qn), qn).includes("boxSale"),

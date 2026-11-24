@@ -1,0 +1,35 @@
+# Test checks removed with #379 (2026-11-24) — they pinned screens that no longer exist
+# (Internal review's client-view tabs; the Build package Narrative / Client package shell). One per line: file: message.
+scripts/test-batch5.ts: #63: staff-side labels (Client package presentation, Build package tabs) are unchanged
+scripts/test-box-sale.ts: box sale package: ?ptab=narrative / client (or none) lands on BOM quote; a normal estimate is unchanged
+scripts/test-box-sale.ts: utf8
+scripts/test-review-and-spec.ts: 
+scripts/test-review-and-spec.ts: #333 Q4: the chip lands on Build package → Client package → #systems
+scripts/test-review-and-spec.ts: #333 review N: drawings off with no files shows only "Drawings are off…"
+scripts/test-review-and-spec.ts: #333 review rows: a left-out product's row carries excluded (absent otherwise — unchanged rows)
+scripts/test-review-and-spec.ts: #333 shell: the Narrative panel is always mounted and hidden with display: "none" — never conditionally rendered (TipTap keeps its undo)
+scripts/test-review-and-spec.ts: #333 tabs: Home/End jump; any other key → null
+scripts/test-review-and-spec.ts: #333 tabs: Narrative writes no ptab
+scripts/test-review-and-spec.ts: #333 tabs: labels
+scripts/test-review-and-spec.ts: #333 tabs: packageTabSearch tolerates a missing ? and an empty search
+scripts/test-review-and-spec.ts: #333 tabs: parsePackageTab reads a known tab
+scripts/test-review-and-spec.ts: #333 tabs: unknown, missing or wrong-case ptab reads as Narrative
+scripts/test-review-and-spec.ts: #333 tabs: ←/→ wrap
+scripts/test-review-and-spec.ts: #P4 review UI fix: Left/Right move between tabs (wrapping), Home/End jump, other keys do nothing
+scripts/test-review-and-spec.ts: #P4 review UI fix: tab/panel ids and the per-comment aria-labels read exactly
+scripts/test-review-and-spec.ts: #P4 review UI fix: the tabs are a tablist/tab/tabpanel with aria-selected, aria-controls, aria-labelledby, roving tabindex and arrow keys
+scripts/test-review-and-spec.ts: #P4 review UI: Document / Datasheets / Drawings aren't framed, and an unsaved quote frames nothing
+scripts/test-review-and-spec.ts: #P4 review UI: Document is the existing PDF pane; Datasheets / Drawings links open in a new tab
+scripts/test-review-and-spec.ts: #P4 review UI: Package page / BOM / Cut sheets frame /estimator-preview/<id>?tab=package|bom|cutsheets
+scripts/test-review-and-spec.ts: #P4 review UI: every tab but Document needs a saved quote
+scripts/test-review-and-spec.ts: #P4 review UI: tabs read Review (#378), Document, Package page, BOM, Cut sheets, Datasheets, Drawings — in that order
+scripts/test-review-and-spec.ts: #P4 review UI: the Desktop / Phone toggle shows only on a framed tab
+scripts/test-review-and-spec.ts: #P4 review UI: the frame is 100% wide on Desktop, 390 px on Phone
+scripts/test-review-and-spec.ts: #P4 review UI: the frame remounts after a Save (pdf.savedAt) or a status change (asOf), not otherwise
+scripts/test-review-and-spec.ts: #P4 review UI: the frame toggle reads Desktop / Phone
+scripts/test-review-and-spec.ts: #P4 review UI: the framed tabs are an iframe keyed on the saved version, titled, sized by the device, never sandboxed without downloads
+scripts/test-review-and-spec.ts: #P4 review UI: the step reads the docs once (re-read after a Save / status change) for both tabs and checklist; a phone keeps the plain PDF
+scripts/test-review-and-spec.ts: #P4 review UI: the unsaved banner and the save-first note are exact
+scripts/test-review-and-spec.ts: #P4 review UI: unsaved edits show the banner (Document keeps its own Save), and an unsaved quote reads Save the estimate first.
+scripts/test-review-and-spec.ts: #P4 review UI: a Datasheets cell is its own document, covered by …, not needed, or Missing
+scripts/test-review-and-spec.ts: #333 review cell: (three checks on the removed Datasheets cell)

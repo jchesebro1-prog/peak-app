@@ -1,22 +1,17 @@
-import { previewPath, type PreviewTab, type ReviewDatasheetRow } from "@/lib/estimate-output/package-preview";
 import type { StepBadge } from "@/lib/estimate-steps/readiness";
 import { STEP_LABEL } from "@/lib/estimate-steps/steps";
 import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { sendBackNote, WHOLE_ESTIMATE, type NumberedComment } from "./comments";
 
 /**
- * Estimator Phase 4 (spec §11) — the Customer review step's pure view rules:
- * the client's-eye tabs, the framed preview's src / width, the sidebar copy,
- * the Labor crew line, the Package checklist rows, the Datasheets cell states
- * and the approver's Send back button. Client-safe (no server imports).
+ * Estimator Phase 4 (spec §11) — the Internal review step's (#378; was
+ * Customer review) pure view rules: the Review grid's copy, the sidebar copy, the
+ * Labor crew line, the Package checklist rows and the approver's Send back
+ * button. #379 removed the client's-eye tabs and their helpers. Client-safe (no server imports).
  */
 
 export const REVIEW_UI_COPY = {
-  unsaved: "Unsaved changes — Save to refresh what the client sees.",
   saveFirst: "Save the estimate first.",
-  save: "Save",
-  desktop: "Desktop",
-  phone: "Phone",
   internalOnly: "Internal only",
   labor: "Labor",
   checklist: "Package checklist",
@@ -41,66 +36,16 @@ export const REVIEW_UI_COPY = {
   sendBackSaveFirst: "Save first — the note numbers follow the saved estimate.",
   sendBackNoComments: "There are no open comments to send — add one or type a note.",
   cancel: "Cancel",
-  noDatasheets: "No catalog parts print on this estimate.",
-  noDrawings: "No drawings on this estimate.",
-  drawingsOff: "Drawings are off for this package (Client package).",
   docsError: "Couldn't load the package documents.",
-  datasheetMissing: "Missing",
-  notNeeded: "not needed",
-  // #333: a datasheet this project leaves out (Client package).
-  leftOut: "Left out of this package",
-  leftOutWith: "Left out with",
+  // #378: the Review tab — the Review spreadsheet on screen.
+  gridHint: "Internal only — cost, sell and markup for every line, as on the Review spreadsheet.",
+  gridAlternates: "Alternate systems aren't listed.",
+  gridLoading: "Loading the review…",
+  gridError: "Couldn't load the catalog details — reopen this step to try again.",
+  gridStale: "Couldn't refresh the catalog details — manufacturer and item names may be out of date.",
+  gridEmpty: "No parts or labor to review yet.",
+  gridDownload: "Download spreadsheet",
 } as const;
-
-export const REVIEW_TABS = ["document", "package", "bom", "cutsheets", "datasheets", "drawings"] as const;
-export type ReviewTab = (typeof REVIEW_TABS)[number];
-/** Box goods sale (spec 2026-10-21): the client gets the BOM only — Document (the BOM PDF) and BOM. */
-export const BOX_SALE_REVIEW_TABS: readonly ReviewTab[] = ["document", "bom"];
-
-/** The tabs Customer review shows. */
-export function reviewTabsFor(boxSale: boolean): readonly ReviewTab[] {
-  return boxSale ? BOX_SALE_REVIEW_TABS : REVIEW_TABS;
-}
-export const REVIEW_TAB_LABEL: Record<ReviewTab, string> = {
-  document: "Document",
-  package: "Package page",
-  bom: "BOM",
-  cutsheets: "Cut sheets",
-  datasheets: "Datasheets",
-  drawings: "Drawings",
-};
-
-export type ReviewDevice = "desktop" | "phone";
-export const REVIEW_DEVICES: ReviewDevice[] = ["desktop", "phone"];
-export const REVIEW_DEVICE_LABEL: Record<ReviewDevice, string> = { desktop: REVIEW_UI_COPY.desktop, phone: REVIEW_UI_COPY.phone };
-/** A phone-width frame, so the client pages' own media queries apply. */
-export const PHONE_FRAME_WIDTH = 390;
-
-/** The staff preview tab a review tab frames, or null (Document / Datasheets / Drawings aren't framed). */
-export function framedTab(tab: ReviewTab): PreviewTab | null {
-  return tab === "package" || tab === "bom" || tab === "cutsheets" ? tab : null;
-}
-
-/** Whether a tab needs a saved quote (everything but the Document tab, which has its own Save). */
-export function tabNeedsSave(tab: ReviewTab): boolean {
-  return tab !== "document";
-}
-
-/** The framed tab's src — `/estimator-preview/<id>?tab=…`; null when unsaved or not a framed tab. */
-export function frameSrc(quoteId: string | null | undefined, tab: ReviewTab): string | null {
-  const t = framedTab(tab);
-  return quoteId && t ? previewPath(quoteId, t) : null;
-}
-
-/** The frame's CSS width: full width on Desktop, 390 px on Phone. */
-export function frameWidth(device: ReviewDevice): string {
-  return device === "phone" ? `${PHONE_FRAME_WIDTH}px` : "100%";
-}
-
-/** The frame's React key — a Save (new pdf.savedAt) or a status change (new asOf) remounts it on the fresh saved quote. */
-export function frameKey(tab: ReviewTab, savedAt: number | null | undefined, asOf: number | null | undefined): string {
-  return `${tab}:${savedAt ?? 0}:${asOf ?? 0}`;
-}
 
 /** "Send back with 1 comment" / "Send back with 3 comments". */
 export function sendBackLabel(n: number): string {
@@ -136,19 +81,6 @@ export function checklistRows(gaps: readonly string[] | null, pkg: Pick<StepBadg
   if (pkg.state !== "ok") rows.push({ text: `${STEP_LABEL.package}: ${pkg.label}`, ok: false });
   if (rows.length === 0 && gaps) rows.push({ text: REVIEW_UI_COPY.checklistClear, ok: true });
   return rows;
-}
-
-export type DatasheetCell = { kind: "link"; href: string; name: string } | { kind: "note"; text: string } | { kind: "missing"; text: string };
-
-/** A Datasheets row's datasheet cell: its own document, "covered by …", "not needed", or Missing. */
-export function datasheetCell(row: Pick<ReviewDatasheetRow, "datasheet" | "datasheetCoveredBy" | "datasheetOk" | "excluded">): DatasheetCell {
-  // #333: left out on this project — itself, or with every fixture covering it.
-  if (row.excluded === "parent" && row.datasheetCoveredBy.length) return { kind: "note", text: `${REVIEW_UI_COPY.leftOutWith} ${row.datasheetCoveredBy.join(", ")}` };
-  if (row.excluded) return { kind: "note", text: REVIEW_UI_COPY.leftOut };
-  if (row.datasheet) return { kind: "link", href: row.datasheet.href, name: row.datasheet.name };
-  if (row.datasheetOk && row.datasheetCoveredBy.length) return { kind: "note", text: `covered by ${row.datasheetCoveredBy.join(", ")}` };
-  if (row.datasheetOk) return { kind: "note", text: REVIEW_UI_COPY.notNeeded };
-  return { kind: "missing", text: REVIEW_UI_COPY.datasheetMissing };
 }
 
 /** The comment target select: Whole estimate (value "") first, then every system in order. */
@@ -189,21 +121,6 @@ export function sendBackNoteFromNumbered(numbered: ReadonlyArray<NumberedComment
     return comment;
   });
   return sendBackNote(comments, sections, extra);
-}
-
-/** The tab strip's DOM ids (aria-controls / aria-labelledby). */
-export const reviewTabId = (tab: ReviewTab) => `review-tab-${tab}`;
-export const reviewPanelId = (tab: ReviewTab) => `review-panel-${tab}`;
-
-/** Arrow-key navigation across the tabs: Left/Right wrap, Home/End jump; any other key → null. */
-export function nextReviewTab(current: ReviewTab, key: string, tabs: readonly ReviewTab[] = REVIEW_TABS): ReviewTab | null {
-  const i = tabs.indexOf(current);
-  const n = tabs.length;
-  if (key === "ArrowRight") return tabs[(i + 1) % n];
-  if (key === "ArrowLeft") return tabs[(i - 1 + n) % n];
-  if (key === "Home") return tabs[0];
-  if (key === "End") return tabs[n - 1];
-  return null;
 }
 
 /** "Resolve comment 2" / "Delete comment 2"; a resolved comment has no number → "Delete resolved comment". */
