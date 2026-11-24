@@ -34,6 +34,8 @@ export type PdfDocKeyInput = {
   pdfOptions: QuotePdfOptions;
   /** Box goods sale (spec 2026-10-21) — the whole document switches to the BOM view. */
   boxSale?: boolean;
+  /** #379 — the BOM-estimate stamp: the whole document is the BOM view once a Save has set it. */
+  bomEstimate?: boolean;
 };
 
 function printedVendorQuotes(sections: SpecSection[], vendorQuotes: VendorQuote[]): VendorQuote[] {
@@ -60,6 +62,8 @@ export function pdfDocKey(i: PdfDocKeyInput): string {
     i.document ?? null,
     // Box goods sale: only when on, so every other estimate's key is unchanged.
     ...(i.boxSale === true ? ["boxSale"] : []),
+    // #379: likewise — an estimate still waiting for its stamp reads as changed until it is saved.
+    ...(i.bomEstimate === true ? ["bomEstimate"] : []),
   ]);
 }
 

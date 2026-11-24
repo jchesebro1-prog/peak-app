@@ -643,6 +643,9 @@ export type InitialQuote = {
   /** Box goods sale (spec 2026-10-21) — the stored flag (boxSaleOf); false for a new estimate unless the
    *  + New quote card opened it (?box=1). Rides every Save. */
   boxSale: boolean;
+  /** #379 — the stored BOM-estimate stamp (Quote.bomEstimate); false on a new estimate and on one last saved
+   *  before #379. The next Save of a draft sets it. */
+  bomEstimate: boolean;
 };
 
 export type EstimatorProps = {

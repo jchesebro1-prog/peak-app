@@ -85,6 +85,12 @@ const nextConfig: NextConfig = {
           { key: "X-Robots-Tag", value: "noindex" },
         ],
       },
+      // #379: Build package → Datasheets embeds each datasheet's own file in its live
+      // preview. Signed-in staff only (the route's requireUser), same origin only.
+      {
+        source: "/api/part-documents/:id",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
       // #293 slice 3: the client share page carries its token in the path —
       // never pass it on in a Referer, and never index it.
       {

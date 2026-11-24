@@ -15,6 +15,8 @@ import { BonusCard } from "./bonus-card";
 import { alternateChoices, liveEstimatorBonus } from "@/lib/estimate-bonus/card";
 import { quoteHasBonusLines } from "@/lib/estimate-bonus/record";
 import { isBonusEligibleQuote } from "@/lib/estimate-bonus/rules";
+import { bomPdfPath } from "@/lib/estimate-output/bom-pdf";
+import { BOOK_COVER_COPY, quoteDatasheetsPdfPath } from "@/lib/part-docs/datasheet-book-cover";
 
 const CARD = { background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: 16 } as const;
 const CARD_LABEL = { fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 10 } as const;
@@ -249,6 +251,19 @@ export function SendStep({ s, onActed }: { s: EstimatorState; onActed: (a: NextS
             <div style={CARD_LABEL}>Client link</div>
             <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>
           </>
+        )}
+        {/* #379: the two documents the customer gets, from the SAVED estimate — the app sends nothing itself. */}
+        {loadedId && (
+          <div data-testid="send-documents" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 16px", marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0f1f4", fontSize: 12.5 }}>
+            <span style={{ fontWeight: 600, color: "#16181d" }}>Documents</span>
+            <a href={bomPdfPath(loadedId, true)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+              Download estimate PDF
+            </a>
+            <a href={quoteDatasheetsPdfPath(loadedId)} download style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+              {BOOK_COVER_COPY.estimateButton}
+            </a>
+            {pdfDirty && <span style={{ color: "#8a6d1f" }}>Save first — these print the saved estimate.</span>}
+          </div>
         )}
         {loadedId && <PackageStaffPanel quoteId={loadedId} section="responses" onPdf={setPdf} />}
       </section>

@@ -15,10 +15,15 @@ import { PaymentTermsSelect } from "../preview-doc";
 import { PAYMENT_TERMS } from "../types";
 import { bomPricesHiddenNote, bomSwitchShown } from "@/lib/estimate-box-sale/rules";
 
-/** Copy for the BOM quote tab (spec 2026-10-12 §4.3). */
+/** Copy for the BOM Estimate Generator tab (spec 2026-10-12 §4.3; #379). */
 export const BOM_TAB_COPY = {
+  settings: "Estimate settings",
+  settingsHint: "Every switch re-draws the preview on the right and is saved with the estimate.",
+  showOnEstimate: "Show on the estimate",
+  sections: "Sections",
+  people: "People",
   live: "Live",
-  liveNote: "shows unsaved changes. The client sees this view once it's saved and sent.",
+  liveNote: "shows unsaved changes. The client gets this estimate once it's saved and sent.",
   openSaved: "Open saved preview ↗",
   downloadPdf: "Download PDF",
   openPdf: "Open PDF ↗",
@@ -40,15 +45,17 @@ export const BOM_SHOW_SWITCHES = [
 
 const STRIP: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 14px", fontSize: 12, color: "#5b616e", lineHeight: 1.45, marginBottom: 12 };
 const LINK: CSSProperties = { color: "var(--accent)", fontWeight: 600, textDecoration: "none" };
-// #364: the Show on BOM switches — preview-doc.tsx's segmented ✓ toggles.
-const SEG_WRAP: CSSProperties = { display: "inline-flex", flexWrap: "wrap", gap: 2, background: "#f1f2f5", borderRadius: 7, padding: 2 };
-const SEG: CSSProperties = { fontFamily: "var(--font-ui)", fontSize: 12, padding: "5px 13px", borderRadius: 5, border: "none", cursor: "pointer" };
-const SEG_ON: CSSProperties = { ...SEG, fontWeight: 600, background: "#fff", color: "#16181d", boxShadow: "0 1px 2px rgba(0,0,0,.1)" };
-const SEG_OFF: CSSProperties = { ...SEG, fontWeight: 500, background: "transparent", color: "#9aa0ab" };
+// #379: the settings panel beside the live preview.
+const H2: CSSProperties = { margin: 0, fontSize: 11, fontWeight: 700, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".06em" };
+const H3: CSSProperties = { margin: 0, fontSize: 12, fontWeight: 700, color: "#16181d" };
+const HINT: CSSProperties = { fontSize: 11.5, color: "#8c919c", lineHeight: 1.45 };
+const GROUP: CSSProperties = { display: "flex", flexDirection: "column", gap: 7 };
+const ROW: CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#3a3f4a", cursor: "pointer" };
 
 /**
- * #333 (spec §4.3, D-TBD-c) — Build package → BOM quote: the itemized, priced
- * quote exactly as the customer's BOM view prints it, built in the browser
+ * #333 (spec §4.3, D-TBD-c); #379 (Jeff 2026-11-24) — Build package → BOM
+ * Estimate Generator: the settings on the left, and on the right the itemized,
+ * priced estimate exactly as the customer's document prints it, built in the browser
  * from the UNSAVED editor state (liveBomDocumentProps = bomViewProps over
  * quoteDocumentDataFor — the saved preview's own path), so every edit on
  * Build shows on the next render with no network call. Read-only. Code-split
@@ -166,128 +173,108 @@ export default function PackageBomTab({ s, active }: { s: EstimatorState; active
   const docProps = useMemo(() => (props && bomModelParts ? { ...props, bomModelParts } : props), [props, bomModelParts]);
   const empty = (shown?.sections ?? sections).every((sec) => !sec.items.length);
 
+  /** One settings switch. `locked` shows why it can't be changed. */
+  const toggle = (label: string, on: boolean, onChange: () => void, opts: { locked?: string; hint?: string; testId?: string } = {}) => (
+    <label key={label} title={opts.locked || opts.hint} style={{ ...ROW, ...(opts.locked ? { cursor: "not-allowed", opacity: 0.6 } : {}) }}>
+      <input type="checkbox" role="switch" aria-checked={on} checked={on} disabled={!!opts.locked} onChange={onChange} data-testid={opts.testId} style={{ accentColor: "var(--accent)", flexShrink: 0 }} />
+      <span>{label}</span>
+    </label>
+  );
+
   return (
-    <div className="est-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#f7f8fa" }}>
-      <div style={{ maxWidth: 820, margin: "0 auto", padding: "18px 16px 40px" }}>
-        <div role="note" style={STRIP}>
-          <span>
-            <strong style={{ color: "#16181d" }}>{BOM_TAB_COPY.live}</strong> — {BOM_TAB_COPY.liveNote}
-          </span>
-          {loadedId && (
-            <a href={previewPath(loadedId, "bom")} target="_blank" rel="noopener noreferrer" style={LINK}>
-              {BOM_TAB_COPY.openSaved}
-            </a>
-          )}
-          {loadedId ? (
-            <>
-              <a href={bomPdfPath(loadedId, true)} target="_blank" rel="noopener noreferrer" style={LINK}>
-                {BOM_TAB_COPY.downloadPdf}
-              </a>
-              <a href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer" style={LINK}>
-                {BOM_TAB_COPY.openPdf}
-              </a>
-              {/* The Client package tab's datasheet book (cover, index, datasheets), also here — a box sale has no Client package tab. */}
-              <a
-                href={quoteDatasheetsPdfPath(loadedId)}
-                download
-                data-testid="bom-datasheets-pdf"
-                style={LINK}
-                title="One PDF: a cover with our logo and the customer's job details, then every datasheet A→Z by manufacturer — from the saved estimate, honouring the Client package datasheet choices"
-              >
-                {BOOK_COVER_COPY.estimateButton}
-              </a>
-              {contentUnsaved && <span style={{ color: "#8a6d1f" }}>{BOM_TAB_COPY.saveFirst}</span>}
-            </>
-          ) : (
-            <span aria-disabled="true" style={{ color: "#9aa0ab", fontWeight: 600 }}>
-              {BOM_TAB_COPY.downloadPdf} — {BOM_TAB_COPY.saveToCreate}
-            </span>
-          )}
-          {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{bomPricesHiddenNote(s.boxSale)}</span>}
-          {/* #364 — Show on BOM: saved with the quote (pdfOptions), applied by bomViewProps to this tab, the BOM PDF,
-              the saved preview's BOM and the client's online BOM. Line prices yields to the quote-wide Prices. */}
-          <span role="group" aria-label={BOM_TAB_COPY.showOnBom} style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 10px" }}>
-            <strong style={{ color: "#16181d" }}>{BOM_TAB_COPY.showOnBom}</strong>
-            {/* Box goods sale (2026-10-22): the Client package tab is hidden, so the estimate-wide Show prices / Show quantities
-                (the same pdfPrices / pdfQty through the same togglePdf as Client package → Line detail) live here. */}
-            {s.boxSale && (
-              <>
-              <span data-testid="box-sale-show-toggles" role="group" aria-label="Show prices and quantities" style={SEG_WRAP}>
-                <button type="button" onClick={() => togglePdf("pdfPrices")} aria-pressed={pdfOpts.pdfPrices} style={pdfOpts.pdfPrices ? SEG_ON : SEG_OFF}>
-                  {(pdfOpts.pdfPrices ? "✓ " : "") + "Show prices"}
-                </button>
-                <button type="button" onClick={() => togglePdf("pdfQty")} aria-pressed={pdfOpts.pdfQty} style={pdfOpts.pdfQty ? SEG_ON : SEG_OFF}>
-                  {(pdfOpts.pdfQty ? "✓ " : "") + "Show quantities"}
-                </button>
-              </span>
-              {/* Everything else a box sale's BOM prints is only on the hidden Client package tab, so it is settable here too
-                  (2026-10-22): Payment terms (same options + setter), Terms, Options and the Cover note toggle. The cover note's
-                  text is the header's Quote details → Quote note, on every step. */}
-              <span data-testid="box-sale-document-controls" role="group" aria-label="Payment terms, terms, options and cover note" style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px" }}>
-                <PaymentTermsSelect value={paymentTerms} options={PAYMENT_TERMS} onChange={s.setPaymentTerms} />
-                <span style={SEG_WRAP}>
-                  <button type="button" onClick={() => togglePdf("pdfTerms")} aria-pressed={pdfOpts.pdfTerms} style={pdfOpts.pdfTerms ? SEG_ON : SEG_OFF}>
-                    {(pdfOpts.pdfTerms ? "✓ " : "") + "Terms"}
-                  </button>
-                  <button type="button" onClick={() => togglePdf("pdfOptions")} aria-pressed={pdfOpts.pdfOptions} style={pdfOpts.pdfOptions ? SEG_ON : SEG_OFF}>
-                    {(pdfOpts.pdfOptions ? "✓ " : "") + "Options"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => togglePdf("pdfCover")}
-                    aria-pressed={pdfOpts.pdfCover}
-                    title="The cover note at the top of the estimate (edit its text under Quote details → Quote note)"
-                    style={pdfOpts.pdfCover ? SEG_ON : SEG_OFF}
-                  >
-                    {(pdfOpts.pdfCover ? "✓ " : "") + "Cover note"}
-                  </button>
-                </span>
-              </span>
-              </>
-            )}
-            <span style={SEG_WRAP}>
-              {BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale)).map(({ flag, label }) => {
-                const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;
-                const on = pdfOpts[flag] && !locked;
-                return (
-                  <button
-                    key={flag}
-                    type="button"
-                    onClick={() => togglePdf(flag)}
-                    disabled={locked}
-                    title={locked ? bomPricesHiddenNote(s.boxSale) : undefined}
-                    aria-pressed={on}
-                    style={{ ...(on ? SEG_ON : SEG_OFF), ...(locked ? { cursor: "not-allowed", opacity: 0.6 } : {}) }}
-                  >
-                    {(on ? "✓ " : "") + label}
-                  </button>
-                );
-              })}
-            </span>
-            <span style={{ color: "#8c919c" }}>{BOM_TAB_COPY.showOnBomHint}</span>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", background: "#f7f8fa" }}>
+      {/* Left: the settings. Every switch is saved with the quote (pdfOptions) and re-draws the preview at once. */}
+      <aside aria-label={BOM_TAB_COPY.settings} className="est-scroll" style={{ width: 320, flexShrink: 0, overflowY: "auto", background: "#fff", borderRight: "1px solid #e4e7ec", padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={GROUP}>
+          <h2 style={H2}>{BOM_TAB_COPY.settings}</h2>
+          <span style={HINT}>{BOM_TAB_COPY.settingsHint}</span>
+        </div>
+        {/* The estimate-wide Show prices / Show quantities (pdfPrices / pdfQty). */}
+        <div data-testid="bom-show-toggles" role="group" aria-label={BOM_TAB_COPY.showOnEstimate} style={GROUP}>
+          <h3 style={H3}>{BOM_TAB_COPY.showOnEstimate}</h3>
+          {toggle("Show prices", pdfOpts.pdfPrices, () => togglePdf("pdfPrices"))}
+          {toggle("Show quantities", pdfOpts.pdfQty, () => togglePdf("pdfQty"))}
+        </div>
+        {/* #364 — Show on BOM: applied by bomViewProps to this preview, the estimate PDF, the saved preview's BOM and
+            the client's online BOM. Line prices yields to Show prices. */}
+        <div role="group" aria-label={BOM_TAB_COPY.showOnBom} style={GROUP}>
+          <h3 style={H3}>{BOM_TAB_COPY.showOnBom}</h3>
+          {BOM_SHOW_SWITCHES.filter(({ flag }) => bomSwitchShown(flag, s.boxSale)).map(({ flag, label }) => {
+            const locked = flag === "bomLinePrices" && !pdfOpts.pdfPrices;
+            return toggle(label, pdfOpts[flag] && !locked, () => togglePdf(flag), { locked: locked ? bomPricesHiddenNote(s.boxSale) : undefined });
+          })}
+          <span style={HINT}>{BOM_TAB_COPY.showOnBomHint}</span>
+        </div>
+        {/* Payment terms, Terms, Options and the Cover note toggle. The cover note's text is the header's
+            Quote details → Quote note, on every step. */}
+        <div data-testid="bom-document-controls" role="group" aria-label={BOM_TAB_COPY.sections} style={GROUP}>
+          <h3 style={H3}>{BOM_TAB_COPY.sections}</h3>
+          {toggle("Cover note", pdfOpts.pdfCover, () => togglePdf("pdfCover"), { hint: "The cover note at the top of the estimate (edit its text under Quote details → Quote note)" })}
+          {toggle("Options", pdfOpts.pdfOptions, () => togglePdf("pdfOptions"))}
+          {toggle("Terms", pdfOpts.pdfTerms, () => togglePdf("pdfTerms"))}
+          <span style={{ ...ROW, cursor: "default", justifyContent: "space-between" }}>
+            <span>Payment terms</span>
+            <PaymentTermsSelect value={paymentTerms} options={PAYMENT_TERMS} onChange={s.setPaymentTerms} />
           </span>
         </div>
-        {/* Box goods sale (spec 2026-10-21): the Narrative tab's aside is gone, so Lead estimator / Prepared by live here. */}
-        {s.boxSale && (
-          <div data-testid="box-sale-people" style={{ display: "flex", flexDirection: "column", gap: 7, background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "12px 14px", marginBottom: 12, maxWidth: 360 }}>
-            <QuotePeopleFields s={s} tone="light" />
-          </div>
-        )}
-        <details open style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, padding: "10px 14px", marginBottom: 12 }}>
-          <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>
-            Vendors
-          </summary>
+        {/* Lead estimator / Prepared by print on the estimate. */}
+        <div data-testid="bom-people" style={GROUP}>
+          <h3 style={H3}>{BOM_TAB_COPY.people}</h3>
+          <QuotePeopleFields s={s} tone="light" />
+        </div>
+        <details style={{ borderTop: "1px solid #f0f1f4", paddingTop: 10 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#16181d" }}>Vendors</summary>
           <div style={{ marginTop: 10 }}>
             {loadedId ? <VendorsCard quoteId={loadedId} vendorQuotes={vendorQuotes} refreshKey={0} /> : <div style={{ fontSize: 11.5, color: "#aab0bb" }}>Save the estimate first.</div>}
           </div>
         </details>
-        {empty ? (
-          <div style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 12, padding: "40px 24px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#5b616e" }}>
-            {BOM_TAB_COPY.empty}
+      </aside>
+
+      {/* Right: the live preview */}
+      <div className="est-scroll" data-testid="bom-preview" style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
+        <div style={{ maxWidth: 820, margin: "0 auto", padding: "18px 16px 40px" }}>
+          <div role="note" style={STRIP}>
+            <span>
+              <strong style={{ color: "#16181d" }}>{BOM_TAB_COPY.live}</strong> — {BOM_TAB_COPY.liveNote}
+            </span>
+            {loadedId ? (
+              <>
+                <a href={bomPdfPath(loadedId, true)} target="_blank" rel="noopener noreferrer" style={LINK}>
+                  {BOM_TAB_COPY.downloadPdf}
+                </a>
+                <a href={bomPdfPath(loadedId, false)} target="_blank" rel="noopener noreferrer" style={LINK}>
+                  {BOM_TAB_COPY.openPdf}
+                </a>
+                <a href={previewPath(loadedId, "bom")} target="_blank" rel="noopener noreferrer" style={LINK}>
+                  {BOM_TAB_COPY.openSaved}
+                </a>
+                {/* The datasheet book (cover, index, datasheets) — its choices are on the Datasheets tab; a box sale has none. */}
+                <a
+                  href={quoteDatasheetsPdfPath(loadedId)}
+                  download
+                  data-testid="bom-datasheets-pdf"
+                  style={LINK}
+                  title="One PDF: a cover with our logo and the customer's job details, then every datasheet A→Z by manufacturer — from the saved estimate, honouring the Datasheets tab's choices"
+                >
+                  {BOOK_COVER_COPY.estimateButton}
+                </a>
+                {contentUnsaved && <span style={{ color: "#8a6d1f" }}>{BOM_TAB_COPY.saveFirst}</span>}
+              </>
+            ) : (
+              <span aria-disabled="true" style={{ color: "#9aa0ab", fontWeight: 600 }}>
+                {BOM_TAB_COPY.downloadPdf} — {BOM_TAB_COPY.saveToCreate}
+              </span>
+            )}
+            {!pdfOpts.pdfPrices && <span style={{ flexBasis: "100%", color: "#8a6d1f" }}>{bomPricesHiddenNote(s.boxSale)}</span>}
           </div>
-        ) : docProps ? (
-          <BomDocument props={docProps} />
-        ) : null}
+          {empty ? (
+            <div style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 12, padding: "40px 24px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#5b616e" }}>
+              {BOM_TAB_COPY.empty}
+            </div>
+          ) : docProps ? (
+            <BomDocument props={docProps} />
+          ) : null}
+        </div>
       </div>
     </div>
   );

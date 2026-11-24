@@ -35,6 +35,9 @@ export type ReadinessInput = {
   /** Box goods sale (spec 2026-10-21): the client gets the BOM only — no narrative / intro / goals / key-product /
    *  document gaps. */
   boxSale?: boolean;
+  /** #379: the customer document is the BOM estimate (every estimate the Estimator edits now) — the same: no
+   *  narrative / intro / goals / key-product / document gaps. */
+  bomOutput?: boolean;
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -97,7 +100,7 @@ function sendBadge(i: ReadinessInput): StepBadge {
   // #352 review M3: a draft about to go out warns about lines still at an old vendor price — never blocks Send.
   const requote = i.status === "draft" ? requoteCount(i.sections) : 0;
   // #355 review M6: so is a narrative system with no intro text (new estimates start Narrative).
-  const noIntro = i.status === "draft" && !i.boxSale ? narrativeWithoutIntro(i.sections, i.document) : 0;
+  const noIntro = i.status === "draft" && !i.boxSale && !i.bomOutput ? narrativeWithoutIntro(i.sections, i.document) : 0;
   if (requote > 0 || noIntro > 0) {
     const base = i.review?.tone === "approved" ? "Ready to send" : "";
     const warn = [
@@ -122,7 +125,7 @@ function sendBadge(i: ReadinessInput): StepBadge {
 export function estimateReadiness(i: ReadinessInput): Record<EstimateStep, StepBadge> {
   return {
     build: buildBadge(i.sections),
-    package: packageBadge(i.saved, i.sections, i.document, i.boxSale === true),
+    package: packageBadge(i.saved, i.sections, i.document, i.boxSale === true || i.bomOutput === true),
     review: reviewBadge(i.review),
     send: sendBadge(i),
   };

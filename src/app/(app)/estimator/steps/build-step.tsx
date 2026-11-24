@@ -639,6 +639,7 @@ export function BuildStep({ s, onOpenNarrative, presentationHref, onOpenPresenta
                     built={isBuilt(sec.id)}
                     onMarkBuilt={() => markBuilt(sec.id)}
                     boxSale={s.boxSale}
+                    bomOutput
                     {...(isInternal
                       ? {
                           projectDiscounts,

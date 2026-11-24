@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import type { NextStepAction } from "@/lib/quote-next-step";
 import { parseStep, stepAfterAction, stepSearch, type EstimateStep } from "@/lib/estimate-steps/steps";
-import { packageTabSearch } from "@/lib/estimate-steps/package-tabs";
 import { estimateReadiness } from "@/lib/estimate-steps/readiness";
 import { retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";
 import { CSS } from "./estimator-styles";
@@ -33,9 +32,9 @@ export default function EstimatorClient(props: EstimatorProps) {
     window.history.pushState(null, "", window.location.pathname + stepSearch(window.location.search, to));
   };
   /** #333 (Q4): Build's presentation chip → Build package → Client package → Systems (the one presentation editor). */
-  const presentationHref = packageTabSearch(stepSearch("?" + params.toString(), "package"), "client") + "#systems";
+  const presentationHref = stepSearch("?" + params.toString(), "package");
   const openPresentation = () =>
-    window.history.pushState(null, "", window.location.pathname + packageTabSearch(stepSearch(window.location.search, "package"), "client") + "#systems");
+    goStep("package");
   const onActed = (action: NextStepAction) => {
     const to = stepAfterAction(action);
     if (to) goStep(to);
@@ -85,6 +84,7 @@ export default function EstimatorClient(props: EstimatorProps) {
         revNum: s.revNum,
         document: s.packageDoc,
         boxSale: s.boxSale,
+        bomOutput: true, // #379: the customer document is the BOM estimate
       }),
     [s.loadedId, s.sections, s.packageDoc, s.next, s.status, s.revNum, s.boxSale]
   );
