@@ -279,8 +279,8 @@ function packageReviewChecks(ok: Ok) {
   ok(["narrative", "client", "bom", null, "junk"].every((raw) => boxSalePackageTab(parsePackageTab(raw), true) === "bom") &&
      boxSalePackageTab(parsePackageTab("client"), false) === "client" && boxSalePackageTab(parsePackageTab(null), false) === "narrative",
     "box sale package: ?ptab=narrative / client (or none) lands on BOM quote; a normal estimate is unchanged");
-  ok(reviewTabsFor(true).join() === "document,bom" && reviewTabsFor(false) === REVIEW_TABS && BOX_SALE_REVIEW_TABS.join() === "document,bom", "box sale review: Customer review shows Document and BOM only");
-  ok(nextReviewTab("document", "ArrowRight", BOX_SALE_REVIEW_TABS) === "bom" && nextReviewTab("bom", "ArrowRight", BOX_SALE_REVIEW_TABS) === "document" && nextReviewTab("document", "End", BOX_SALE_REVIEW_TABS) === "bom" &&
+  ok(reviewTabsFor(true).join() === "review,document,bom" && reviewTabsFor(false) === REVIEW_TABS && BOX_SALE_REVIEW_TABS.join() === "review,document,bom", "box sale review: Internal review shows Review, Document and BOM only");
+  ok(nextReviewTab("document", "ArrowRight", BOX_SALE_REVIEW_TABS) === "bom" && nextReviewTab("bom", "ArrowRight", BOX_SALE_REVIEW_TABS) === "review" && nextReviewTab("document", "End", BOX_SALE_REVIEW_TABS) === "bom" &&
      nextReviewTab("document", "ArrowRight") === "package" && nextReviewTab("document", "x", BOX_SALE_REVIEW_TABS) === null,
     "box sale review: arrow keys move across the shown tabs only (the default list is unchanged)");
   const narr = sys("n", "Rigging", [line(1)], { presentation: "narrative" });
@@ -297,8 +297,8 @@ function packageReviewChecks(ok: Ok) {
   ok(/\{s\.boxSale && \(\s*<div[^>]*data-testid="box-sale-people"[^>]*>\s*<QuotePeopleFields s=\{s\} tone="light" \/>/.test(bomTab) && !/from "@\/lib\/stores\//.test(bomTab),
     "box sale package (source): BOM quote carries Lead estimator / Prepared by on a box sale (and still imports no store)");
   const tabsSrc = rd("src/app/(app)/estimator/steps/review-tabs.tsx");
-  ok(tabsSrc.includes("const tabs = reviewTabsFor(s.boxSale);") && tabsSrc.includes('const tab: ReviewTab = tabs.includes(picked) ? picked : "document";') && tabsSrc.includes("{tabs.map((t) => (") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)"),
-    "box sale review (source): the review tabs follow reviewTabsFor; a hidden tab reads as Document");
+  ok(tabsSrc.includes("const tabs = reviewTabsFor(s.boxSale);") && tabsSrc.includes('const tab: ReviewTab = tabs.includes(picked) ? picked : "review";') && tabsSrc.includes("{tabs.map((t) => (") && tabsSrc.includes("nextReviewTab(tab, e.key, tabs)"),
+    "box sale review (source): the review tabs follow reviewTabsFor; a hidden tab reads as Review");
   ok(rd("src/app/(app)/estimator/steps/review-sidebar.tsx").includes("{!s.boxSale && <PackageChecklist saved={!!loadedId} docs={docs} packageBadge={packageBadge} />}"), "box sale review (source): the sidebar's package checklist is hidden");
   const reviewSrc = rd("src/app/(app)/estimator/steps/review-step.tsx");
   ok(/\{!s\.boxSale && \(\s*<CoverPackagePanel/.test(reviewSrc) && reviewSrc.split("<CoverPackagePanel").length === 2,

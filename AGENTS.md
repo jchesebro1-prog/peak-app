@@ -139,7 +139,7 @@ Account from the user menu. Everything below exists in the code today.
   `public/sw.js`, and the Capacitor shells in `ios/` and `android/`.
 
 **Estimating**
-- `/estimator` — one URL, four steps (Build · Build package · Customer review ·
+- `/estimator` — one URL, four steps (Build · Build package · Internal review ·
   Send & track). State lives in `src/app/(app)/estimator/use-estimator-state.ts`;
   pricing in `estimator/pricing.ts` and `src/lib/markup/` (every percentage is
   markup on cost). Rules by area: `src/lib/estimate-steps/`, `estimate-groups/`,

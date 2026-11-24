@@ -19439,7 +19439,7 @@ async function reviewSheet363Checks(check: typeof ok): Promise<void> {
 
 
 /* --- #374: the Review spreadsheet lists each system's labor inside its block --- */
-import { reviewLaborRows as r374Rows, reviewSheetModel as r374Model, partsListRows as r374Parts, partsListCsvRows as r374Csv, partsListSkus as r374Skus, systemFees as r374Fees } from "@/app/(app)/estimator/parts-csv";
+import { reviewMoney as r378Money, reviewLaborRows as r374Rows, reviewSheetModel as r374Model, partsListRows as r374Parts, partsListCsvRows as r374Csv, partsListSkus as r374Skus, systemFees as r374Fees } from "@/app/(app)/estimator/parts-csv";
 import { buildLaborItems as r374Build, computeLabor as r374Calc, systemSellTotal as r374Total, lineExtSellOf as r374Ext } from "@/app/(app)/estimator/pricing";
 import { withLaborGroup as r374With } from "@/app/(app)/estimator/labor-group";
 import { buildReviewWorkbook as r374Xlsx } from "@/app/(app)/estimator/review-sheet-xlsx";
@@ -19453,6 +19453,43 @@ const r374Mob = (people: string, days: string, hoursPerDay: string, extra: Parti
 const r374Rate = (sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 60, "TVL-MIL": 0.7, "TVL-HTL": 150, "TVL-FOD": 50, "EQP-LIFT": 400 }[sku] || 0);
 const r374Draft = (mobs: R374Mob[]): R374Draft =>
   ({ discipline: "RIG", margin: "30", mobs, pmHrs: "", pmAuto: false, shopHrs: "", drfHrs: "", drfAuto: false, misc: "" });
+/* --- #378: Internal review's Review tab — the Review spreadsheet's columns on screen --- */
+import { REVIEW_GRID_COLUMNS as r378Cols, reviewGrid as r378Grid, reviewGridCells as r378Cells, reviewQty as r378Qty, reviewRowMarkup as r378Markup } from "@/app/(app)/estimator/review-grid";
+import { REVIEW_SHEET_HEADER as r378Header } from "@/app/(app)/estimator/review-sheet-xlsx";
+{
+  const sec = r374Sec([
+    r374It(1, "PART-A", "Truss", 2, 100, { link: "https://example.com/truss" }),
+    r374It(2, "CUSTOM", "Free part", 1, 0, { custom: true, price: 50 }),
+    r374It(3, "PART-B", "Clamp", 3, 10.5, { unit: "ft", internalNote: "check length" }),
+  ], { freightPct: 10 });
+  const model = r374Model([sec, r374Sec([r374It(9, "ALT", "Alt part", 1, 5)], { id: "s-alt", alternate: true })], [], { "PART-A": { mfr: "Acme", manufacturerModelNumber: "T-12" } });
+  const grid = r378Grid(model);
+  const b = grid[0];
+  ok(r378Cols === r378Header && r378Cols.join("|") === "Manufacturer|Item name|Description|Room|System|Qty|Unit Cost|Unit Sell|Ext Cost|Ext Sell|Markup|Price source|Link|Notes",
+    "#378 review grid: the columns ARE the Review spreadsheet's header, in its order");
+  ok(grid.length === 1 && b.sectionId === "s-373" && b.rows.length === 3 && b.rows.every((r) => r378Cells(r).length === r378Cols.length),
+    "#378 review grid: one block per listed system (alternates left out, as on the spreadsheet), a cell for every column");
+  const [a, free, clamp] = b.rows;
+  ok(a.manufacturer === "Acme" && a.itemName === "T-12" && a.qty === "2" && a.unitCost === "$100.00" && a.unitSell === "$200.00" && a.extCost === "$200.00" && a.extSell === "$400.00" && a.markup === "100.0%" &&
+     a.link === "https://example.com/truss" && a.source === "Catalog",
+    "#378 review grid: a row shows qty, unit and extended cost / sell, markup on its own sell, the price source and its link");
+  ok(free.markup === "" && free.extSell === "$50.00" && clamp.qty === "3" && clamp.extCost === "$31.50" && clamp.notes === "per ft; check length",
+    "#378 review grid: a zero-cost row prints no markup; Notes carry the unit and the internal note");
+  const close = Object.fromEntries(b.closing.map((c) => [c.key, c]));
+  ok(b.closing.map((c) => c.key).join() === "cost,markup,accts,freight,sell" && close.cost.label === "System cost — Rigging" && close.accts.label === "ACCTs" && close.freight.label === "Freight" && close.sell.label === "Package sell — Rigging",
+    "#378 review grid: each system closes with System cost, System markup, ACCTs, Freight and Package sell");
+  ok(close.cost.amount === "$231.50" && close.markup.amount === "$281.50" && close.freight.amount === r378Money(model[0].fees.freight) && close.sell.amount === r378Money(r374Total(sec)),
+    "#378 review grid: the closing rows are the sums the spreadsheet's formulas give, and Package sell is the system's real price");
+  ok(r378Qty(2.5) === "2.5" && r378Qty(248) === "248" && r378Qty(1 / 3) === "0.33" && r378Markup(0, 10) === "" && r378Markup(100, 90) === "-10.0%" && r378Markup(100, 100) === "0.0%",
+    "#378 review grid: quantities drop trailing zeros; markup is blank at zero cost, negative below cost");
+  const tabSrc = readFileSync(join(process.cwd(), EST_DIR, "steps/review-grid-tab.tsx"), "utf8");
+  const tabsSrc378 = readFileSync(join(process.cwd(), EST_DIR, "steps/review-tabs.tsx"), "utf8");
+  ok(tabSrc.includes("reviewSheetModel(sections, vendorQuotes, info.parts, venueRoomName, projectDiscounts)") && tabSrc.includes("resolveCatalogSkusAction(skus)") && tabSrc.includes("exportReviewSheet()") &&
+     tabSrc.includes('target="_blank" rel="noopener noreferrer"'),
+    "#378 review grid (source): the tab builds the spreadsheet's own model from the live estimate, offers the download, and opens links in a new tab");
+  ok(tabsSrc378.includes('useState<ReviewTab>("review")') && /if \(tab === "review"\) \{\s*body = <ReviewGridTab s=\{s\} \/>;/.test(tabsSrc378),
+    "#378 review grid (source): Internal review opens on the Review tab");
+}
 {
   const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
   const byDesc = (rows: ReturnType<typeof r374Rows>, d: string) => rows.find((r) => r.desc === d);
@@ -32241,7 +32278,7 @@ import {
 } from "@/lib/estimate-steps/steps";
 {
   ok(e304Steps.join(",") === "build,package,review,send", "#305 steps: four steps in order");
-  ok(e304Label.build === "Build" && e304Label.package === "Build package" && e304Label.review === "Customer review" && e304Label.send === "Send & track",
+  ok(e304Label.build === "Build" && e304Label.package === "Build package" && e304Label.review === "Internal review" && e304Label.send === "Send & track",
     "#305 steps: the tab labels are exactly the spec's");
   ok(e304Parse(null) === "build" && e304Parse(undefined) === "build" && e304Parse("") === "build" && e304Parse("bogus") === "build" && e304Parse("PACKAGE") === "build",
     "#305 steps: a missing, unknown or wrong-case step is Build");
@@ -33952,8 +33989,8 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
 {
   const C = p4r.REVIEW_UI_COPY;
   // Exact copy (constraints).
-  ok(p4r.REVIEW_TABS.map((t) => p4r.REVIEW_TAB_LABEL[t]).join("|") === "Document|Package page|BOM|Cut sheets|Datasheets|Drawings",
-    "#P4 review UI: tabs read Document, Package page, BOM, Cut sheets, Datasheets, Drawings — in that order");
+  ok(p4r.REVIEW_TABS.map((t) => p4r.REVIEW_TAB_LABEL[t]).join("|") === "Review|Document|Package page|BOM|Cut sheets|Datasheets|Drawings",
+    "#P4 review UI: tabs read Review (#378), Document, Package page, BOM, Cut sheets, Datasheets, Drawings — in that order");
   ok(p4r.REVIEW_DEVICES.map((d) => p4r.REVIEW_DEVICE_LABEL[d]).join("|") === "Desktop|Phone", "#P4 review UI: the frame toggle reads Desktop / Phone");
   ok(C.unsaved === "Unsaved changes — Save to refresh what the client sees." && C.saveFirst === "Save the estimate first.",
     "#P4 review UI: the unsaved banner and the save-first note are exact");
@@ -33971,7 +34008,7 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
   ok(p4r.frameWidth("desktop") === "100%" && p4r.frameWidth("phone") === "390px" && p4r.PHONE_FRAME_WIDTH === 390, "#P4 review UI: the frame is 100% wide on Desktop, 390 px on Phone");
   ok(p4r.frameKey("bom", 1, 2) !== p4r.frameKey("bom", 3, 2) && p4r.frameKey("bom", 1, 2) !== p4r.frameKey("bom", 1, 5) && p4r.frameKey("bom", 1, 2) === p4r.frameKey("bom", 1, 2),
     "#P4 review UI: the frame remounts after a Save (pdf.savedAt) or a status change (asOf), not otherwise");
-  ok(p4r.tabNeedsSave("document") === false && ["package", "bom", "cutsheets", "datasheets", "drawings"].every((t) => p4r.tabNeedsSave(t as p4r.ReviewTab)),
+  ok(p4r.tabNeedsSave("document") === false && p4r.tabNeedsSave("review") === false && ["package", "bom", "cutsheets", "datasheets", "drawings"].every((t) => p4r.tabNeedsSave(t as p4r.ReviewTab)),
     "#P4 review UI: every tab but Document needs a saved quote");
 
   // Send back: label pluralisation, enablement, visibility.
@@ -34023,7 +34060,7 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
      (!/sandbox=/.test(tabs) || /sandbox="[^"]*allow-same-origin[^"]*"/.test(tabs) && /allow-downloads/.test(tabs)),
     "#P4 review UI: the framed tabs are an iframe keyed on the saved version, titled, sized by the device, never sandboxed without downloads");
   ok(/\{framed && \(\s*<div role="group"/.test(tabs) && tabs.includes("REVIEW_DEVICE_LABEL[d]"), "#P4 review UI: the Desktop / Phone toggle shows only on a framed tab");
-  ok(/\{pdfDirty && tab !== "document" && \(/.test(tabs) && tabs.includes("{COPY.unsaved}") && /tabNeedsSave\(tab\) && !loadedId\) \{\s*body = <p style=\{NOTE\}>\{COPY\.saveFirst\}<\/p>;/.test(tabs),
+  ok(/\{pdfDirty && tabNeedsSave\(tab\) && \(/.test(tabs) && tabs.includes("{COPY.unsaved}") && /tabNeedsSave\(tab\) && !loadedId\) \{\s*body = <p style=\{NOTE\}>\{COPY\.saveFirst\}<\/p>;/.test(tabs),
     "#P4 review UI: unsaved edits show the banner (Document keeps its own Save), and an unsaved quote reads Save the estimate first.");
   ok(tabs.includes("<PdfPreviewPane") && tabs.includes("actionsInline={!phone}") && tabs.includes("onSave={doSave}") && (tabs.match(/target="_blank" rel="noopener noreferrer"/g) || []).length >= 2,
     "#P4 review UI: Document is the existing PDF pane; Datasheets / Drawings links open in a new tab");
@@ -34085,9 +34122,9 @@ import { sendBackNote as p4rNote, numberComments as p4rNumber } from "@/lib/esti
     "#P4 review UI fix: the adapter's note equals sendBackNote over the same saved systems");
 
   // 3. Tab keyboard model + comment aria-labels.
-  ok(p4r.nextReviewTab("document", "ArrowRight") === "package" && p4r.nextReviewTab("drawings", "ArrowRight") === "document" &&
-     p4r.nextReviewTab("document", "ArrowLeft") === "drawings" && p4r.nextReviewTab("bom", "ArrowLeft") === "package" &&
-     p4r.nextReviewTab("bom", "Home") === "document" && p4r.nextReviewTab("bom", "End") === "drawings" && p4r.nextReviewTab("bom", "a") === null,
+  ok(p4r.nextReviewTab("document", "ArrowRight") === "package" && p4r.nextReviewTab("drawings", "ArrowRight") === "review" && p4r.nextReviewTab("review", "ArrowRight") === "document" &&
+     p4r.nextReviewTab("review", "ArrowLeft") === "drawings" && p4r.nextReviewTab("bom", "ArrowLeft") === "package" &&
+     p4r.nextReviewTab("bom", "Home") === "review" && p4r.nextReviewTab("bom", "End") === "drawings" && p4r.nextReviewTab("bom", "a") === null,
     "#P4 review UI fix: Left/Right move between tabs (wrapping), Home/End jump, other keys do nothing");
   ok(p4r.reviewTabId("bom") === "review-tab-bom" && p4r.reviewPanelId("bom") === "review-panel-bom" &&
      p4r.commentActionLabel("resolve", 2) === "Resolve comment 2" && p4r.commentActionLabel("delete", 3) === "Delete comment 3" && p4r.commentActionLabel("delete", null) === "Delete resolved comment",

@@ -9,6 +9,7 @@ import type { DocLinkView, ReviewDatasheetRow, ReviewDrawingRow } from "@/lib/es
 import { PdfPreviewPane } from "../preview-doc";
 import type { ReviewDocsResult } from "../review-actions";
 import type { EstimatorState } from "../use-estimator-state";
+import { ReviewGridTab } from "./review-grid-tab";
 
 const TAB_BTN = (active: boolean): CSSProperties => ({
   fontFamily: "var(--font-ui)",
@@ -40,8 +41,10 @@ const LINK: CSSProperties = { color: "var(--accent)", textDecoration: "none", fo
 const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: 11, color: "#8c919c" };
 
 /**
- * Estimator Phase 4 (spec §11.1) — the Customer review step's client's-eye
- * tabs, desktop only: Document (the saved estimate PDF, today's pane),
+ * Estimator Phase 4 (spec §11.1) — the Internal review step's tabs, desktop
+ * only. #378: Review (review-grid-tab.tsx — the Review spreadsheet's columns
+ * on screen, internal) comes first and opens by default; the client's-eye tabs
+ * follow: Document (the saved estimate PDF, today's pane),
  * Package page / BOM / Cut sheets (the SAVED quote framed from the staff
  * preview route, full width or 390 px for Phone), Datasheets and Drawings
  * (reviewDocsAction, read by the step). Unsaved edits get the banner; the
@@ -49,10 +52,10 @@ const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: 11, colo
  */
 export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsResult | null }) {
   const { doSave, loadedId, next, pdf, pdfDirty, phone, setPdf, statusChanging, tierResolving } = s;
-  // Box goods sale (spec 2026-10-21): Document + BOM only; a tab it doesn't offer reads as Document.
+  // Box goods sale (spec 2026-10-21): Document + BOM only; a tab it doesn't offer reads as Review.
   const tabs = reviewTabsFor(s.boxSale);
-  const [picked, setTab] = useState<ReviewTab>("document");
-  const tab: ReviewTab = tabs.includes(picked) ? picked : "document";
+  const [picked, setTab] = useState<ReviewTab>("review");
+  const tab: ReviewTab = tabs.includes(picked) ? picked : "review";
   const [device, setDevice] = useState<ReviewDevice>("desktop");
   const framed = framedTab(tab);
   const src = frameSrc(loadedId, tab);
@@ -66,7 +69,9 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
   };
 
   let body: ReactNode;
-  if (tab === "document") {
+  if (tab === "review") {
+    body = <ReviewGridTab s={s} />;
+  } else if (tab === "document") {
     body = (
       <PdfPreviewPane
         phone={phone}
@@ -125,7 +130,7 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
       <div
         style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 14px", borderBottom: "1px solid #e4e7ec", background: "#f7f8fa" }}
       >
-        <div role="tablist" aria-label="What the client sees" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        <div role="tablist" aria-label="Review views" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
           {tabs.map((t) => (
             <button
               key={t}
@@ -156,7 +161,7 @@ export function ReviewTabs({ s, docs }: { s: EstimatorState; docs: ReviewDocsRes
           </div>
         )}
       </div>
-      {pdfDirty && tab !== "document" && (
+      {pdfDirty && tabNeedsSave(tab) && (
         <div
           role="status"
           style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", fontSize: 12.5, color: "#7a5a12", background: "#fdf6e7", borderBottom: "1px solid #f0e2bf" }}

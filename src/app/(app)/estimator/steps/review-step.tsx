@@ -14,8 +14,9 @@ import { ReviewSidebar } from "./review-sidebar";
 import { ReviewTabs } from "./review-tabs";
 
 /**
- * #305 — Customer review. Desktop (Phase 4, spec §11): the client's-eye tabs
- * (review-tabs.tsx — Document = the saved PDF, the framed package page / BOM /
+ * #305 — Internal review (#378; was Customer review). Desktop (Phase 4, spec §11):
+ * the tabs (review-tabs.tsx — Review = the Review spreadsheet's columns on screen,
+ * then the client's-eye Document = the saved PDF, the framed package page / BOM /
  * cut sheets, Datasheets, Drawings) and the internal sidebar (review-sidebar.tsx —
  * the review actions, cost, Labor, Package checklist, Comments). A phone keeps
  * the view-only Review: the PDF, the approver's decision when one is waiting,

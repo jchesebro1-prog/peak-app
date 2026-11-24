@@ -5,8 +5,8 @@ import type { QuoteNextStepView } from "@/lib/quote-next-step";
 import { sendBackNote, WHOLE_ESTIMATE, type NumberedComment } from "./comments";
 
 /**
- * Estimator Phase 4 (spec §11) — the Customer review step's pure view rules:
- * the client's-eye tabs, the framed preview's src / width, the sidebar copy,
+ * Estimator Phase 4 (spec §11) — the Internal review step's (#378; was
+ * Customer review) pure view rules: the Review grid tab, the client's-eye tabs, the framed preview's src / width, the sidebar copy,
  * the Labor crew line, the Package checklist rows, the Datasheets cell states
  * and the approver's Send back button. Client-safe (no server imports).
  */
@@ -50,18 +50,28 @@ export const REVIEW_UI_COPY = {
   // #333: a datasheet this project leaves out (Client package).
   leftOut: "Left out of this package",
   leftOutWith: "Left out with",
+  // #378: the Review tab — the Review spreadsheet on screen.
+  gridHint: "Internal only — cost, sell and markup for every line, as on the Review spreadsheet.",
+  gridAlternates: "Alternate systems aren't listed.",
+  gridLoading: "Loading the review…",
+  gridError: "Couldn't load the catalog details — reopen this step to try again.",
+  gridStale: "Couldn't refresh the catalog details — manufacturer and item names may be out of date.",
+  gridEmpty: "No parts or labor to review yet.",
+  gridDownload: "Download spreadsheet",
 } as const;
 
-export const REVIEW_TABS = ["document", "package", "bom", "cutsheets", "datasheets", "drawings"] as const;
+/** #378: Review (the internal grid) is first and the default; the rest are the client's-eye tabs. */
+export const REVIEW_TABS = ["review", "document", "package", "bom", "cutsheets", "datasheets", "drawings"] as const;
 export type ReviewTab = (typeof REVIEW_TABS)[number];
-/** Box goods sale (spec 2026-10-21): the client gets the BOM only — Document (the BOM PDF) and BOM. */
-export const BOX_SALE_REVIEW_TABS: readonly ReviewTab[] = ["document", "bom"];
+/** Box goods sale (spec 2026-10-21): the client gets the BOM only — Review, Document (the BOM PDF) and BOM. */
+export const BOX_SALE_REVIEW_TABS: readonly ReviewTab[] = ["review", "document", "bom"];
 
-/** The tabs Customer review shows. */
+/** The tabs Internal review shows. */
 export function reviewTabsFor(boxSale: boolean): readonly ReviewTab[] {
   return boxSale ? BOX_SALE_REVIEW_TABS : REVIEW_TABS;
 }
 export const REVIEW_TAB_LABEL: Record<ReviewTab, string> = {
+  review: "Review",
   document: "Document",
   package: "Package page",
   bom: "BOM",
@@ -81,9 +91,9 @@ export function framedTab(tab: ReviewTab): PreviewTab | null {
   return tab === "package" || tab === "bom" || tab === "cutsheets" ? tab : null;
 }
 
-/** Whether a tab needs a saved quote (everything but the Document tab, which has its own Save). */
+/** Whether a tab needs a saved quote (everything but Review, which reads the live estimate, and Document, which has its own Save). */
 export function tabNeedsSave(tab: ReviewTab): boolean {
-  return tab !== "document";
+  return tab !== "document" && tab !== "review";
 }
 
 /** The framed tab's src — `/estimator-preview/<id>?tab=…`; null when unsaved or not a framed tab. */

@@ -13054,3 +13054,14 @@ Jeff, Nov 6: "make the estimator and the package bonus be a line that just says 
 - Check a real estimate with labor on production, and open it in Excel.
 - Confirm "Package sell" per system is what he meant, not a whole-estimate total.
 - Still open from #374: freight % is charged on labor cost in a materials system.
+
+## 378. Internal review: the Review spreadsheet's columns on screen — DONE 2026-11-23 (D1348)
+
+Jeff, Nov 23: "can the customer review tab just become internal review? Then just display the columns for review? Similar to what is in the review spreadsheet just inside the app?" Step 3 reads **Internal review** and opens on a **Review** tab that shows the Review spreadsheet's fourteen columns and each system's closing rows (System cost, System markup, ACCTs, Freight, Package sell), built from the same model as the download (`review-grid.ts`, `steps/review-grid-tab.tsx`). The client's-eye tabs stay after it.
+
+**Gates:** tsc 0 errors; eslint clean; test-review-and-spec ALL PASSED (10 `#378` checks); test-box-sale 125 PASS. Browser (dev): a four-part estimate read System cost $6,160.00 + System markup $3,342.00 + ACCTs $192.50 + Freight $123.20 + $7.30 rounding = Package sell $9,825.00, the header's quoted total.
+
+**Remaining (Jeff):**
+- Say whether the client's-eye tabs (Document, Package page, BOM, Cut sheets, Datasheets, Drawings) should stay on this step or go.
+- Say whether the grid should be editable, or carry any column the spreadsheet doesn't have.
+- Not checked in the browser: an estimate with labor, catalog parts or a vendor quote (covered by the tests only).
